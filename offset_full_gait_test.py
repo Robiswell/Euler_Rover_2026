@@ -475,7 +475,7 @@ if __name__ == "__main__":
     def state_self_right_roll():
         """Recovery: Multi-step momentum roll to flip robot upright using centripetal loading."""
         print("\n" + "!"*55)
-        print("[STATE] RECOVERY: GRAVITY INVERSION DETECTED (CAPSIZED)!")
+        print("[STATE] RECOVERY: GRAVITY INVERSION DETECTED (UPSIDE DOWN)!")
         print("[DIAGNOSTIC] Scenario: Chassis tilt exceeded stability gate on steep incline.")
         print("[DIAGNOSTIC] IMU Feedback: Gravity vector aligned with Z-Positive axis (Inverted).")
         print("[ACTION] Initiating 'Symmetrical Roll' recovery sequence.")
@@ -509,7 +509,7 @@ if __name__ == "__main__":
         # PHASE 1: TRIPOD TACTICAL AGILITY (CONCRETE)
         # =========================================================
         print("\n" + "="*50)
-        print("PHASE 1: TRIPOD FULL DIRECTIONAL MATRIX")
+        print("PHASE 1: TRIPOD GAIT")
         print("="*50)
         shared_gait_id.value = 0; shared_impact_start.value, shared_impact_end.value = 330, 30 
         
@@ -524,7 +524,7 @@ if __name__ == "__main__":
         # PHASE 2: QUADRUPED TACTICAL STABILITY (GRAVEL)
         # =========================================================
         print("\n" + "="*50)
-        print("PHASE 2: QUADRUPED FULL DIRECTIONAL MATRIX")
+        print("PHASE 2: QUADRUPED GAIT")
         print("="*50)
         shared_gait_id.value = 2; shared_impact_start.value, shared_impact_end.value = 330, 30 
         
@@ -542,7 +542,7 @@ if __name__ == "__main__":
         # PHASE 3: WAVE TACTICAL PRECISION (SAND)
         # =========================================================
         print("\n" + "="*50)
-        print("PHASE 3: WAVE FULL DIRECTIONAL MATRIX")
+        print("PHASE 3: WAVE GAIT")
         print("="*50)
         shared_gait_id.value = 1; shared_impact_start.value, shared_impact_end.value = 330, 30
         
@@ -559,7 +559,7 @@ if __name__ == "__main__":
         # PHASE 4: EXPANDED ADVERSARIAL RECOVERY
         # =========================================================
         print("\n" + "="*50)
-        print("PHASE 4: ADVERSARIAL RECOVERY MATRIX")
+        print("PHASE 4: ADVERSARIAL RECOVERY ")
         print("="*50)
         print("[FSM] ASSESSMENT: Tactical deceleration for system diagnostics..."); shared_speed.value = 0; shared_turn_bias.value = 0.0; tactical_sleep(3, is_running)
         
@@ -582,4 +582,5 @@ if __name__ == "__main__":
     finally:
         is_running.value = False
         gait_process.join(timeout=15)
-        print("\nMission Matrix Concluded. All systems offline.")
+
+        print("\nMission Concluded. All systems offline.")
