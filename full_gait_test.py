@@ -15,11 +15,14 @@ CORE ARCHITECTURE:
   closed-loop phase tracking, hardware safety, and bus duty-cycle.
 
 SAFETY CAPABILITIES:
-- 69 Independent adversarial safety layers.
+- 70 Independent adversarial safety layers (including EC70 Splay Guard).
+- Continuous Momentum Guard (Prevents mid-stride stuttering).
+- Dynamic Braking Deadband (Prevents rubber-banding on stops).
+- Pure-Velocity Boot/Park (Prevents 0-boundary encoder unwinding).
+- Precision Settle & Squeeze (Eliminates steady-state homing errors).
 - Linux Real-Time Priority Escalation (Nice -20).
 - Automatic Garbage Collection management for zero-jitter frames.
 - Rotating Health Telemetry to prevent Bus Saturation.
-- Zero-Jerk handover and phase-aligned LERP shutdown.
 =============================================================================
 """
 
@@ -67,8 +70,9 @@ LEN_GOAL_SPEED        = 2   # Byte length for velocity sync writes
 # --- ROBOT PHYSICAL CONSTANTS ---
 ENCODER_RESOLUTION = 4096.0  # Ticks per 360-degree rotation
 VELOCITY_SCALAR    = 1.85    # Multiplier for degrees/sec to STS units
-VOLTAGE_MIN        = 9.5     # Absolute floor for 3S LiPo batteries
+VOLTAGE_MIN        = 10.0    # Adjusted for realistic 3S LiPo safe-floor under heavy load sag
 TEMP_MAX           = 70      # Thermal safety shutdown threshold
+TEMP_ERROR_VAL     = 125     # Known STS Ghost sensor error value
 LOG_FILE           = "telemetry_log.txt"
 LOG_MAX_SIZE       = 10 * 1024 * 1024  # 10MB Log Rotation (EC58)
 
@@ -97,19 +101,42 @@ HOME_POSITIONS = {
 KP_PHASE        = 12.5       # Proportional gain for trajectory tracking
 STALL_THRESHOLD = 600        # Load magnitude required to trigger yield
 
+# EC70: Anti-Collision Leg Splay (Degrees)
+# Permanently biases front/rear legs outward to prevent toes from colliding during dense gaits.
+# Negative = Biased Forward, Positive = Biased Backward
+LEG_SPLAY = {
+    1: -25, 
+    2: -25,  # Front legs aggressively splayed forward
+    6: 0,   
+    3: 0,    # Middle legs perfectly centered
+    5: 25,  
+    4: 25    # Rear legs aggressively splayed backward
+}
+
+# Pre-calculate safe splayed park positions for boot and shutdown to prevent leg collisions
+SAFE_PARK_POSITIONS = {}
+for sid in ALL_SERVOS:
+    splay_deg = LEG_SPLAY.get(sid, 0)
+    splay_ticks = int((splay_deg / 360.0) * ENCODER_RESOLUTION * DIRECTION_MAP[sid])
+    # Modulo ensures the target stays within valid 0-4095 encoder bounds
+    safe_pos = int((HOME_POSITIONS[sid] + splay_ticks) % ENCODER_RESOLUTION)
+    SAFE_PARK_POSITIONS[sid] = safe_pos
+
 # --- KINEMATIC GAIT DICTIONARIES ---
+# Inverted dense gaits from Back-to-Front to Front-to-Back waves.
+# This ensures a leading leg swings out of the way before the trailing leg swings forward.
 GAITS = {
-    0: {  # TRIPOD (High speed, 3-leg support)
+    0: {  # TRIPOD (High speed, 3-leg support - already max distance)
         'duty': 0.5, 
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
-    1: {  # WAVE (Max stability, 5-leg support)
+    1: {  # WAVE (Max stability, Front-to-Back propagation)
         'duty': 0.85, 
-        'offsets': {4: 0.833, 3: 0.666, 2: 0.5,  5: 0.380, 6: 0.166, 1: 0.0}
+        'offsets': {1: 0.833, 6: 0.666, 5: 0.5,  2: 0.333, 3: 0.166, 4: 0.0}
     },
-    2: {  # QUADRUPED (Medium terrain, 4-leg support)
+    2: {  # QUADRUPED (Medium terrain, Front-to-Back Diagonal pairs)
         'duty': 0.7,
-        'offsets': {4: 0.0, 1: 0.0,  3: 0.333, 6: 0.333,  2: 0.666, 5: 0.666}
+        'offsets': {1: 0.666, 4: 0.666,  6: 0.333, 3: 0.333,  5: 0.0, 2: 0.0}
     }
 }
 
@@ -175,9 +202,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     actual_phases = {id: 0.0 for id in ALL_SERVOS} 
     comm_error_streak = 0
     telemetry_rotator = 0
-    volt_dip_counter = 0 
     last_log_time = 0
     parent_pid = os.getppid() # EC24: Monitor parent for orphaned thread prevention
+
+    # FIX 3: Persistent memory for voltage and thermal to prevent dropped-packet wipes
+    voltage_reading = 12.0
+    volt_dip_counter = 0 
+    temp_spike_counter = 0 
+    hot_servo_id = -1
     
     def log_telemetry(volt, temp_max, load_max, total_amps, fsm_speed, fsm_turn):
         """EC58 & EC68: Smart Log Management."""
@@ -202,35 +234,67 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             time.sleep(1.0)
             
         port_handler.clearPort() # EC41: Clear serial artifacts
-        print("[Heart] BOOT: Moving to STAND stance with Soft-Torque protection (40%)...")
+        print("[Heart] BOOT: Moving to splayed SAFE PARK stance using Velocity Mode...")
         
         for sid in ALL_SERVOS:
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 0) # Position Mode
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_ACCEL, 20) # Smooth hardware ramp
-            # EC51: Limit torque during initial alignment to protect gears
-            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 400)
-            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 800)
-            # EC7: Load goal position BEFORE torque-on to prevent snap
-            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_POSITION, HOME_POSITIONS[sid])
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
-        time.sleep(3.0) 
-        
-        # EC13: Perform blocking truth-read to prevent 1-frame snap on loop start
-        for sid in ALL_SERVOS:
-            pos, r_val, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
-            if r_val == 0:
-                diff = pos - HOME_POSITIONS[sid]
-                # Map physical encoder to geometric coordinate system
-                actual_phases[sid] = ((diff / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
-
-        print("[Heart] BOOT: Handover successful. Entering Velocity-Control Loop.")
-        for sid in ALL_SERVOS:
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0) # EC49 Mode switch
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1) # Velocity Mode
-            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000) # Enable full strength
+            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_ACCEL, 0) # Disable choke
+            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
+        time.sleep(0.5) 
+        
+        # LERP using Phase Math (immune to 0-boundary)
+        start_phases = {}
+        for sid in ALL_SERVOS:
+            pos, r1, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
+            if r1 == 0:
+                start_phases[sid] = (((pos - HOME_POSITIONS[sid]) / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
+            else:
+                start_phases[sid] = 0.0
+
+        # FIX: Precision Settle & Squeeze (70 frames total)
+        for i in range(70): 
+            # If the user hits Ctrl+C during boot, safely exit the loop early
+            if not is_running.value:
+                break
+                
+            # LERP moves over the first 50 frames (1 second), then settles exactly on target for 20 frames
+            lerp = min(1.0, (i+1)/50.0) 
+            for sid in ALL_SERVOS:
+                target_ph_final = LEG_SPLAY.get(sid, 0) % 360
+                diff = (target_ph_final - start_phases[sid] + 180) % 360 - 180
+                cur_target_ph = (start_phases[sid] + diff * lerp) % 360
+                
+                pos, r1, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
+                if r1 == 0:
+                    cur_ph = (((pos - HOME_POSITIONS[sid]) / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
+                    short_err = (cur_target_ph - cur_ph + 180) % 360 - 180
+                    
+                    # Increased KP for parking to eliminate steady-state error
+                    pd_term = short_err * (KP_PHASE * 1.5)
+                    
+                    # Friction Squeeze: If off by >0.5 deg, add minimum speed to overcome deadband
+                    if abs(short_err) > 0.5:
+                        pd_term += 40 if short_err > 0 else -40
+
+                    # FIX: Toned down from 1500 to a safe, controlled 500 for a confident but gentle park
+                    raw_speed = pd_term * DIRECTION_MAP[sid]
+                    final_speed = max(-500, min(500, int(raw_speed)))
+                    
+                    abs_v = int(abs(final_speed))
+                    speed_val = (abs_v | 0x8000) if final_speed < 0 else abs_v
+                    group_sync_write.addParam(sid, [speed_val & 0xff, (speed_val >> 8) & 0xff])
+            
+            group_sync_write.txPacket()
+            group_sync_write.clearParam()
+            time.sleep(0.02)
+            
+        for sid in ALL_SERVOS:
+            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)
+            
+        print("[Heart] BOOT: Alignment complete. Entering control loop.")
 
     # Begin hardware initialization
     init_and_align_servos()
@@ -264,15 +328,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # EC24: Watchdog check for parent process
             if loop_start_time - last_log_time > 1.0:
                 if os.getppid() != parent_pid:
-                    print("[Heart] CRITICAL: Watchdog detected lost Brain process. Stopping."); break
+                    print("[Heart] CRITICAL: Watchdog detected lost Brain process. Stopping.")
+                    break
                 gc.collect() # Manually trigger GC during the telemetry window
 
             # EC52: Serial buffer purge to prevent frame-latency buildup
             port_handler.clearPort()
 
             # 1. READ SENSORS (EC46, EC64: Lag-free top-of-loop read)
-            current_temp_max, current_load_max, current_total_ma = 0, 0, 0
-            voltage_reading = 12.0
+            current_temp_max = 0
+            current_load_max = 0
+            current_total_ma = 0
             loop_comm_fail = False
             
             for sid in ALL_SERVOS:
@@ -298,8 +364,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             shared_servo_loads[sid] = l_mag
                         
                         # EC14: Stall Debouncing logic
-                        if l_mag > STALL_THRESHOLD: stall_counters[sid] += 1
-                        else: stall_counters[sid] = 0
+                        if l_mag > STALL_THRESHOLD:
+                            stall_counters[sid] += 1
+                        else:
+                            stall_counters[sid] = 0
+
                         is_stalled[sid] = (stall_counters[sid] >= 3)
                         current_load_max = max(current_load_max, l_mag)
                         
@@ -307,30 +376,61 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         if l_mag > 900: 
                             is_stalled[sid] = True 
                         
-                    if r3 == 0: current_temp_max = max(current_temp_max, temp)
-                    if r4 == 0: voltage_reading = volt / 10.0
-                    if r5 == 0: current_total_ma = (amps & 0x7FFF)
+                    if r3 == 0: 
+                        # Identify the hottest servo
+                        if temp > current_temp_max:
+                            current_temp_max = temp
+                            hot_servo_id = sid
+
+                    if r4 == 0:
+                        voltage_reading = volt / 10.0
+
+                    if r5 == 0:
+                        current_total_ma = (amps & 0x7FFF)
 
             telemetry_rotator = (telemetry_rotator + 1) % len(ALL_SERVOS)
             
             # EC39: Connection Health Monitoring
-            if loop_comm_fail: comm_error_streak += 1
-            else: comm_error_streak = 0
+            if loop_comm_fail:
+                comm_error_streak += 1
+            else:
+                comm_error_streak = 0
             
             if comm_error_streak > 15:
-                print("[Heart] FATAL: Persistent bus desynchronization. Halting motors."); break
+                print("[Heart] FATAL: Persistent bus desynchronization. Halting motors.")
+                # Force Death Certificate log before dying
+                log_telemetry(voltage_reading, current_temp_max, current_load_max, current_total_ma / 1000.0, shared_speed.value, shared_turn_bias.value)
+                is_running.value = False
+                break
 
-            # EC48: Voltage/Thermal protection debouncer
-            if voltage_reading < VOLTAGE_MIN: volt_dip_counter += 1
-            else: volt_dip_counter = 0
+            # -----------------------------------------------------------------
+            # FIX 4: THERMAL & VOLTAGE DEBOUNCE (100 frame sag / 15 frame heat)
+            # -----------------------------------------------------------------
+            if current_temp_max > TEMP_MAX: 
+                temp_spike_counter += 1
+            else: 
+                temp_spike_counter = 0
+
+            if voltage_reading < VOLTAGE_MIN:
+                volt_dip_counter += 1
+            else:
+                volt_dip_counter = 0
             
-            if volt_dip_counter > 20 or current_temp_max > TEMP_MAX:
-                print(f"[Heart] SAFETY SHUTDOWN: Low Power ({voltage_reading}V) or Thermal High ({current_temp_max}C)"); break
+            if temp_spike_counter > 15 or volt_dip_counter > 100:
+                reason = "Thermal High" if temp_spike_counter > 15 else "Low Power"
+                val = f"{current_temp_max}C on ID:{hot_servo_id}" if "Thermal" in reason else f"{voltage_reading}V"
+                print(f"[Heart] SAFETY SHUTDOWN: {reason} ({val})")
+                
+                # FIX 1.5: "Death Certificate" - Log the exact failing voltage/temp
+                log_telemetry(voltage_reading, current_temp_max, current_load_max, current_total_ma / 1000.0, shared_speed.value, shared_turn_bias.value)
+                is_running.value = False 
+                break
 
             # 2. LOCAL SNAPSHOT (EC49: Atomic copy of FSM states)
             fsm_spd = shared_speed.value
             fsm_trn = shared_turn_bias.value
-            fsm_x, fsm_z = shared_x_flip.value, shared_z_flip.value
+            fsm_x   = shared_x_flip.value
+            fsm_z   = shared_z_flip.value
             fsm_gait = shared_gait_id.value
             fsm_imp_s = shared_impact_start.value
             fsm_imp_e = shared_impact_end.value
@@ -341,7 +441,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             
             # 3. SLEW-RATE INTERPOLATION (Protects hardware from high-frequency command shock)
             target_effective_speed = fsm_spd * fsm_x * fsm_z
-            lerp_rate = min(1.0, 5.0 * real_dt) # 0.2 second physical damping
+            lerp_rate = min(1.0, 2.0 * real_dt) # FIX: Smooth 0.5-second acceleration ramp
             
             # Interpolate speed and turn
             smooth_speed += (target_effective_speed - smooth_speed) * lerp_rate
@@ -373,7 +473,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # EC12, EC40: Kinematic Governor (Prevents Air-Swing saturation)
             base_sweep = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
             air_sweep = 360.0 - abs(base_sweep)
-            if base_sweep < 0: air_sweep = -air_sweep
+            if base_sweep < 0:
+                air_sweep = -air_sweep
             
             # Ensure hardware ceiling (3000 limit - 200 unit safety buffer)
             max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
@@ -383,7 +484,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # 4. MASTER CLOCKS
             # EC16, EC43: Reset clocks if stationary for > 2 seconds to prevent drift
             if abs(hz_L) < 0.001 and abs(hz_R) < 0.001:
-                master_time_L, master_time_R = 0.0, 0.0
+                master_time_L = 0.0
+                master_time_R = 0.0
             else:
                 master_time_L = (master_time_L + (hz_L * real_dt)) % 1.0
                 master_time_R = (master_time_R + (hz_R * real_dt)) % 1.0
@@ -410,6 +512,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     t_leg  = (m_t + smooth_offsets[sid]) % 1.0
                     tar_ph = get_buehler_angle(t_leg, smooth_duty, smooth_imp_start, smooth_imp_end)
                     
+                    # EC70: Apply Anti-Collision Splay
+                    # Permanently pushes the front and rear legs outward to guarantee clearance
+                    tar_ph = (tar_ph + LEG_SPLAY.get(sid, 0)) % 360
+                    
                     # Compute Geometric Derivative for Feed-Forward velocity
                     if t_leg <= smooth_duty:
                         deg_per_sec = (base_sweep / smooth_duty) * s_hz
@@ -420,18 +526,34 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     
                     # Proportional Phase Correction (PD loop)
                     short_err = (tar_ph - cur_ph + 180) % 360 - 180
-                    if s_hz > 0.05 and short_err < -90: short_err += 360
-                    elif s_hz < -0.05 and short_err > 90: short_err -= 360
+                    if s_hz > 0.05 and short_err < -90: 
+                        short_err += 360
+                    elif s_hz < -0.05 and short_err > 90: 
+                        short_err -= 360
                     
-                    # EC6: Virtual Spring Limit (45 deg) protects gearbox from snaps
-                    raw_speed = ff_speed + (max(-45, min(45, short_err)) * KP_PHASE)
+                    # FIX: Dynamic Deceleration Damping (Anti-Stutter)
+                    # If the robot is trying to stop, we drastically soften the PD spring (by 85%) 
+                    # so that momentum doesn't cause violent "rubber-banding" corrections.
+                    current_kp = KP_PHASE if abs(s_hz) > 0.1 else KP_PHASE * 0.15
+                    pd_term = max(-45, min(45, short_err)) * current_kp
                     
+                    raw_speed = ff_speed + pd_term
+                    
+                    # FIX: CONTINUOUS FORWARD MOMENTUM GUARD (No-Stop Policy)
+                    # If the robot is walking, absolutely forbid the PD loop from slamming 
+                    # the brakes or reversing to correct an overshoot. Let it coast at a 
+                    # minimum of 35% forward speed so the visual rotation never stutters.
+                    if abs(s_hz) > 0.05:
+                        if ff_speed > 0:
+                            raw_speed = max(ff_speed * 0.35, raw_speed)
+                        elif ff_speed < 0:
+                            raw_speed = min(ff_speed * 0.35, raw_speed)
+
                     # Sign adjustment based on physical mounting (DIRECTION_MAP)
-                    if DIRECTION_MAP[sid] == -1: 
-                        raw_speed = -raw_speed 
+                    raw_speed *= DIRECTION_MAP[sid]
                     
-                    # EC33: Virtual software deadzone to prevent coil heat/hum
-                    if abs(raw_speed) < 5: 
+                    # If the robot is effectively stopped and within 15 degrees of target, let it relax.
+                    if abs(s_hz) < 0.01 and abs(short_err) < 15:
                         final_speed = 0
                     else:
                         final_speed = max(-3000, min(3000, int(raw_speed)))
@@ -458,37 +580,64 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     except Exception as e:
         print(f"[Heart] FATAL LOOP ERROR: {e}")
     finally:
-        # EC28, EC44, EC45: Zero-Jerk LERP shutdown sequence
+        # PURE VELOCITY PARKING SEQUENCE (Fix for 0-boundary unwinding bug)
         print("\n" + "*"*60)
-        print("[Heart] SHUTDOWN: Navigating to HOME stance with Jerk-Free Handover.")
+        print("[Heart] SHUTDOWN: Coasting to safe splay stance in Pure Velocity Mode.")
         print("*"*60)
         port_handler.clearPort()
         
-        # Phase 1: Zero out all speed registers
+        # Phase 1: Zero out speeds instantly
         for sid in ALL_SERVOS: 
             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)
-        time.sleep(0.5)
+        time.sleep(0.1)
         
-        # Phase 2: Handover - Read current pos and set as goal to prevent initial mode snap
+        # Phase 2: Read current phases
+        start_phases = {}
         for sid in ALL_SERVOS:
-            pos, _, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 0) # Position Mode
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_ACCEL, 0) # Instant park response
-            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_POSITION, pos)
-            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
+            pos, r1, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
+            if r1 == 0:
+                start_phases[sid] = (((pos - HOME_POSITIONS[sid]) / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
+            else:
+                start_phases[sid] = LEG_SPLAY.get(sid, 0)
         
-        # Phase 3: LERPing to HOME posture over 1 second
-        print("[Heart] Parking Sequence: Interpolating physical pose...")
-        for i in range(50):
-            lerp = (i+1)/50.0
+        # Phase 3: Gentle Velocity PD loop to park (Precision Settle & Squeeze)
+        print("[Heart] Parking Sequence: Interpolating and squeezing physical pose...")
+        for i in range(70): # 70 frames = 1.4 seconds total
+            # LERP over the first 50 frames (1s), hold perfectly still on target for the last 20 frames
+            lerp = min(1.0, (i+1)/50.0) 
             for sid in ALL_SERVOS:
-                p, _, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
-                target = int(p + (HOME_POSITIONS[sid] - p) * lerp)
-                packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_POSITION, target)
+                target_ph_final = LEG_SPLAY.get(sid, 0) % 360
+                diff = (target_ph_final - start_phases[sid] + 180) % 360 - 180
+                cur_target_ph = (start_phases[sid] + diff * lerp) % 360
+                
+                pos, r1, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
+                if r1 == 0:
+                    cur_ph = (((pos - HOME_POSITIONS[sid]) / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
+                    short_err = (cur_target_ph - cur_ph + 180) % 360 - 180
+                    
+                    # Increased KP for parking to eliminate steady-state error
+                    pd_term = short_err * (KP_PHASE * 1.5)
+                    
+                    # Friction Squeeze: If off by >0.5 deg, add minimum speed to overcome deadband
+                    if abs(short_err) > 0.5:
+                        pd_term += 40 if short_err > 0 else -40
+
+                    # FIX: Toned down from 1500 to a safe, controlled 500 for a confident but gentle park
+                    raw_speed = pd_term * DIRECTION_MAP[sid]
+                    final_speed = max(-500, min(500, int(raw_speed)))
+                    
+                    abs_v = int(abs(final_speed))
+                    speed_val = (abs_v | 0x8000) if final_speed < 0 else abs_v
+                    group_sync_write.addParam(sid, [speed_val & 0xff, (speed_val >> 8) & 0xff])
+            
+            group_sync_write.txPacket()
+            group_sync_write.clearParam()
             time.sleep(0.02)
-        
-        # Phase 4: Final Release
+            
+        # Final Zero & Release
+        for sid in ALL_SERVOS: 
+            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)
+        time.sleep(0.1)
         for sid in ALL_SERVOS: 
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
         port_handler.closePort()
@@ -497,14 +646,32 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 # =================================================================
 # PROCESS 1: THE BRAIN (VERBOSE TACTICAL STATE MACHINE)
 # =================================================================
+
+class EmergencyStopException(Exception): pass
+
+def tactical_sleep(duration, running_flag):
+    """
+    Non-blocking sleep sequence. Monitors the Heart's liveness flag 
+    every 100ms. If the Heart triggers a safety shutdown, this instantly
+    aborts the Brain's current tactical phase.
+    """
+    start_time = time.time()
+    while time.time() - start_time < duration:
+        if not running_flag.value:
+            raise EmergencyStopException("Hardware Safety Halt Triggered by Heart Process.")
+        time.sleep(0.1)
+
+
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("      HEXAPOD KINEMATICS PRO ")
+    print("      HEXAPOD KINEMATICS  ")
     print("="*60)
 
     if os.path.exists(LOG_FILE):
-        try: os.rename(LOG_FILE, LOG_FILE + ".old")
-        except: pass
+        try: 
+            os.rename(LOG_FILE, LOG_FILE + ".old")
+        except: 
+            pass
 
     # Multi-Processing Primitive Allocation
     shared_speed        = mp.Value('i', 0)  
@@ -519,7 +686,8 @@ if __name__ == "__main__":
     is_running          = mp.Value('b', True) 
 
     # EC54: Sentinel initialization for load array
-    for i in range(7): shared_servo_loads[i] = -1
+    for i in range(7): 
+        shared_servo_loads[i] = -1
 
     gait_process = mp.Process(target=gait_worker, args=(
         shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, 
@@ -529,7 +697,7 @@ if __name__ == "__main__":
     gait_process.start()
 
     # --- TACTICAL BEHAVIOR DEFINITIONS ---
-    def state_recovery_wiggle(duration=5):
+    def state_recovery_wiggle(duration=10):
         """Active Compliance: Shakes chassis to break legs free."""
         print("\n" + "*"*50)
         print("[STATE] RECOVERY: High Load Detected (Leg Stuck)!")
@@ -537,8 +705,12 @@ if __name__ == "__main__":
         print("*"*50)
         end_time = time.time() + duration
         while time.time() < end_time:
-            shared_x_flip.value = -1; time.sleep(0.3)
-            shared_x_flip.value = 1; time.sleep(0.3)
+            if not is_running.value: 
+                raise EmergencyStopException("Hardware aborted during wiggle.")
+            shared_x_flip.value = -1
+            tactical_sleep(0.3, is_running)
+            shared_x_flip.value = 1
+            tactical_sleep(0.3, is_running)
         print("[STATE] Extraction sequence complete. Resuming trajectory.")
 
     def state_self_right_roll():
@@ -548,12 +720,24 @@ if __name__ == "__main__":
         print("[STATE] Action: Executing Slow-Torque Symmetrical Roll sequence.")
         print("!"*50)
         shared_gait_id.value = 1 # Wave Gait ensures max support
-        shared_impact_start.value, shared_impact_end.value = 320, 40 
+        shared_impact_start.value = 320
+        shared_impact_end.value = 40 
         
-        print("[FSM] Step 1: Shifting internal center of gravity forward..."); shared_speed.value = 400; time.sleep(2.0)
-        print("[FSM] Step 2: Initiating reverse torque momentum pulse..."); shared_speed.value = -500; time.sleep(4.0)
-        print("[FSM] Step 3: Secondary momentum buildup..."); shared_speed.value = 400; time.sleep(2.0)
-        print("[FSM] Step 4: Final clearing roll and posture reset..."); shared_speed.value = -500; time.sleep(4.0)
+        print("[FSM] Step 1: Shifting internal center of gravity forward...")
+        shared_speed.value = 400
+        tactical_sleep(4.0, is_running)
+
+        print("[FSM] Step 2: Initiating reverse torque momentum pulse...")
+        shared_speed.value = -500
+        tactical_sleep(8.0, is_running)
+
+        print("[FSM] Step 3: Secondary momentum buildup...")
+        shared_speed.value = 400
+        tactical_sleep(4.0, is_running)
+
+        print("[FSM] Step 4: Final clearing roll and posture reset...")
+        shared_speed.value = -500
+        tactical_sleep(8.0, is_running)
         
         shared_speed.value = 0
         print("[STATE] Orientation normalized. Gyroscopic truth verified.")
@@ -571,18 +755,38 @@ if __name__ == "__main__":
         print("="*50)
         print("[SIMULATION] Env: Concrete floor. Path: Clear. Slope: 0.")
         print("[FSM] Decision: Engaging High-Agility Tripod Gait.")
-        shared_gait_id.value = 0; shared_impact_start.value, shared_impact_end.value = 320, 40 
         
-        print("[FSM] Executing: High-Speed Sprint Forward (Velocity: 800)"); shared_speed.value = 800; time.sleep(5)
-        print("[FSM] Executing: Dynamic Carving Turn LEFT (Bias: -0.4)"); shared_turn_bias.value = -0.4; time.sleep(4)
-        print("[FSM] Executing: Dynamic Carving Turn RIGHT (Bias: 0.4)"); shared_turn_bias.value = 0.4; time.sleep(4)
+        # Reduced Tripod sweep to 60 degrees (330->30) to prevent leg crowding at high speed
+        shared_gait_id.value = 0
+        shared_impact_start.value = 330
+        shared_impact_end.value = 30 
         
-        print("[FSM] Executing: True Zero-Radius Tactical Pivot LEFT (Spd: 0, Trn: -0.8)")
-        shared_speed.value = 0; shared_turn_bias.value = -0.8; time.sleep(4)
-        print("[FSM] Executing: True Zero-Radius Tactical Pivot RIGHT (Spd: 0, Trn: 0.8)")
-        shared_speed.value = 0; shared_turn_bias.value = 0.8; time.sleep(4)
+        print("[FSM] Executing: High-Speed Sprint Forward (Velocity: 1200)")
+        shared_speed.value = 1200
+        tactical_sleep(20, is_running)
+
+        print("[FSM] Executing: Dynamic Carving Turn LEFT (Bias: -0.4)")
+        shared_turn_bias.value = -0.4
+        tactical_sleep(16, is_running)
+
+        print("[FSM] Executing: Dynamic Carving Turn RIGHT (Bias: 0.4)")
+        shared_turn_bias.value = 0.4
+        tactical_sleep(16, is_running)
         
-        print("[FSM] Executing: Full-Power High-Speed Reverse Sprint"); shared_turn_bias.value = 0.0; shared_speed.value = -800; time.sleep(5)
+        print("[FSM] Executing: True Zero-Radius Tactical Pivot LEFT (Spd: 0, Trn: -1.0)")
+        shared_speed.value = 0
+        shared_turn_bias.value = -1.0
+        tactical_sleep(16, is_running)
+
+        print("[FSM] Executing: True Zero-Radius Tactical Pivot RIGHT (Spd: 0, Trn: 1.0)")
+        shared_speed.value = 0
+        shared_turn_bias.value = 1.0
+        tactical_sleep(16, is_running)
+        
+        print("[FSM] Executing: Full-Power High-Speed Reverse Sprint")
+        shared_turn_bias.value = 0.0
+        shared_speed.value = -1200
+        tactical_sleep(20, is_running)
 
         # --- PHASE 2: QUADRUPED ---
         print("\n" + "="*50)
@@ -590,17 +794,29 @@ if __name__ == "__main__":
         print("="*50)
         print("[SIMULATION] Env: Loose gravel path. Slope: Moderate.")
         print("[FSM] Decision: Switching to high-torque Quadruped stability gait.")
-        shared_gait_id.value = 2; shared_speed.value = 550; shared_turn_bias.value = 0.0
+        shared_gait_id.value = 2
+        shared_speed.value = 550
+        shared_turn_bias.value = 0.0
         
-        print("[FSM] Executing: Standard Stability Walking Sequence..."); time.sleep(5)
+        # Splay guard active, FSM sweeps returned to comfortable stride distances
+        shared_impact_start.value = 330
+        shared_impact_end.value = 30 
+        
+        print("[FSM] Executing: Standard Stability Walking Sequence...")
+        tactical_sleep(24, is_running)
         
         print("[SIMULATION] Sensor (Ultrasonic): 10cm Obstacle detected in center path!")
         print("[STATE] Triggering: WALKING TALL - Riding over obstruction (Impacts: 345->15)")
-        shared_speed.value = 500; shared_impact_start.value, shared_impact_end.value = 345, 15; time.sleep(6)
+        shared_speed.value = 500
+        shared_impact_start.value = 345
+        shared_impact_end.value = 15
+        tactical_sleep(24, is_running)
         
         print("[SIMULATION] Sensor (Ultrasonic): Low overhang clearance detected!")
-        print("[STATE] Triggering: STEALTH CRAWL - Lowering body profile (Impacts: 300->60)")
-        shared_impact_start.value, shared_impact_end.value = 300, 60; time.sleep(6)
+        print("[STATE] Triggering: STEALTH CRAWL - Lowering body profile (Impacts: 325->35)")
+        shared_impact_start.value = 325
+        shared_impact_end.value = 35
+        tactical_sleep(24, is_running)
 
         # --- PHASE 3: WAVE ---
         print("\n" + "="*50)
@@ -608,21 +824,41 @@ if __name__ == "__main__":
         print("="*50)
         print("[SIMULATION] Env: Deformable sand hill. Slope: Steep (15 deg).")
         print("[FSM] Decision: Engaging ultra-stable Wave Gait (Duty 0.85).")
-        shared_gait_id.value = 1; shared_speed.value = 350
+        shared_gait_id.value = 1
+        shared_speed.value = 350
         
-        print("[FSM] Executing: Low-Speed Sand Crawl Cycle..."); time.sleep(6)
-        print("[FSM] Executing: Fine Fine-Correction Pivot LEFT"); shared_turn_bias.value = -0.15; time.sleep(5)
-        print("[FSM] Executing: Fine Fine-Correction Pivot RIGHT"); shared_turn_bias.value = 0.15; time.sleep(5)
+        # Splay guard active
+        shared_impact_start.value = 330
+        shared_impact_end.value = 30
+        
+        print("[FSM] Executing: Low-Speed Sand Crawl Cycle...")
+        tactical_sleep(30, is_running)
+
+        print("[FSM] Executing: Fine Fine-Correction Pivot LEFT")
+        shared_turn_bias.value = -0.15
+        tactical_sleep(20, is_running)
+
+        print("[FSM] Executing: Fine Fine-Correction Pivot RIGHT")
+        shared_turn_bias.value = 0.15
+        tactical_sleep(20, is_running)
         
         print("[SIMULATION] Sensor (IMU): Chassis pitch exceeds stability gate!")
-        print("[STATE] Triggering: LEANING INTO HILL - Shifting COG (Impacts: 290->10)")
-        shared_speed.value = 350; shared_impact_start.value, shared_impact_end.value = 290, 10; time.sleep(8)
+        print("[STATE] Triggering: LEANING INTO HILL - Shifting COG (Impacts: 315->15)")
+        shared_speed.value = 350
+        shared_turn_bias.value = 0.0
+        shared_impact_start.value = 315
+        shared_impact_end.value = 15
+        tactical_sleep(30, is_running)
 
         # --- PHASE 4: TACTICAL RECOVERY ---
         print("\n" + "="*50)
         print("PHASE 4: TACTICAL ERROR RECOVERY")
         print("="*50)
-        print("[FSM] Sequence: Temporary deceleration for environmental assessment..."); shared_speed.value = 0; time.sleep(2)
+        # BUG FIX: Resetting the turn bias to 0 so the robot doesn't keep spinning while trying to stop!
+        print("[FSM] Sequence: Temporary deceleration for environmental assessment...")
+        shared_speed.value = 0
+        shared_turn_bias.value = 0.0
+        tactical_sleep(3, is_running)
         
         print("[SIMULATION] Sensor (Load): Leg 2 mechanical resistance > STALL_THRESHOLD!")
         state_recovery_wiggle()
@@ -635,8 +871,15 @@ if __name__ == "__main__":
         print("PHASE 5: NAVIGATION SEQUENCE COMPLETE")
         print("="*50)
         print("[SIMULATION] Sensor: Final destination reached. Navigating to base posture.")
-        shared_speed.value = 0; time.sleep(8) 
+        # BUG FIX: Resetting the turn bias again to guarantee perfectly still stopping posture
+        shared_speed.value = 0
+        shared_turn_bias.value = 0.0
+        tactical_sleep(5, is_running) 
 
+    except EmergencyStopException as e:
+        print("\n" + "!"*60)
+        print(f"[Brain] EMERGENCY ABORT: {e}")
+        print("!"*60)
     except KeyboardInterrupt:
         print("\n" + "!"*60)
         print("[Brain] INTERRUPT: Tactical Kill Command Received from Operator.")
@@ -648,4 +891,4 @@ if __name__ == "__main__":
         if gait_process.is_alive():
             print("[Brain] SHUTDOWN ALERT: Heart unresponsive. Force terminating process.")
             gait_process.terminate()
-        print("\nIntegrated Industrial Test Suite Complete. All systems offline.")
+        print("\nTest Suite Complete. All systems offline.")
