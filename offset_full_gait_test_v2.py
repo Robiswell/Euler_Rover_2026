@@ -194,18 +194,27 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     voltage_reading = 12.0
     volt_dip_counter   = 0
     temp_spike_counter = 0
+    temp_per_servo     = {sid: 0 for sid in ALL_SERVOS}   # Last known temp per servo (°C)
+    current_per_servo  = {sid: 0 for sid in ALL_SERVOS}   # Last known current per servo (raw mA units)
     parent_pid     = os.getppid()
     last_log_time  = 0
 
-    def log_telemetry(volt, temp_max, load_max, total_amps, fsm_speed, fsm_turn):
+    GAIT_NAMES = {0: "tripod", 1: "wave", 2: "quad"}
+
+    def log_telemetry(volt, load_max, total_amps, fsm_speed, fsm_turn):
         """Industrial Standard Logging."""
         try:
             if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_SIZE:
                 os.rename(LOG_FILE, LOG_FILE + f".{int(time.time())}.old")
             with open(LOG_FILE, "a") as f:
-                ts = datetime.datetime.now().strftime("%H:%M:%S")
-                f.write(f"[{ts}] Spd:{fsm_speed} Trn:{fsm_turn:.1f} | "
-                        f"V:{volt:.1f}V | T:{temp_max}C | L:{load_max} | A:{total_amps:.2f}\n")
+                ts         = datetime.datetime.now().strftime("%H:%M:%S")
+                gait_name  = GAIT_NAMES.get(shared_gait_id.value, str(shared_gait_id.value))
+                # Individual temps in ALL_SERVOS order (2,3,4,1,6,5) so hotspots are identifiable
+                temps_str  = ",".join(str(temp_per_servo[sid]) for sid in ALL_SERVOS)
+                stall_count = sum(1 for s in is_stalled.values() if s)
+                f.write(f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.1f} | "
+                        f"V:{volt:.1f}V | T:{temps_str} | L:{load_max} | "
+                        f"A:{total_amps:.2f} | Stall:{stall_count}\n")
         except:
             pass
 
@@ -291,7 +300,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # read all servos for load (needed for stall detection every tick)
             gsread_load.txRxPacket()
             current_load_max  = 0
-            current_total_ma  = 0
             stall_active = not shared_stall_override.value
             for sid in ALL_SERVOS:
                 if gsread_load.isAvailable(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD):
@@ -325,6 +333,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             temp, res_t, _ = packet_handler.read1ByteTxRx(port_handler, telemetry_sid, ADDR_PRESENT_TEMP)
             if res_t == 0 and temp != GHOST_TEMP:
                 current_temp_max = temp
+                temp_per_servo[telemetry_sid] = temp
                 temp_read_ok = True
 
             volt, res_v, _ = packet_handler.read1ByteTxRx(port_handler, telemetry_sid, ADDR_PRESENT_VOLTAGE)
@@ -333,7 +342,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             amps, res_a, _ = packet_handler.read2ByteTxRx(port_handler, telemetry_sid, ADDR_PRESENT_CURRENT)
             if res_a == 0:
-                current_total_ma = amps & 0x7FFF
+                current_per_servo[telemetry_sid] = amps & 0x7FFF
 
             # ----------------------------------------------------------
             # Safety Guards
@@ -353,16 +362,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 volt_dip_counter  = 0
 
             if temp_spike_counter > 15 or volt_dip_counter > 100:
-                print(f"[heart] safety shutdown - temp={current_temp_max}C volt={voltage_reading:.1f}V")
-                log_telemetry(voltage_reading, current_temp_max, current_load_max,
-                              current_total_ma / 1000.0,
+                print(f"[heart] safety shutdown - temp={max(temp_per_servo.values())}C volt={voltage_reading:.1f}V")
+                log_telemetry(voltage_reading, current_load_max,
+                              sum(current_per_servo.values()) / 1000.0,
                               shared_speed.value, shared_turn_bias.value)
                 is_running.value = False
                 break
 
             if loop_start - last_log_time > 1.0:
-                log_telemetry(voltage_reading, current_temp_max, current_load_max,
-                              current_total_ma / 1000.0,
+                log_telemetry(voltage_reading, current_load_max,
+                              sum(current_per_servo.values()) / 1000.0,
                               shared_speed.value, shared_turn_bias.value)
                 last_log_time = loop_start
 
@@ -526,9 +535,19 @@ if __name__ == "__main__":
     shared_speed        = mp.Value('i', 0)
     shared_x_flip       = mp.Value('i', 1)
     shared_z_flip       = mp.Value('i', 1)   # NOTE: never written after init - always 1.
-                                              # Whether to set -1 during state_self_right_roll
-                                              # (Scenario B) is unresolved - requires physical
-                                              # testing to determine correct inversion strategy.
+                                              #
+                                              # Intended for capsized mode in state_self_right_roll.
+                                              # Setting -1 would flip effective forward/backward for
+                                              # all legs, to correct for the chassis axis reversing
+                                              # when upside down.
+                                              #
+                                              # Unresolved because the correct value can only be
+                                              # determined by physically running Step 1 of the roll
+                                              # (1-2s) on a capsized robot and observing which way
+                                              # the chassis shifts:
+                                              #   - Shifts in the useful roll direction → keep 1
+                                              #   - Shifts the wrong way → set -1 at the top of
+                                              #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('d', 0.0)
     shared_gait_id      = mp.Value('i', 0)
     shared_impact_start = mp.Value('i', 320)
@@ -566,7 +585,6 @@ if __name__ == "__main__":
         shared_speed.value = 400
 
         end_time    = time.time() + duration
-        cycle_count = 0
         try:
             while time.time() < end_time:
                 if not is_running.value:
@@ -574,7 +592,6 @@ if __name__ == "__main__":
                 if not gait_process.is_alive():
                     raise EmergencyStopException("Heart process died during recovery wiggle.")
 
-                cycle_count += 1
                 shared_x_flip.value = -1
                 tsleep(0.3)
                 shared_x_flip.value = 1
@@ -713,13 +730,16 @@ if __name__ == "__main__":
         print("pivot right");                shared_speed.value = 0; shared_turn_bias.value =  0.5; tsleep(10)
         print("reverse");                    shared_turn_bias.value = 0.0; shared_speed.value = -350; tsleep(12)
 
+        # Decel pause - matches Phase 1/2 pattern, bleeds ~720ms of reverse motion before COG shift
+        shared_speed.value = 0; tsleep(2)
+
         print("cog shift (hill climb)");     shared_speed.value = 350; shared_impact_start.value, shared_impact_end.value = 315, 15; tsleep(20)
 
         # =========================================================
         # PHASE 4: RECOVERY
         # =========================================================
         print("\n-- phase 4: recovery --")
-        shared_speed.value = 0; shared_turn_bias.value = 0.0; tsleep(3)
+        shared_speed.value = 0; shared_turn_bias.value = 0.0; shared_gait_id.value = 0; tsleep(3)
 
         state_recovery_wiggle()
         state_self_right_roll()
