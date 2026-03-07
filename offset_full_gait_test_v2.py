@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Hexapod rover kinematics — STS3215 servos, Raspberry Pi 3B+
+Hexapod rover kinematics - STS3215 servos, Raspberry Pi 3B+
 
 Two processes:
-  Brain  — mission sequencer, runs gait phases and recovery behaviors
-  Heart  — 50Hz kinematics loop, Buehler clock math + LERP smoothing
+  Brain  - mission sequencer, runs gait phases and recovery behaviors
+  Heart  - 50Hz kinematics loop, Buehler clock math + LERP smoothing
 
 Hardware: 6x STS3215 12V servos on /dev/ttyUSB0 @ 1Mbaud
-No software angle offsets — clearance is managed physically.
+No software angle offsets - clearance is managed physically.
 """
 
 import time
@@ -91,7 +91,7 @@ SERVO_LOAD_INDEX = {sid: i for i, sid in enumerate(ALL_SERVOS)}
 # Feedback Gains
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 600
-GHOST_TEMP      = 125  # STS3215 EMI artifact — bus noise returns flat 125°C (not a real reading)
+GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 
 # --- KINEMATIC GAIT DICTIONARIES ---
 GAITS = {
@@ -175,7 +175,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     gsread_pos = GroupSyncRead(
         port_handler, packet_handler, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION)
 
-    # Sync read: load — all servos every tick (required for stall detection)
+    # Sync read: load - all servos every tick (required for stall detection)
     gsread_load = GroupSyncRead(port_handler, packet_handler, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD)
 
     # Temp / voltage / current use individual reads on the single rotating telemetry_sid.
@@ -255,7 +255,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     smooth_imp_end   = float(shared_impact_end.value)
     smooth_duty      = 0.5
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
-    # from tick 1 — avoids all-6-legs-in-phase condition during cold start.
+    # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
 
     try:
@@ -273,7 +273,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # ----------------------------------------------------------
             # 1. READ PHYSICAL FEEDBACK via GroupSyncRead
             # ----------------------------------------------------------
-            # Position read — all servos, every loop
+            # Position read - all servos, every loop
             gsread_pos.txRxPacket()
 
             actual_phases = {}
@@ -287,7 +287,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 else:
                     actual_phases[sid] = last_actual_phases[sid]
 
-            # Telemetry read — rotate one servo per tick for full telemetry,
+            # Telemetry read - rotate one servo per tick for full telemetry,
             # read all servos for load (needed for stall detection every tick)
             gsread_load.txRxPacket()
             current_load_max  = 0
@@ -306,19 +306,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         is_stalled[sid] = (stall_counters[sid] >= 3)
                     else:
                         # Stall override active (e.g. inverted roll): high load is
-                        # intentional floor contact — do not cut leg speed.
+                        # intentional floor contact - do not cut leg speed.
                         stall_counters[sid] = 0
                         is_stalled[sid]     = False
                     current_load_max = max(current_load_max, l_mag)
 
-            # Rotate which servo supplies temp/voltage/current each tick —
+            # Rotate which servo supplies temp/voltage/current each tick -
             # individual reads on one servo, not a 6-servo batch transaction.
             telemetry_sid   = ALL_SERVOS[telemetry_index]
             telemetry_index = (telemetry_index + 1) % len(ALL_SERVOS)
 
             # STS3215 "Ghost Sensor" artifact: bus noise / EMI can cause the servo
             # to return a flat 125°C instead of a real reading. Treat 125 the same
-            # as a comms failure — leave spike counter unchanged rather than
+            # as a comms failure - leave spike counter unchanged rather than
             # triggering a false shutdown or masking a real overheat.
             temp_read_ok = False
             current_temp_max = 0
@@ -339,7 +339,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Safety Guards
             # ----------------------------------------------------------
             # Only reset spike counter when we have a confirmed safe reading.
-            # Failed reads leave the counter unchanged — a string of failures
+            # Failed reads leave the counter unchanged - a string of failures
             # cannot mask a genuine overheat that was already accumulating.
             if temp_read_ok:
                 if current_temp_max > TEMP_MAX:
@@ -353,7 +353,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 volt_dip_counter  = 0
 
             if temp_spike_counter > 15 or volt_dip_counter > 100:
-                print(f"[heart] safety shutdown — temp={current_temp_max}C volt={voltage_reading:.1f}V")
+                print(f"[heart] safety shutdown - temp={current_temp_max}C volt={voltage_reading:.1f}V")
                 log_telemetry(voltage_reading, current_temp_max, current_load_max,
                               current_total_ma / 1000.0,
                               shared_speed.value, shared_turn_bias.value)
@@ -525,9 +525,9 @@ if __name__ == "__main__":
     # Multi-Processing Primitives
     shared_speed        = mp.Value('i', 0)
     shared_x_flip       = mp.Value('i', 1)
-    shared_z_flip       = mp.Value('i', 1)   # NOTE: never written after init — always 1.
+    shared_z_flip       = mp.Value('i', 1)   # NOTE: never written after init - always 1.
                                               # Whether to set -1 during state_self_right_roll
-                                              # (Scenario B) is unresolved — requires physical
+                                              # (Scenario B) is unresolved - requires physical
                                               # testing to determine correct inversion strategy.
     shared_turn_bias    = mp.Value('d', 0.0)
     shared_gait_id      = mp.Value('i', 0)
@@ -559,7 +559,7 @@ if __name__ == "__main__":
         """Oscillate direction rapidly to break static friction / unstick a jammed leg."""
         print("[recovery] wiggling to break friction...")
 
-        # Reset to standard window — avoids inheriting stale state (e.g. COG Shift 315/15)
+        # Reset to standard window - avoids inheriting stale state (e.g. COG Shift 315/15)
         shared_impact_start.value, shared_impact_end.value = 330, 30
 
         # Phase 4 zeros speed before calling this, so we own the speed here
@@ -588,7 +588,7 @@ if __name__ == "__main__":
     def state_self_right_roll():
         """Momentum roll to flip robot upright when capsized.
 
-        !! UNVALIDATED — never tested on hardware, but geometrically grounded !!
+        !! UNVALIDATED - never tested on hardware, but geometrically grounded !!
 
         Geometry (from design specs):
           Leg radius = 75mm, arc = 210°. Chassis 510x280x75mm.
@@ -601,33 +601,33 @@ if __name__ == "__main__":
 
           Home (0°) = legs straight down upright = straight UP when inverted.
           Legs must be at ~180° to reach the floor when inverted.
-          Normal walking window (320/40) sweeps ±40° around 0° — no floor contact inverted.
+          Normal walking window (320/40) sweeps ±40° around 0° - no floor contact inverted.
           Corrected inverted window: 140/220 (±40° around 180°). 210° arc includes this. ✓
 
         Open questions (needs physical testing):
           - Does +400 shift weight in the useful direction when inverted?
           - Is 4s/8s/4s the right timing for a 3kg robot?
-          - z_flip strategy (Scenario A vs B) — see shared_z_flip comment.
+          - z_flip strategy (Scenario A vs B) - see shared_z_flip comment.
 
         First test: run Step 1 only (1-2s) inverted on flat surface.
           Confirm legs hit floor and chassis shifts, then tune from there.
         """
-        print("[recovery] capsized — attempting momentum roll to self-right")
+        print("[recovery] upside-down - attempting momentum roll to self-right")
 
-        ROLL_LOAD_SPEED   =  400   # step 1 — direction unverified inverted
-        ROLL_SNAP_SPEED   = -500   # step 2 — direction unverified inverted
-        ROLL_SETTLE_SPEED =  400   # step 3 — timing unverified
+        ROLL_LOAD_SPEED   =  400   # step 1 - direction unverified inverted
+        ROLL_SNAP_SPEED   = -500   # step 2 - direction unverified inverted
+        ROLL_SETTLE_SPEED =  400   # step 3 - timing unverified
 
         # Corrected window centered on 180° (floor-facing when inverted).
-        # Old value (320/40) was centered on 0° — legs pointing at ceiling, no contact.
+        # Old value (320/40) was centered on 0° - legs pointing at ceiling, no contact.
         ROLL_IMPACT_START = 140
         ROLL_IMPACT_END   = 220
 
-        shared_gait_id.value   = 1    # wave gait — maximum sequential torque
+        shared_gait_id.value   = 1    # wave gait - maximum sequential torque
         shared_turn_bias.value = 0.0
         shared_impact_start.value, shared_impact_end.value = ROLL_IMPACT_START, ROLL_IMPACT_END
 
-        # Suppress stall detection — floor contact produces high load intentionally.
+        # Suppress stall detection - floor contact produces high load intentionally.
         # Without this the legs get cut every 60ms and generate no sustained momentum.
         shared_stall_override.value = True
         try:
@@ -636,15 +636,15 @@ if __name__ == "__main__":
             # stance_sweep to ~0° and zeroing feed-forward. 1s = ~98% convergence.
             tsleep(1.0)
 
-            print("[recovery] roll step 1 — loading weight")
+            print("[recovery] roll step 1 - loading weight")
             shared_speed.value = ROLL_LOAD_SPEED
             tsleep(4.0)
 
-            print("[recovery] roll step 2 — inertial snap")
+            print("[recovery] roll step 2 - inertial snap")
             shared_speed.value = ROLL_SNAP_SPEED
             tsleep(8.0)
 
-            print("[recovery] roll step 3 — settling")
+            print("[recovery] roll step 3 - settling")
             shared_speed.value = ROLL_SETTLE_SPEED
             tsleep(4.0)
         finally:
@@ -675,7 +675,7 @@ if __name__ == "__main__":
         print("pivot right");                shared_speed.value = 0; shared_turn_bias.value =  1.0; tsleep(10)
         print("reverse");                    shared_turn_bias.value = 0.0; shared_speed.value = -1200; tsleep(12)
 
-        # Decel pause — smooth_hz bleeds ~720ms from -1.2Hz without this,
+        # Decel pause - smooth_hz bleeds ~720ms from -1.2Hz without this,
         # meaning the robot reverses briefly after Phase 2 starts.
         shared_speed.value = 0; tsleep(2)
 
@@ -693,7 +693,7 @@ if __name__ == "__main__":
         print("pivot right");                shared_speed.value = 0; shared_turn_bias.value =  0.8; tsleep(10)
         print("reverse");                    shared_turn_bias.value = 0.0; shared_speed.value = -550; tsleep(12)
 
-        # Decel before walking tall — avoids ~720ms of backward motion bleed into forward mode
+        # Decel before walking tall - avoids ~720ms of backward motion bleed into forward mode
         shared_speed.value = 0; tsleep(2)
 
         print("walking tall");               shared_speed.value = 500; shared_impact_start.value, shared_impact_end.value = 345, 15; tsleep(15)
