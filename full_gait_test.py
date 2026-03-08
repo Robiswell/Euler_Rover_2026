@@ -85,8 +85,9 @@ HOME_POSITIONS = {
 
 KP_PHASE        = 12.5  # proportional gain for phase tracking
 STALL_THRESHOLD     = 600   # load magnitude that triggers stall yield
-RECURRENCE_WINDOW   = 150   # frames (~3 s at 50 Hz) for sand-trap rolling window
-SAND_TRAP_THRESHOLD = 120   # stall servo-frames in window to declare sand trap
+RECURRENCE_WINDOW    = 150   # frames (~3 s at 50 Hz) for sand-trap rolling window
+SAND_TRAP_THRESHOLD  = 120   # stall servo-frames in window to declare sand trap
+RECURRENCE_THRESHOLD = SAND_TRAP_THRESHOLD  # audit alias
 
 # Anti-collision splay: permanently offsets front/rear legs to prevent
 # toe contact during the tripod air swing.
@@ -125,16 +126,24 @@ GAITS = {
 }
 
 
-def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang):
+def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
     """
     Returns the target phase angle for a leg at normalized clock position t_norm.
 
     Stance (t <= duty): linear sweep from start to end — constant body velocity.
     Air   (t >  duty): raised-cosine return swing — velocity is zero at liftoff
                        and touchdown, peaks at mid-swing.
+
+    is_reversed=True swaps start/end so the stance sweep runs backward while the
+    clock always advances forward.  This avoids the backward-clock issues (low-KP
+    freeze during speed transition, 300-degree air sweep direction error) that
+    caused all legs to hang near 180° during reverse quadruped.
     """
-    # Shortest-path stance sweep
     stance_sweep = (end_ang - start_ang + 180) % 360 - 180
+
+    if is_reversed:
+        start_ang, end_ang = end_ang, start_ang
+        stance_sweep = -stance_sweep
 
     if t_norm <= duty_cycle:
         progress = t_norm / duty_cycle
@@ -206,7 +215,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
         """Append one telemetry line; rotate file at 10 MB."""
         try:
             if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_SIZE:
-                os.rename(LOG_FILE, LOG_FILE + f".{int(time.time())}.old")
+                ts_r = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                os.rename(LOG_FILE, LOG_FILE + f".{ts_r}")
+                import glob
+                for old in sorted(glob.glob(LOG_FILE + ".*"), key=os.path.getmtime)[:-20]:
+                    try: os.remove(old)
+                    except: pass
             with open(LOG_FILE, "a") as f:
                 ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(
@@ -332,7 +346,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                 if os.getppid() != parent_pid:
                     print("[heart] brain process gone, stopping")
                     break
-                gc.collect()
 
             # Clear serial buffer to prevent frame-latency buildup
             port_handler.clearPort()
@@ -351,49 +364,53 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                 else:
                     loop_comm_fail = True
 
-                # Rotating health read: one changing servo + servo 1 per frame
+                # Load read: ALL servos every frame for correct 3-frame stall latency.
+                # Rotating-only load (v1 original) only read each servo every 6 frames,
+                # making effective stall latency 18 frames (360ms) instead of 3 (60ms).
+                # Temp/voltage/current remain rotating (only one servo per frame needed).
+                load, r2, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_LOAD)
+
+                # Stall detection on every servo every frame (load read moved outside rotate guard)
+                if r2 == 0:
+                    l_mag = load & 0x3FF
+                    last_load[sid] = l_mag
+                    if 0 <= sid < len(shared_servo_loads):
+                        shared_servo_loads[sid] = l_mag
+
+                    if l_mag > STALL_THRESHOLD:
+                        stall_counters[sid] += 1
+                    else:
+                        stall_counters[sid] = max(0, stall_counters[sid] - 1)
+
+                    is_stalled[sid]  = (stall_counters[sid] >= 3)
+                    current_load_max = max(current_load_max, l_mag)
+
+                    if l_mag > 900:
+                        is_stalled[sid] = True
+
+                    if is_stalled[sid] and not prev_stalled[sid]:
+                        ev_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        print(f"[heart] servo {sid} stalled (load={l_mag})")
+                        try:
+                            with open(LOG_FILE, "a") as f:
+                                f.write(f"[{ev_ts}] EVENT: servo {sid} STALLED (load={l_mag})\n")
+                        except:
+                            pass
+                    elif not is_stalled[sid] and prev_stalled[sid]:
+                        ev_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        print(f"[heart] servo {sid} stall cleared")
+                        try:
+                            with open(LOG_FILE, "a") as f:
+                                f.write(f"[{ev_ts}] EVENT: servo {sid} STALL CLEARED\n")
+                        except:
+                            pass
+                    prev_stalled[sid] = is_stalled[sid]
+
+                # Rotating health: temp/voltage/current for one servo per frame
                 if sid == ALL_SERVOS[telemetry_rotator] or sid == 1:
-                    load, r2, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_LOAD)
                     temp, r3, _ = packet_handler.read1ByteTxRx(port_handler, sid, ADDR_PRESENT_TEMP)
                     volt, r4, _ = packet_handler.read1ByteTxRx(port_handler, sid, ADDR_PRESENT_VOLTAGE)
                     amps, r5, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_CURRENT)
-
-                    if r2 == 0:
-                        l_mag = load & 0x3FF
-                        last_load[sid] = l_mag
-                        if 0 <= sid < len(shared_servo_loads):
-                            shared_servo_loads[sid] = l_mag
-
-                        if l_mag > STALL_THRESHOLD:
-                            stall_counters[sid] += 1
-                        else:
-                            stall_counters[sid] = max(0, stall_counters[sid] - 1)
-
-                        is_stalled[sid]  = (stall_counters[sid] >= 3)
-                        current_load_max = max(current_load_max, l_mag)
-
-                        # Instant yield on severe mechanical spike
-                        if l_mag > 900:
-                            is_stalled[sid] = True
-
-                        # Log stall onset and clear transitions
-                        if is_stalled[sid] and not prev_stalled[sid]:
-                            ev_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            print(f"[heart] servo {sid} stalled (load={l_mag})")
-                            try:
-                                with open(LOG_FILE, "a") as f:
-                                    f.write(f"[{ev_ts}] EVENT: servo {sid} STALLED (load={l_mag})\n")
-                            except:
-                                pass
-                        elif not is_stalled[sid] and prev_stalled[sid]:
-                            ev_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            print(f"[heart] servo {sid} stall cleared")
-                            try:
-                                with open(LOG_FILE, "a") as f:
-                                    f.write(f"[{ev_ts}] EVENT: servo {sid} STALL CLEARED\n")
-                            except:
-                                pass
-                        prev_stalled[sid] = is_stalled[sid]
 
                     if r3 == 0:
                         if temp != TEMP_ERROR_VAL:  # filter STS3215 ghost reads
@@ -408,10 +425,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             telemetry_rotator = (telemetry_rotator + 1) % len(ALL_SERVOS)
 
             # --- SAND TRAP ROLLING WINDOW (per frame) ---
-            n_stalled = sum(1 for s in ALL_SERVOS if is_stalled[s])
+            n_trapped = sum(1 for s in ALL_SERVOS if is_stalled[s])
+            n_stalled = n_trapped  # alias used by telemetry
             window_total -= stall_window[window_idx]
-            stall_window[window_idx] = n_stalled
-            window_total += n_stalled
+            stall_window[window_idx] = n_trapped
+            window_total += n_trapped
             window_idx = (window_idx + 1) % RECURRENCE_WINDOW
             if window_total >= SAND_TRAP_THRESHOLD:
                 shared_sand_trap.value = True
@@ -445,7 +463,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             else:
                 volt_dip_counter = 0
 
-            if temp_spike_counter > 15 or volt_dip_counter > 100:
+            if temp_spike_counter > 15 or volt_dip_counter > 150:  # 150 ticks = 3s debounce — covers transient sag during max-torque extraction
                 reason = "over temperature" if temp_spike_counter > 15 else "low voltage"
                 val    = f"{current_temp_max}C servo {hot_servo_id}" if temp_spike_counter > 15 else f"{voltage_reading:.1f}V"
                 print(f"[heart] safety shutdown: {reason} ({val})")
@@ -509,13 +527,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
 
-            # Advance clocks. When effectively stationary the advance is
-            # sub-millicycle per frame so phase drift is negligible.
-            # We do NOT reset to 0 at stop: a reset would snap the target
-            # angle mid-leg, causing legs in the air phase to slowly crawl
-            # ~150° to a new park position every time the robot stops.
-            master_time_L = (master_time_L + hz_L * real_dt) % 1.0
-            master_time_R = (master_time_R + hz_R * real_dt) % 1.0
+            # Advance clocks using ABSOLUTE hz so they always count forward.
+            # Direction is encoded in is_reversed passed to get_buehler_angle —
+            # not in clock direction.  Backward-running clocks caused legs to
+            # hang near 180° during reverse: the 300° air sweep traversed in
+            # reverse combined with the near-zero KP during the speed lerp
+            # transition left legs stranded at the air-phase midpoint.
+            master_time_L = (master_time_L + abs(hz_L) * real_dt) % 1.0
+            master_time_R = (master_time_R + abs(hz_R) * real_dt) % 1.0
 
             # Keep left/right clocks synchronized during straight-line walking.
             # Cap the per-frame correction to 0.002 cycles so a large post-pivot
@@ -547,14 +566,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                     stall_exit_ramp[sid] = 0  # reset while stalled
                     final_speed = 0  # active compliance yield
                 else:
-                    s_hz  = hz_L if sid in LEFT_SERVOS else hz_R
-                    m_t   = master_time_L if sid in LEFT_SERVOS else master_time_R
+                    s_hz     = hz_L if sid in LEFT_SERVOS else hz_R
+                    m_t      = master_time_L if sid in LEFT_SERVOS else master_time_R
+                    is_rev   = (s_hz < 0)   # direction flag — clock always advances
                     _csv_s_hz = s_hz
 
                     cur_ph = actual_phases.get(sid, 0.0)
                     t_leg  = (m_t + smooth_offsets[sid]) % 1.0
                     _csv_t_leg = t_leg
-                    tar_ph = get_buehler_angle(t_leg, smooth_duty, smooth_imp_start, smooth_imp_end)
+                    tar_ph = get_buehler_angle(t_leg, smooth_duty, smooth_imp_start, smooth_imp_end,
+                                               is_reversed=is_rev)
 
                     # Apply anti-collision splay offset
                     tar_ph = (tar_ph + LEG_SPLAY.get(sid, 0)) % 360
@@ -754,7 +775,42 @@ class SandTrapException(Exception):
     pass
 
 
-_sand_trap_ref = None   # set to shared_sand_trap before tactical sequence
+_sand_trap_ref    = None   # set to shared_sand_trap before tactical sequence
+_shared_speed     = None   # module-level refs so state_sand_extraction() can be top-level
+_shared_turn_bias = None
+_shared_gait_id   = None
+_is_running       = None
+_heart_process_ref = None  # set to gait_process before tactical sequence; checked for liveness
+
+
+def state_sand_extraction():
+    """S4 strategy: oscillate 3 cycles to loosen compacted sand, then Wave crawl out."""
+    print("\n[brain] SAND TRAP -- executing extraction (S4: oscillate x3 + Wave crawl)")
+
+    # Settle
+    _shared_speed.value = 0
+    tactical_sleep(1.5, _is_running)
+
+    # 3 oscillation cycles (reverse then forward) — speed cap <= 600
+    for cycle in range(3):
+        print(f"[brain] sand osc cycle {cycle + 1}/3")
+        _shared_speed.value = -400
+        tactical_sleep(0.4, _is_running)
+        _shared_speed.value = 400
+        tactical_sleep(0.3, _is_running)
+
+    # Wave crawl to exit
+    print("[brain] sand crawl: Wave gait speed=200 for 8 s")
+    _shared_speed.value      = 0
+    _shared_turn_bias.value  = 0.0
+    _shared_gait_id.value    = 1   # Wave
+    _shared_speed.value      = 200
+    tactical_sleep(8.0, _is_running)
+
+    # Settle before handing back to Brain exception handler
+    print("[brain] extraction complete")
+    _shared_speed.value   = 0
+    _shared_gait_id.value = 0
 
 
 def tactical_sleep(duration, running_flag):
@@ -763,6 +819,8 @@ def tactical_sleep(duration, running_flag):
     while time.time() - start < duration:
         if not running_flag.value:
             raise EmergencyStopException("safety halt from heart process")
+        if _heart_process_ref is not None and not _heart_process_ref.is_alive():
+            raise EmergencyStopException("heart process died unexpectedly")
         if _sand_trap_ref is not None and _sand_trap_ref.value:
             _sand_trap_ref.value = False   # acknowledge — Heart will re-arm if still trapped
             raise SandTrapException("sand trap detected by Heart")
@@ -776,7 +834,16 @@ if __name__ == "__main__":
 
     if os.path.exists(LOG_FILE):
         try:
-            os.rename(LOG_FILE, LOG_FILE + ".old")
+            ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            os.rename(LOG_FILE, LOG_FILE + f".{ts}")
+            # Keep only the 5 most recent archived logs
+            import glob
+            archives = sorted(glob.glob(LOG_FILE + ".*"), key=os.path.getmtime)
+            for old in archives[:-20]:
+                try:
+                    os.remove(old)
+                except:
+                    pass
         except:
             pass
 
@@ -791,7 +858,7 @@ if __name__ == "__main__":
     shared_speed        = mp.Value('i', 0)
     shared_x_flip       = mp.Value('i', 1)
     shared_z_flip       = mp.Value('i', 1)
-    shared_turn_bias    = mp.Value('d', 0.0)
+    shared_turn_bias    = mp.Value('f', 0.0)    # c_float (4B) — atomic on ARMv7; c_double (8B) was not
     shared_gait_id      = mp.Value('i', 0)
     shared_impact_start = mp.Value('i', 320)
     shared_impact_end   = mp.Value('i', 40)
@@ -855,35 +922,6 @@ if __name__ == "__main__":
         shared_z_flip.value = 1    # restore normal orientation
         print("[brain] self-right complete")
 
-    def state_sand_extraction():
-        """S4 strategy: oscillate 3 cycles to loosen compacted sand, then Wave crawl out."""
-        print("\n[brain] SAND TRAP — executing extraction (S4: oscillate x3 + Wave crawl)")
-
-        # Settle
-        shared_speed.value = 0
-        tactical_sleep(1.5, is_running)
-
-        # 3 oscillation cycles (reverse then forward)
-        for cycle in range(3):
-            print(f"[brain] sand osc cycle {cycle + 1}/3")
-            shared_speed.value = -400
-            tactical_sleep(0.4, is_running)
-            shared_speed.value = 400
-            tactical_sleep(0.3, is_running)
-
-        # Wave crawl to exit
-        print("[brain] sand crawl: Wave gait speed=200 for 8 s")
-        shared_speed.value     = 0
-        shared_turn_bias.value = 0.0
-        shared_gait_id.value   = 1   # Wave
-        shared_speed.value     = 200
-        tactical_sleep(8.0, is_running)
-
-        # Restore tripod and sprint speed
-        print("[brain] extraction complete — resuming tripod")
-        shared_gait_id.value = 0
-        shared_speed.value   = 600
-
     try:
         print("\n[brain] waiting for heart link...")
         while shared_heartbeat.value < 50:
@@ -892,7 +930,13 @@ if __name__ == "__main__":
             time.sleep(0.1)
         print("[brain] link established — starting test sequence")
 
-        _sand_trap_ref = shared_sand_trap
+        # Arm module-level refs so top-level functions can access shared state
+        _sand_trap_ref     = shared_sand_trap
+        _shared_speed      = shared_speed
+        _shared_turn_bias  = shared_turn_bias
+        _shared_gait_id    = shared_gait_id
+        _is_running        = is_running
+        _heart_process_ref = gait_process
 
         # --- Phase 1: Tripod ---
         print("\n--- Phase 1: Tripod ---")
@@ -1028,6 +1072,18 @@ if __name__ == "__main__":
         shared_turn_bias.value = 0.0
         tactical_sleep(8, is_running)
 
+    except SandTrapException:
+        print("\n[brain] sand trap interrupt — running extraction then resuming")
+        try:
+            state_sand_extraction()
+            # After extraction, continue with tripod forward
+            shared_gait_id.value   = 0
+            shared_speed.value     = 600
+            shared_turn_bias.value = 0.0
+            tactical_sleep(10, is_running)
+            shared_speed.value = 0
+        except (EmergencyStopException, SandTrapException, KeyboardInterrupt):
+            pass
     except EmergencyStopException as e:
         print(f"\n[brain] emergency stop: {e}")
     except KeyboardInterrupt:
