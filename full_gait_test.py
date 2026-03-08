@@ -24,6 +24,7 @@ import os
 import multiprocessing as mp
 import gc
 import math
+import csv
 
 try:
     from scservo_sdk import PortHandler, PacketHandler, GroupSyncWrite
@@ -83,7 +84,9 @@ HOME_POSITIONS = {
 }
 
 KP_PHASE        = 12.5  # proportional gain for phase tracking
-STALL_THRESHOLD = 600   # load magnitude that triggers stall yield
+STALL_THRESHOLD     = 600   # load magnitude that triggers stall yield
+RECURRENCE_WINDOW   = 150   # frames (~3 s at 50 Hz) for sand-trap rolling window
+SAND_TRAP_THRESHOLD = 120   # stall servo-frames in window to declare sand trap
 
 # Anti-collision splay: permanently offsets front/rear legs to prevent
 # toe contact during the tripod air swing.
@@ -116,6 +119,7 @@ GAITS = {
         # separation. Minimum across full cycle rises from 6° to 49°.
         # Servo 3 (left middle) intentionally kept at 0.333 — it runs on the
         # left clock and does not interact with the servo 5/6 collision zone.
+        'duty': 0.7,
         'offsets': {1: 0.666, 4: 0.666,  6: 0.833, 3: 0.333,  5: 0.0, 2: 0.0}
     },
 }
@@ -151,7 +155,8 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang):
 # =============================================================
 def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                 shared_gait_id, shared_impact_start, shared_impact_end,
-                shared_servo_loads, shared_heartbeat, is_running):
+                shared_servo_loads, shared_heartbeat, is_running,
+                shared_sand_trap):
 
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -175,11 +180,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
     stall_counters    = {id: 0     for id in ALL_SERVOS}
     stall_exit_ramp   = {id: 0     for id in ALL_SERVOS}
     actual_phases     = {id: 0.0   for id in ALL_SERVOS}
+    stall_window      = [0] * RECURRENCE_WINDOW   # circular buffer: stalled-servo count per frame
+    window_total      = 0                          # running sum of stall_window
+    window_idx        = 0                          # next write position
     comm_error_streak = 0
     telemetry_rotator = 0
     last_log_time      = 0
     last_jitter_log_t  = 0
     parent_pid         = os.getppid()
+
+    # CSV telemetry state
+    frame_counter = 0
+    last_load     = {id: 0                for id in ALL_SERVOS}
+    last_pos      = {id: HOME_POSITIONS[id] for id in ALL_SERVOS}
 
     # Persistent sensor readings — rotating telemetry only polls one servo per
     # frame, so we hold each servo's last-known value to avoid false resets.
@@ -266,6 +279,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
 
     init_and_align_servos()
 
+    _csv_path   = os.path.expanduser(
+        f"~/hexapod_run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    _csv_file   = open(_csv_path, 'w', newline='', buffering=1)
+    _csv_writer = csv.writer(_csv_file)
+    _csv_writer.writerow([
+        'frame', 'master_time_L', 'master_time_R', 'sid',
+        'phase', 'cmd_dps', 'actual_pos', 'load',
+        'stall_active', 'stall_counter', 'zone', 'hz', 'gait',
+    ])
+    print(f"[heart] CSV telemetry: {_csv_path}")
+
     master_time_L  = 0.0
     master_time_R  = 0.0
     target_dt      = 1.0 / 50.0
@@ -321,7 +345,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             for sid in ALL_SERVOS:
                 pos, r1, _ = packet_handler.read2ByteTxRx(port_handler, sid, ADDR_PRESENT_POSITION)
                 if r1 == 0:
-                    diff              = pos - HOME_POSITIONS[sid]
+                    last_pos[sid]      = pos
+                    diff               = pos - HOME_POSITIONS[sid]
                     actual_phases[sid] = ((diff / ENCODER_RESOLUTION) * 360.0 * DIRECTION_MAP[sid]) % 360
                 else:
                     loop_comm_fail = True
@@ -335,6 +360,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
 
                     if r2 == 0:
                         l_mag = load & 0x3FF
+                        last_load[sid] = l_mag
                         if 0 <= sid < len(shared_servo_loads):
                             shared_servo_loads[sid] = l_mag
 
@@ -380,6 +406,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                         current_total_ma = (amps & 0x7FFF)
 
             telemetry_rotator = (telemetry_rotator + 1) % len(ALL_SERVOS)
+
+            # --- SAND TRAP ROLLING WINDOW (per frame) ---
+            n_stalled = sum(1 for s in ALL_SERVOS if is_stalled[s])
+            window_total -= stall_window[window_idx]
+            stall_window[window_idx] = n_stalled
+            window_total += n_stalled
+            window_idx = (window_idx + 1) % RECURRENCE_WINDOW
+            if window_total >= SAND_TRAP_THRESHOLD:
+                shared_sand_trap.value = True
 
             # Derive max temp from all servos' persistent readings
             current_temp_max = max(last_temp_readings.values())
@@ -502,15 +537,23 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             raw_speed = 0.0  # pre-init so the del below is always valid
             STALL_EXIT_FRAMES = 10  # 200 ms ramp after stall clears
             for sid in ALL_SERVOS:
+                # CSV telemetry capture — populated in whichever branch runs below
+                _csv_zone  = 0     # 0=stalled, 1-5=feedforward zone
+                _csv_dps   = 0.0   # feedforward deg/s
+                _csv_t_leg = -1.0  # normalized leg phase (−1 when stalled)
+                _csv_s_hz  = 0.0   # per-side clock frequency
+
                 if is_stalled[sid]:
                     stall_exit_ramp[sid] = 0  # reset while stalled
                     final_speed = 0  # active compliance yield
                 else:
                     s_hz  = hz_L if sid in LEFT_SERVOS else hz_R
                     m_t   = master_time_L if sid in LEFT_SERVOS else master_time_R
+                    _csv_s_hz = s_hz
 
                     cur_ph = actual_phases.get(sid, 0.0)
                     t_leg  = (m_t + smooth_offsets[sid]) % 1.0
+                    _csv_t_leg = t_leg
                     tar_ph = get_buehler_angle(t_leg, smooth_duty, smooth_imp_start, smooth_imp_end)
 
                     # Apply anti-collision splay offset
@@ -525,13 +568,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                     ff_stance = (base_sweep / smooth_duty) * s_hz
                     if t_leg < BLEND:
                         # Post-touchdown ramp: ramp from 0 up to full stance ff over
-                        # BLEND cycles so the leg accelerates gently into stance.
-                        deg_per_sec = ff_stance * (t_leg / BLEND)
+                        # BLEND cycles. Cosine envelope gives zero slope at both ends,
+                        # making the ramp C1-continuous with zone 2 (no click at exit).
+                        env         = (1.0 - math.cos(math.pi * t_leg / BLEND)) / 2.0
+                        deg_per_sec = ff_stance * env
+                        _csv_zone   = 1
                     elif t_leg < smooth_duty:
                         # Deep stance: full feedforward until the leg actually lifts off.
                         # Keeping this at full value all the way to t=duty prevents the
                         # 50% feedforward dip that occurred when the blend started early.
                         deg_per_sec = ff_stance
+                        _csv_zone   = 2
                     elif t_leg < smooth_duty + 2.0 * BLEND:
                         # Liftoff blend: leg just left the ground (t >= duty).
                         # Blend from ff_stance into the rising air cosine over 2*BLEND
@@ -542,20 +589,28 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                         ff_air = (air_sweep * math.pi / (2.0 * (1.0 - smooth_duty))) \
                                  * math.sin(math.pi * air_progress_blend) * s_hz
                         deg_per_sec = ff_stance * (1.0 - blend_frac) + ff_air * blend_frac
+                        _csv_zone   = 3
                     elif t_leg > 1.0 - BLEND:
                         # Pre-touchdown blend: fade air ff to 0 before landing.
                         # The guard t_leg > smooth_duty + BLEND is implicit here because
                         # smooth_duty + 2*BLEND < 1 - BLEND for all valid duty cycles.
+                        # Cosine envelope: zero slope at both ends → C1-continuous with
+                        # zone 5 at entry and with zone 1 (zero) at exit. Eliminates the
+                        # 450 deg/s/frame derivative jump caused by the old linear fade.
                         air_progress   = (t_leg - smooth_duty) / (1.0 - smooth_duty)
                         ff_air_full    = (air_sweep * math.pi / (2.0 * (1.0 - smooth_duty))) \
                                          * math.sin(math.pi * air_progress) * s_hz
                         blend_frac_pre = (t_leg - (1.0 - BLEND)) / BLEND  # 0→1
-                        deg_per_sec    = ff_air_full * (1.0 - blend_frac_pre)
+                        env            = (1.0 + math.cos(math.pi * blend_frac_pre)) / 2.0
+                        deg_per_sec    = ff_air_full * env
+                        _csv_zone      = 4
                     else:
                         # Deep air: full sinusoidal feedforward.
                         air_progress = (t_leg - smooth_duty) / (1.0 - smooth_duty)
                         deg_per_sec  = (air_sweep * math.pi / (2.0 * (1.0 - smooth_duty))) \
                                        * math.sin(math.pi * air_progress) * s_hz
+                        _csv_zone    = 5
+                    _csv_dps = deg_per_sec
 
                     ff_speed = deg_per_sec * VELOCITY_SCALAR
 
@@ -590,12 +645,33 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
                         stall_exit_ramp[sid] += 1
                         final_speed = int(final_speed * stall_exit_ramp[sid] / STALL_EXIT_FRAMES)
 
+                # CSV: write stance-phase rows and all stalled rows (load is stance-relevant;
+                # skipping pure air rows saves ~50% I/O at tripod duty, ~85% at wave duty).
+                _in_stance = (0.0 <= _csv_t_leg <= smooth_duty)
+                if _in_stance or is_stalled[sid]:
+                    _csv_writer.writerow([
+                        frame_counter,
+                        f"{master_time_L:.6f}", f"{master_time_R:.6f}",
+                        sid,
+                        f"{actual_phases.get(sid, 0.0):.2f}",
+                        f"{_csv_dps:.3f}",
+                        last_pos[sid],
+                        last_load[sid],
+                        1 if is_stalled[sid] else 0,
+                        stall_counters[sid],
+                        _csv_zone,
+                        f"{_csv_s_hz:.4f}",
+                        fsm_gait,
+                    ])
+
                 abs_v     = int(abs(final_speed))
                 speed_val = (abs_v | 0x8000) if final_speed < 0 else abs_v
                 group_sync_write.addParam(sid, [speed_val & 0xff, (speed_val >> 8) & 0xff])
 
             group_sync_write.txPacket()
             group_sync_write.clearParam()
+
+            frame_counter += 1
 
             # Hybrid timing: sleep then busy-wait for sub-millisecond precision
             elapsed = time.perf_counter() - loop_start_time
@@ -609,6 +685,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
     except Exception as e:
         print(f"[heart] loop error: {e}")
     finally:
+        try:
+            _csv_file.close()
+            print(f"[heart] CSV closed: {_csv_path}")
+        except Exception:
+            pass
         print("\n[heart] shutdown: parking legs")
         group_sync_write.clearParam()
         port_handler.clearPort()
@@ -669,12 +750,22 @@ class EmergencyStopException(Exception):
     pass
 
 
+class SandTrapException(Exception):
+    pass
+
+
+_sand_trap_ref = None   # set to shared_sand_trap before tactical sequence
+
+
 def tactical_sleep(duration, running_flag):
-    """Sleep for duration seconds, waking every 100 ms to check for a safety halt."""
+    """Sleep for duration seconds, waking every 100 ms to check safety and sand trap."""
     start = time.time()
     while time.time() - start < duration:
         if not running_flag.value:
             raise EmergencyStopException("safety halt from heart process")
+        if _sand_trap_ref is not None and _sand_trap_ref.value:
+            _sand_trap_ref.value = False   # acknowledge — Heart will re-arm if still trapped
+            raise SandTrapException("sand trap detected by Heart")
         time.sleep(0.1)
 
 
@@ -707,6 +798,7 @@ if __name__ == "__main__":
     shared_servo_loads  = mp.Array('i', 7)
     shared_heartbeat    = mp.Value('i', 0)
     is_running          = mp.Value('b', True)
+    shared_sand_trap    = mp.Value('b', False)
 
     for i in range(7):
         shared_servo_loads[i] = -1
@@ -714,7 +806,8 @@ if __name__ == "__main__":
     gait_process = mp.Process(target=gait_worker, args=(
         shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
         shared_gait_id, shared_impact_start, shared_impact_end,
-        shared_servo_loads, shared_heartbeat, is_running
+        shared_servo_loads, shared_heartbeat, is_running,
+        shared_sand_trap
     ))
     gait_process.start()
 
@@ -737,6 +830,7 @@ if __name__ == "__main__":
     def state_self_right_roll():
         """Slow-torque symmetrical roll to recover from a flip."""
         print("\n[brain] upside-down detected — executing self-right roll")
+        shared_z_flip.value       = -1   # inverted: negate velocity commands
         shared_gait_id.value      = 1
         shared_impact_start.value = 320
         shared_impact_end.value   = 40
@@ -757,8 +851,38 @@ if __name__ == "__main__":
         shared_speed.value = -500
         tactical_sleep(8.0, is_running)
 
-        shared_speed.value = 0
+        shared_speed.value  = 0
+        shared_z_flip.value = 1    # restore normal orientation
         print("[brain] self-right complete")
+
+    def state_sand_extraction():
+        """S4 strategy: oscillate 3 cycles to loosen compacted sand, then Wave crawl out."""
+        print("\n[brain] SAND TRAP — executing extraction (S4: oscillate x3 + Wave crawl)")
+
+        # Settle
+        shared_speed.value = 0
+        tactical_sleep(1.5, is_running)
+
+        # 3 oscillation cycles (reverse then forward)
+        for cycle in range(3):
+            print(f"[brain] sand osc cycle {cycle + 1}/3")
+            shared_speed.value = -400
+            tactical_sleep(0.4, is_running)
+            shared_speed.value = 400
+            tactical_sleep(0.3, is_running)
+
+        # Wave crawl to exit
+        print("[brain] sand crawl: Wave gait speed=200 for 8 s")
+        shared_speed.value     = 0
+        shared_turn_bias.value = 0.0
+        shared_gait_id.value   = 1   # Wave
+        shared_speed.value     = 200
+        tactical_sleep(8.0, is_running)
+
+        # Restore tripod and sprint speed
+        print("[brain] extraction complete — resuming tripod")
+        shared_gait_id.value = 0
+        shared_speed.value   = 600
 
     try:
         print("\n[brain] waiting for heart link...")
@@ -767,6 +891,8 @@ if __name__ == "__main__":
                 raise EmergencyStopException("heart failed to start")
             time.sleep(0.1)
         print("[brain] link established — starting test sequence")
+
+        _sand_trap_ref = shared_sand_trap
 
         # --- Phase 1: Tripod ---
         print("\n--- Phase 1: Tripod ---")
@@ -807,56 +933,100 @@ if __name__ == "__main__":
         shared_turn_bias.value    = 0.0
         shared_impact_start.value = 330
         shared_impact_end.value   = 30
-        tactical_sleep(24, is_running)
+        tactical_sleep(12, is_running)
+
+        print("[brain] carving turn left")
+        shared_turn_bias.value = -0.3
+        tactical_sleep(10, is_running)
+
+        print("[brain] carving turn right")
+        shared_turn_bias.value = 0.3
+        tactical_sleep(10, is_running)
+
+        print("[brain] zero-radius pivot left")
+        shared_speed.value     = 0
+        shared_turn_bias.value = -0.8
+        tactical_sleep(10, is_running)
+
+        print("[brain] zero-radius pivot right")
+        shared_turn_bias.value = 0.8
+        tactical_sleep(10, is_running)
+
+        print("[brain] reverse")
+        shared_turn_bias.value = 0.0
+        shared_speed.value     = -550
+        tactical_sleep(12, is_running)
+
+        shared_speed.value = 0
+        tactical_sleep(2, is_running)
 
         print("[brain] obstacle — stepping over (impacts 345->15)")
         shared_speed.value        = 500
         shared_impact_start.value = 345
         shared_impact_end.value   = 15
-        tactical_sleep(24, is_running)
+        tactical_sleep(15, is_running)
 
         print("[brain] low clearance — lowering profile (impacts 325->35)")
         shared_impact_start.value = 325
         shared_impact_end.value   = 35
-        tactical_sleep(24, is_running)
+        tactical_sleep(15, is_running)
 
         # --- Phase 3: Wave ---
         print("\n--- Phase 3: Wave ---")
         shared_gait_id.value      = 1
         shared_speed.value        = 350
+        shared_turn_bias.value    = 0.0
         shared_impact_start.value = 330
         shared_impact_end.value   = 30
-        tactical_sleep(30, is_running)
+        tactical_sleep(12, is_running)
 
-        print("[brain] correction turn left")
-        shared_turn_bias.value = -0.15
-        tactical_sleep(20, is_running)
+        print("[brain] carving turn left")
+        shared_turn_bias.value = -0.12
+        tactical_sleep(10, is_running)
 
-        print("[brain] correction turn right")
-        shared_turn_bias.value = 0.15
-        tactical_sleep(20, is_running)
+        print("[brain] carving turn right")
+        shared_turn_bias.value = 0.12
+        tactical_sleep(10, is_running)
+
+        print("[brain] zero-radius pivot left")
+        shared_speed.value     = 0
+        shared_turn_bias.value = -0.48
+        tactical_sleep(10, is_running)
+
+        print("[brain] zero-radius pivot right")
+        shared_turn_bias.value = 0.48
+        tactical_sleep(10, is_running)
+
+        print("[brain] reverse")
+        shared_turn_bias.value = 0.0
+        shared_speed.value     = -350
+        tactical_sleep(12, is_running)
+
+        shared_speed.value = 0
+        tactical_sleep(2, is_running)
 
         print("[brain] leaning into slope (impacts 315->15)")
         shared_speed.value        = 350
         shared_turn_bias.value    = 0.0
         shared_impact_start.value = 315
         shared_impact_end.value   = 15
-        tactical_sleep(30, is_running)
+        tactical_sleep(20, is_running)
 
         # --- Phase 4: Recovery ---
         print("\n--- Phase 4: Recovery ---")
         shared_speed.value     = 0
         shared_turn_bias.value = 0.0
+        shared_gait_id.value   = 0
         tactical_sleep(3, is_running)
 
         state_recovery_wiggle()
         state_self_right_roll()
 
-        # --- Done ---
-        print("\n--- Sequence complete ---")
+        # --- Phase 5: Shutdown ---
+        print("\n--- Phase 5: Shutdown ---")
         shared_speed.value     = 0
         shared_turn_bias.value = 0.0
-        tactical_sleep(5, is_running)
+        tactical_sleep(8, is_running)
 
     except EmergencyStopException as e:
         print(f"\n[brain] emergency stop: {e}")
