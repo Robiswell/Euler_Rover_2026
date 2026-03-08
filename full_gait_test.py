@@ -84,9 +84,10 @@ HOME_POSITIONS = {
 }
 
 KP_PHASE        = 12.5  # proportional gain for phase tracking
-STALL_THRESHOLD     = 600   # load magnitude that triggers stall yield
+STALL_THRESHOLD     = 750   # load magnitude that triggers stall yield
 RECURRENCE_WINDOW    = 150   # frames (~3 s at 50 Hz) for sand-trap rolling window
 SAND_TRAP_THRESHOLD  = 120   # stall servo-frames in window to declare sand trap
+GRACE_FRAMES         = 150   # frames (~3 s at 50 Hz) before sand trap can fire
 RECURRENCE_THRESHOLD = SAND_TRAP_THRESHOLD  # audit alias
 
 # Anti-collision splay: permanently offsets front/rear legs to prevent
@@ -200,6 +201,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
 
     # CSV telemetry state
     frame_counter = 0
+    grace_flushed = False
     last_load     = {id: 0                for id in ALL_SERVOS}
     last_pos      = {id: HOME_POSITIONS[id] for id in ALL_SERVOS}
 
@@ -431,7 +433,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
             stall_window[window_idx] = n_trapped
             window_total += n_trapped
             window_idx = (window_idx + 1) % RECURRENCE_WINDOW
-            if window_total >= SAND_TRAP_THRESHOLD:
+            if not grace_flushed and frame_counter >= GRACE_FRAMES:
+                stall_window[:] = [0] * RECURRENCE_WINDOW
+                window_total = 0
+                window_idx   = 0
+                grace_flushed = True
+            if frame_counter >= GRACE_FRAMES and window_total >= SAND_TRAP_THRESHOLD:
                 shared_sand_trap.value = True
 
             # Derive max temp from all servos' persistent readings
@@ -789,15 +796,15 @@ def state_sand_extraction():
 
     # Settle
     _shared_speed.value = 0
-    tactical_sleep(1.5, _is_running)
+    extraction_sleep(1.5, _is_running)
 
     # 3 oscillation cycles (reverse then forward) — speed cap <= 600
     for cycle in range(3):
         print(f"[brain] sand osc cycle {cycle + 1}/3")
         _shared_speed.value = -400
-        tactical_sleep(0.4, _is_running)
+        extraction_sleep(0.4, _is_running)
         _shared_speed.value = 400
-        tactical_sleep(0.3, _is_running)
+        extraction_sleep(0.3, _is_running)
 
     # Wave crawl to exit
     print("[brain] sand crawl: Wave gait speed=200 for 8 s")
@@ -805,7 +812,7 @@ def state_sand_extraction():
     _shared_turn_bias.value  = 0.0
     _shared_gait_id.value    = 1   # Wave
     _shared_speed.value      = 200
-    tactical_sleep(8.0, _is_running)
+    extraction_sleep(8.0, _is_running)
 
     # Settle before handing back to Brain exception handler
     print("[brain] extraction complete")
@@ -824,6 +831,19 @@ def tactical_sleep(duration, running_flag):
         if _sand_trap_ref is not None and _sand_trap_ref.value:
             _sand_trap_ref.value = False   # acknowledge — Heart will re-arm if still trapped
             raise SandTrapException("sand trap detected by Heart")
+        time.sleep(0.1)
+
+
+def extraction_sleep(duration, running_flag):
+    """Sleep for duration seconds checking only safety — NOT the sand trap flag.
+    Used exclusively inside state_sand_extraction() so Heart re-arming the sand
+    trap flag during an active extraction does not abort the maneuver mid-cycle."""
+    start = time.time()
+    while time.time() - start < duration:
+        if not running_flag.value:
+            raise EmergencyStopException("safety halt from heart process")
+        if _heart_process_ref is not None and not _heart_process_ref.is_alive():
+            raise EmergencyStopException("heart process died unexpectedly")
         time.sleep(0.1)
 
 
@@ -886,10 +906,13 @@ if __name__ == "__main__":
         while time.time() < end_time:
             if not is_running.value:
                 raise EmergencyStopException("safety halt during wiggle")
-            shared_x_flip.value = -1
-            tactical_sleep(0.3, is_running)
-            shared_x_flip.value = 1
-            tactical_sleep(0.3, is_running)
+            try:
+                shared_x_flip.value = -1
+                tactical_sleep(0.3, is_running)
+                shared_x_flip.value = 1
+                tactical_sleep(0.3, is_running)
+            finally:
+                shared_x_flip.value = 1
         shared_speed.value  = 0
         shared_x_flip.value = 1  # restore forward direction
         print("[brain] wiggle complete")
@@ -898,28 +921,31 @@ if __name__ == "__main__":
         """Slow-torque symmetrical roll to recover from a flip."""
         print("\n[brain] upside-down detected — executing self-right roll")
         shared_z_flip.value       = -1   # inverted: negate velocity commands
-        shared_gait_id.value      = 1
-        shared_impact_start.value = 320
-        shared_impact_end.value   = 40
+        try:
+            shared_gait_id.value      = 1
+            shared_impact_start.value = 320
+            shared_impact_end.value   = 40
 
-        print("[brain] step 1: shift COG forward")
-        shared_speed.value = 400
-        tactical_sleep(4.0, is_running)
+            print("[brain] step 1: shift COG forward")
+            shared_speed.value = 400
+            tactical_sleep(4.0, is_running)
 
-        print("[brain] step 2: reverse momentum pulse")
-        shared_speed.value = -500
-        tactical_sleep(8.0, is_running)
+            print("[brain] step 2: reverse momentum pulse")
+            shared_speed.value = -500
+            tactical_sleep(8.0, is_running)
 
-        print("[brain] step 3: secondary buildup")
-        shared_speed.value = 400
-        tactical_sleep(4.0, is_running)
+            print("[brain] step 3: secondary buildup")
+            shared_speed.value = 400
+            tactical_sleep(4.0, is_running)
 
-        print("[brain] step 4: final clearing roll")
-        shared_speed.value = -500
-        tactical_sleep(8.0, is_running)
+            print("[brain] step 4: final clearing roll")
+            shared_speed.value = -500
+            tactical_sleep(8.0, is_running)
 
-        shared_speed.value  = 0
-        shared_z_flip.value = 1    # restore normal orientation
+            shared_speed.value  = 0
+        finally:
+            shared_z_flip.value = 1    # restore normal orientation
+            shared_speed.value  = 0
         print("[brain] self-right complete")
 
     try:
@@ -944,8 +970,8 @@ if __name__ == "__main__":
         shared_impact_start.value = 330
         shared_impact_end.value   = 30
 
-        print("[brain] forward sprint (speed 1200)")
-        shared_speed.value = 1200
+        print("[brain] forward sprint (speed 800)")
+        shared_speed.value = 800
         tactical_sleep(20, is_running)
 
         print("[brain] carving turn left")
@@ -967,7 +993,7 @@ if __name__ == "__main__":
 
         print("[brain] reverse sprint")
         shared_turn_bias.value = 0.0
-        shared_speed.value     = -1200
+        shared_speed.value     = -800
         tactical_sleep(20, is_running)
 
         # --- Phase 2: Quadruped ---
@@ -1073,17 +1099,43 @@ if __name__ == "__main__":
         tactical_sleep(8, is_running)
 
     except SandTrapException:
-        print("\n[brain] sand trap interrupt — running extraction then resuming")
-        try:
-            state_sand_extraction()
-            # After extraction, continue with tripod forward
+        MAX_EXTRACTION_ATTEMPTS = 3
+        for attempt in range(1, MAX_EXTRACTION_ATTEMPTS + 1):
+            print(f"\n[brain] sand trap — extraction attempt {attempt}/{MAX_EXTRACTION_ATTEMPTS}")
+            try:
+                state_sand_extraction()
+            except EmergencyStopException as e:
+                print(f"[brain] emergency stop during extraction: {e}")
+                break
+            except KeyboardInterrupt:
+                print("[brain] operator interrupt during extraction")
+                break
+            # Extraction completed — run post-extraction burst
             shared_gait_id.value   = 0
             shared_speed.value     = 600
             shared_turn_bias.value = 0.0
-            tactical_sleep(10, is_running)
-            shared_speed.value = 0
-        except (EmergencyStopException, SandTrapException, KeyboardInterrupt):
-            pass
+            try:
+                # Phase 1: drain the rolling stall window (one full RECURRENCE_WINDOW = 3 s at 50 Hz).
+                # Extraction oscillation saturates the window; using extraction_sleep here
+                # lets stale stall frames roll out before re-enabling sand trap detection.
+                shared_sand_trap.value = False
+                extraction_sleep(3.0, is_running)
+                # Phase 2: remaining burst with full sand trap detection re-enabled.
+                shared_sand_trap.value = False
+                tactical_sleep(27, is_running)
+                shared_speed.value = 0
+                print("[brain] post-extraction burst complete — resuming")
+                break  # success: exit retry loop
+            except SandTrapException:
+                shared_speed.value = 0
+                if attempt < MAX_EXTRACTION_ATTEMPTS:
+                    print(f"[brain] re-trapped during burst — retrying extraction ({attempt + 1}/{MAX_EXTRACTION_ATTEMPTS})")
+                else:
+                    print("[brain] extraction budget exhausted after 3 attempts — shutting down")
+            except (EmergencyStopException, KeyboardInterrupt) as e:
+                print(f"[brain] halt during post-extraction burst — {type(e).__name__}: {e}")
+                shared_speed.value = 0
+                break
     except EmergencyStopException as e:
         print(f"\n[brain] emergency stop: {e}")
     except KeyboardInterrupt:
