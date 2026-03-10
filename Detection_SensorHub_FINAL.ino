@@ -28,11 +28,12 @@ BNO080 imu;
 
 // Sensor names (CSV columns)
 const char* sensorNames[8] = {
-  "FrontDiagonalLeft","FrontCenterLeft","FrontCenterRight","FrontDiagonalRight",
-  "RearDiagonalLeft","RearCenterLeft","RearCenterRight","RearDiagonalRight"
+  "FrontDiagonalLeft","FrontCenterForward","FrontCenterDown","FrontDiagonalRight",
+  "RearDiagonalLeft","RearCenterForward","RearCenterDown","RearDiagonalRight"
 };
 
-// Ultrasonic pin assignments (kept from user's base)
+
+// Ultrasonic pin assignments 
 const int trigPins[8] = {2, 4, 6, 8, 10, 12, A0, A2};
 const int echoPins[8] = {3, 5, 7, 9, 11, 13, A1, A3};
 
