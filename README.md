@@ -13,4 +13,4 @@ use with bigger physical offsets installed on center servos.)
 
 
 Final Full Gait Test:
-Autonomous Full State Machine with various modes for testing/demo/autonomy. Must implement directions in Steps Before Deploying Gait Test.pdf or Steps Before Deploying Gait Test.html and use final_sensors.ino on the nano before running. Full documentation can be referenced under hexapod_documentation.pdf or hexapod_documentation.html
+Autonomous Full State Machine with various modes for testing/demo/autonomy. Must implement directions in Steps Before Deploying Gait Test.pdf and use final_sensors.ino on the nano before running. Full documentation can be referenced under hexapod_documentation.pdf
