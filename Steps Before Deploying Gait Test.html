@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hexapod Pi Deployment Steps</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 750px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+h1 { font-size: 22px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+h2 { font-size: 18px; margin-top: 30px; color: #1a1a1a; }
+h3 { font-size: 15px; margin-top: 20px; color: #333; }
+code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
+pre { background: #1e1e1e; color: #d4d4d4; padding: 14px 18px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+.note { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 14px; margin: 14px 0; font-size: 14px; }
+.step { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 14px 18px; margin: 12px 0; }
+.step-num { font-weight: bold; color: #0d6efd; }
+ol > li { margin-bottom: 8px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; font-size: 14px; }
+th { background: #f0f0f0; }
+</style>
+</head>
+<body>
+
+<h1>Hexapod Autonomous Nav &mdash; Pi Deployment Steps</h1>
+<p><strong>Date:</strong> 2026-03-13 &nbsp;|&nbsp; <strong>Competition:</strong> Alamosa CO, April 11 2026 (NASA COSGC)</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>Raspberry Pi 3B+ with SSH access</li>
+<li>Arduino Nano connected to Pi via USB</li>
+<li>Updated <code>offset_full_gait_test_v2.py</code> copied to the Pi</li>
+</ul>
+
+<h2>1. Install pyserial</h2>
+
+<div class="step">
+<p><span class="step-num">Step 1.1</span> &mdash; SSH into the Pi and install the package:</p>
+<pre>sudo pip3 install pyserial</pre>
+
+<p><span class="step-num">Step 1.2</span> &mdash; Verify the installation:</p>
+<pre>python3 -c "import serial; print(serial.__version__)"</pre>
+<p>You should see a version number (e.g., <code>3.5</code>). If you get an <code>ImportError</code>, the install failed.</p>
+</div>
+
+<div class="note">
+<strong>Why this matters:</strong> The nav code does <code>import serial</code> at startup. Without pyserial installed, <code>HAS_SERIAL</code> is set to <code>False</code> and the competition mode falls back to the timed sequence (no sensor-driven navigation).
+</div>
+
+<h2>2. udev Rule for Arduino Nano</h2>
+
+<div class="step">
+<p><span class="step-num">Step 2.1</span> &mdash; Find the Arduino's USB vendor/product IDs.</p>
+<p>Plug the Arduino Nano into the Pi's USB port, then run:</p>
+<pre>lsusb</pre>
+<p>Look for a line containing <code>Arduino</code>, <code>QinHeng</code>, or <code>CH340</code>. Note the ID field.</p>
+
+<table>
+<tr><th>Chip</th><th>Typical ID</th><th>Description</th></tr>
+<tr><td>CH340</td><td><code>1a86:7523</code></td><td>Clone Nano (most common)</td></tr>
+<tr><td>ATmega16U2</td><td><code>2341:0043</code></td><td>Genuine Arduino</td></tr>
+</table>
+</div>
+
+<div class="step">
+<p><span class="step-num">Step 2.2</span> &mdash; Create the udev rule file:</p>
+<pre>sudo nano /etc/udev/rules.d/99-arduino.rules</pre>
+<p>Paste this single line (replace vendor/product IDs if yours differ):</p>
+<pre>SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyACM_ARDUINO", MODE="0666"</pre>
+<p>Save and exit (<code>Ctrl+O</code>, <code>Enter</code>, <code>Ctrl+X</code>).</p>
+
+<table>
+<tr><th>Parameter</th><th>What it does</th></tr>
+<tr><td><code>SYMLINK+="ttyACM_ARDUINO"</code></td><td>Creates a stable device name at <code>/dev/ttyACM_ARDUINO</code> regardless of USB plug order</td></tr>
+<tr><td><code>MODE="0666"</code></td><td>Allows any user to read/write without sudo</td></tr>
+</table>
+</div>
+
+<div class="step">
+<p><span class="step-num">Step 2.3</span> &mdash; Reload udev rules:</p>
+<pre>sudo udevadm control --reload-rules
+sudo udevadm trigger</pre>
+</div>
+
+<div class="step">
+<p><span class="step-num">Step 2.4</span> &mdash; Verify. Unplug and replug the Arduino, then:</p>
+<pre>ls -la /dev/ttyACM*</pre>
+<p>You should see both <code>/dev/ttyACM0</code> and the symlink <code>/dev/ttyACM_ARDUINO</code>.</p>
+</div>
+
+<div class="step">
+<p><span class="step-num">Step 2.5 (Optional)</span> &mdash; Use the stable symlink in the gait file.</p>
+<p>The nav code currently uses <code>ARDUINO_PORT = "/dev/ttyACM0"</code>. If you want to use the stable symlink, change it to:</p>
+<pre>ARDUINO_PORT = "/dev/ttyACM_ARDUINO"</pre>
+<p>This is optional. If only the Arduino is on USB (besides the servo debug board on <code>/dev/ttyUSB0</code>), <code>ttyACM0</code> will be consistent.</p>
+</div>
+
+<h2>3. Quick Verification Checklist</h2>
+
+<div class="step">
+<p>After completing steps 1 and 2, run these checks on the Pi:</p>
+<pre># Check pyserial
+python3 -c "import serial; print('pyserial OK:', serial.__version__)"
+
+# Check Arduino port
+ls -la /dev/ttyACM*
+
+# Test Arduino communication (prints 20 frames, no servos needed)
+sudo python3 offset_full_gait_test_v2.py --test-arduino
+
+# Dry-run nav (sensors active, speed=0, robot on stand)
+sudo python3 offset_full_gait_test_v2.py --competition-dry-run</pre>
+</div>
+
+<h2>4. Competition Day Commands</h2>
+
+<table>
+<tr><th>Command</th><th>Purpose</th></tr>
+<tr><td><code>sudo python3 offset_full_gait_test_v2.py --competition</code></td><td>Full autonomous nav with sensors</td></tr>
+<tr><td><code>sudo python3 offset_full_gait_test_v2.py --competition-dry-run</code></td><td>Sensors active, speed=0, logs only</td></tr>
+<tr><td><code>sudo python3 offset_full_gait_test_v2.py --test-arduino</code></td><td>Print 20 Arduino frames (no Heart)</td></tr>
+<tr><td><code>sudo python3 offset_full_gait_test_v2.py --test-competition</code></td><td>Timed fallback (no sensors)</td></tr>
+</table>
+
+<div class="note">
+<strong>Graceful degradation:</strong> If pyserial is missing or the Arduino isn't connected, <code>--competition</code> automatically falls back to the timed sequence (quad@400 for 45s, then wave@350 for 30s). No crash, no error &mdash; just no sensor-driven steering.
+</div>
+
+</body>
+</html>
