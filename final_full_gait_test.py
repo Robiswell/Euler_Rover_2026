@@ -10,7 +10,7 @@ Hardware: 6x STS3215 12V servos on /dev/ttyUSB1 @ 1Mbaud
 No software angle offsets - clearance is managed physically.
 
 Usage:
-  sudo python3 offset_full_gait_test_v2.py [MODE]
+  sudo python3 final_full_gait_test.py [MODE]
 
 Modes:
   (no args)              Demo mode - full maneuver showcase (all gaits + stances)
