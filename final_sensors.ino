@@ -54,6 +54,22 @@
             mounting that causes P1 NAV_STOP_SAFE to fire immediately.
             getQuat() replaced with getQuatI/J/K/Real() individual getters
             (shared rawQuat fields serve whichever RV type is enabled).
+    FIX V0.5.01
+    FIX 12: Blind-zone false-VERY-FAR fix — when step-C times out (no rising
+            edge) the sensor cannot distinguish "nothing nearby" from "object
+            < 2 cm (blind zone / transducer still ringing)".  Two heuristics
+            are added to correctly classify these as VERY NEAR (-1.0):
+              FIX 12a  Double-ping: fires a second quick trigger and polls echo
+                       for NEAR_RECHECK_US (2000 µs ≈ 34 cm round-trip).  If
+                       an echo pulse is detected on the retry the result is
+                       measured and returned as -1.0 (short pulse) or the real
+                       distance.  Catches sensors that need a second trigger to
+                       respond after a blind-zone event.
+              FIX 12b  Hysteresis: if distances_cm[idx] (the previous reading
+                       for this sensor) is already < HYST_NEAR_CM (10 cm) a
+                       timeout most likely means the object slid into the blind
+                       zone, not that it vanished → return -1.0 immediately
+                       without wasting time on a double-ping.
 */
 
 #include <Arduino.h>
@@ -117,6 +133,18 @@ const unsigned long LIMIT_RT_US =
 
 // Total measurement timeout (FIX 3: 20 ms covers 340 cm, well beyond 300 cm limit)
 const unsigned long TIMEOUT_TOTAL = 20000UL;
+// FIX 0.5.01
+// FIX 12a: Double-ping retry window after a step-C timeout.
+//   Poll echo for at most NEAR_RECHECK_US µs on the second trigger.
+//   2000 µs ≈ 34 cm round-trip — enough to catch blind-zone echoes.
+const unsigned long NEAR_RECHECK_US = 2000UL;
+//FIX V0.5.01
+// FIX 12b: Hysteresis threshold.
+//   If distances_cm[idx] (previous reading) was already within HYST_NEAR_CM,
+//   a step-C timeout means the object entered the blind zone, not that it
+//   disappeared — classify as VERY NEAR instead of VERY FAR.
+const float HYST_NEAR_CM = 10.0f;
+
 
 // -----------------------------------------------------------------------
 // IMU state — last-known values (FIX 4 + FIX 6)
@@ -181,7 +209,45 @@ float measureClassified(uint8_t idx) {
   while (digitalRead(echo) == HIGH) {
     if (micros() - rise_time > TIMEOUT_TOTAL) {
       durations_us[idx] = (long)(micros() - rise_time);
-      return 300.0f;  // timeout → no echo → VERY FAR (FIX 2)
+      //return 300.0f;  // timeout → no echo → VERY FAR (FIX 2)
+      //FIX 0.5.01
+      // FIX 12b: Hysteresis — previous reading was already close, so the
+      //   object most likely entered the HC-SR04 blind zone (< 2 cm) rather
+      //   than disappearing.  Return VERY NEAR immediately.
+      //if (distances_cm[idx] >= 0.0f && distances_cm[idx] < HYST_NEAR_CM) {
+      if (distances_cm[idx] < HYST_NEAR_CM) {
+        return -1.0f;
+      }
+      // FIX 12a: Double-ping — fire one more trigger and poll echo for a
+      //   short window (NEAR_RECHECK_US).  Some HC-SR04 variants need a
+      //   second trigger to respond after a blind-zone event, and some produce
+      //   a brief echo that was missed on the first attempt.
+      drainEchoLow(echo, 40000UL);
+      digitalWrite(trig, LOW);
+      delayMicroseconds(4);
+      digitalWrite(trig, HIGH);
+      delayMicroseconds(10);
+      digitalWrite(trig, LOW);
+      unsigned long t1 = micros();
+      while (digitalRead(echo) == LOW) {
+        if (micros() - t1 > NEAR_RECHECK_US) {
+          return 300.0f;   // FIX 2: still no echo → VERY FAR
+        }
+      }
+      // Echo detected on second ping — measure its duration.
+      unsigned long rise2 = micros();
+      while (digitalRead(echo) == HIGH) {
+        if (micros() - rise2 > NEAR_RECHECK_US) break;
+      }
+      unsigned long dur2 = micros() - rise2;
+      durations_us[idx] = (long)dur2;
+      if (dur2 < NEAR_RT_US) return -1.0f;
+      float d2 = (float)dur2 * SOUND_CM_PER_US * 0.5f;
+      if (d2 < BLIND_ZONE_CM) return -1.0f;
+      if (d2 > LIMIT_CM)      return 300.0f;
+      if (d2 < 2.0f)  d2 = 2.0f;
+      if (d2 > 300.0f) d2 = 300.0f;
+      return d2;
     }
   }
   unsigned long dur = micros() - rise_time;
@@ -217,13 +283,20 @@ float measureClassified(uint8_t idx) {
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-  Wire.setWireTimeout(3000, true);  // FIX 5: 3 ms I2C timeout, reset bus on timeout
+
+  // FIX 0.5.01 - Changed from 3000 to 25000 
+  // Use an I2C timeout to prevent the sketch from hanging forever if the IMU/bus stalls.
+  //  I2C transfer can legitimately take more than 3 ms. If Wire resets the bus that early,
+  //   imu.begin() can fail and you'll see "BNO085 not detected" even though the wiring is
+  Wire.setWireTimeout(25000, true);  // FIX 5: 3 ms I2C timeout, reset bus on timeout
 
   // IMU initialisation (BNO085 at address 0x4A)
   if (!imu.begin(0x4A, Wire)) {
     Serial.println("# ERROR: BNO085 not detected — check wiring!");
-    while (1) { delay(1000); }
+    //  FIX 0.5.01 
+    while (1) { delay(25000); } 
   }
+  
   imu.enableGameRotationVector(50);  // 50 Hz quaternion — Game RV (no mag, boot-relative)
   imu.enableAccelerometer(50);
   imu.enableGyro(50);
