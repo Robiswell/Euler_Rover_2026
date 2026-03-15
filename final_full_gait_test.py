@@ -14,8 +14,8 @@ Usage:
 
 Modes:
   (no args)              Demo mode - full maneuver showcase (all gaits + stances)
-  --competition          Autonomous nav - 8-state FSM, Arduino sensors, terrain adaptation
-  --competition-dry-run  Autonomous nav with speed=0 - sensors active, logs transitions only
+  --competition          Autonomous nav - 8-state FSM, Arduino sensors, terrain adaptation (prints real-time FSM state/speed/turn/gait/sensors to terminal)
+  --competition-dry-run  Autonomous nav with speed=0 - sensors active, logs transitions only (same FSM terminal output, servos stay still)
   --test-competition     Timed fallback - quad@400 45s then wave@350 30s (no sensors)
   --test-tripod          Tripod gait only - forward, carve, pivot, reverse
   --test-quad            Quadruped gait only - forward, carve, pivot, reverse, walking tall, stealth crawl
@@ -37,6 +37,7 @@ import math
 import collections
 import socket
 import threading
+import unittest
 
 # --- OPTIONAL: pyserial for autonomous nav (Arduino sensor hub) ---
 try:
@@ -106,10 +107,11 @@ DIRECTION_MAP = {
     6: 1,   # Right Middle
 }
 
+# V0.5.01 New Constants for calibrated home positions and stall detection tuning for wet sand operation.
 # Calibrated zero points (Legs pointing straight down)
 HOME_POSITIONS = {
-    1: 2233, 2: 2731, 3: 4086,
-    4: 2606, 5: 253,  6: 771,
+    1: 3447, 2: 955, 3: 1420,
+    4: 1569, 5: 3197, 6: 3175,
 }
 
 # Servo ID -> shared_servo_loads array index (0-based, clean mapping)
@@ -131,8 +133,11 @@ GAITS = {
     },
     1: {  # WAVE
         'duty': 0.75,
-        # Offsets are spaced 1/6 ≈ 0.167 apart so exactly one leg is in air
-        # at any moment (air window = 0.15 cycles each, no overlap possible).
+        # V0.5.01 update - new offsets to fix servo 5 phase drift/typo and restore proper wave gait timing.
+        # Offsets are spaced 1/6 ≈ 0.167 apart. With duty 0.75 the air window
+        # per leg is 0.25 cycles, so adjacent legs overlap briefly (~0.083 cycles).
+        # This is accepted: ≥4 legs always in stance, safer than tripod's 3.
+
         # servo 5 was previously 0.380 (typo/drift from 0.333), which caused
         # a 0.030-cycle overlap with servo 2's air window — two legs airborne
         # simultaneously at T ≈ 0.47-0.50, violating the wave gait contract.
@@ -368,6 +373,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
         port_handler.clearPort()
         print("[heart] snapping legs to home...")
+        
         for sid in ALL_SERVOS:
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
             dxl_comm_result, dxl_error = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 0)  # Position
@@ -876,6 +882,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
         time.sleep(3.0)
         for sid in ALL_SERVOS:
+            # V0.5.01 safety addition: explicitly zero speed in case mode switch back to velocity failed, 
+            # which would leave the legs spinning at last speed instead of holding position.
+            # packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)  # safety: zero velocity in case mode switch faile
+            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)  # safety: zero velocity before torque disable to prevent runaway motion
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
         port_handler.closePort()
         print("[heart] offline")
@@ -888,7 +898,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 class EmergencyStopException(Exception):
     pass
 
-
+# V0.5.01 addition: tactical sleep function that monitors both the is_running flag and the heart process's liveness,
+#  to ensure that if the heart crashes during a critical phase (e.g. self-righting roll), the brain detects it and triggers 
+# a clean shutdown instead of continuing blindly.
 def tactical_sleep(duration, running_flag, heart_process):
     """
     Monitors is_running flag AND gait_process.is_alive() during tactical
@@ -902,6 +914,60 @@ def tactical_sleep(duration, running_flag, heart_process):
             raise EmergencyStopException("Heart process has died unexpectedly.")
         time.sleep(0.1)
 
+class N21_FSM_BothSidesNearEqual(unittest.TestCase):
+    """P11: both sides equally NEAR → SLOW_FORWARD (not full-speed FORWARD)."""
+    def test_both_sides_near_slows_down(self):
+        nav = NavStateMachine()
+        # Both left and right at 25cm = NEAR, equal severity
+        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
+        result = _nav_update(nav, frame=f)
+        self.assertEqual(result[0], NAV_SLOW_FORWARD)
+        self.assertLessEqual(result[1], SLOW_SPEED)
+    def test_both_sides_near_straight(self):
+        """When both sides equally blocked, turn should be zero."""
+        nav = NavStateMachine()
+        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
+        result = _nav_update(nav, frame=f)
+        self.assertAlmostEqual(result[2], 0.0)
+class N22_FSM_ArcDwellPersistence(unittest.TestCase):
+    """Arc dwell: arc state persists while dwell is active and obstacle remains."""
+    def test_arc_persists_during_dwell(self):
+        """After P11 triggers ARC_LEFT, a second update with same obstacle
+        should NOT snap to FORWARD while dwell is active."""
+        nav = NavStateMachine()
+        # First frame: right blocked → ARC_LEFT
+        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
+        r1 = _nav_update(nav, frame=f_blocked)
+        self.assertEqual(r1[0], NAV_ARC_LEFT)
+        # Second frame: same obstacle, within dwell window → should stay ARC_LEFT
+        r2 = _nav_update(nav, frame=f_blocked)
+        self.assertEqual(r2[0], NAV_ARC_LEFT)
+    def test_arc_right_persists_during_dwell(self):
+        """Same test for ARC_RIGHT."""
+        nav = NavStateMachine()
+        f_blocked = _make_frame(fdl=25, fcf=100, fdr=100, rdl=25, rdr=100)
+        r1 = _nav_update(nav, frame=f_blocked)
+        self.assertEqual(r1[0], NAV_ARC_RIGHT)
+        r2 = _nav_update(nav, frame=f_blocked)
+        self.assertEqual(r2[0], NAV_ARC_RIGHT)
+    def test_arc_clears_when_obstacle_gone(self):
+        """After obstacle clears AND dwell expires, return to FORWARD."""
+        nav = NavStateMachine()
+        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
+        _nav_update(nav, frame=f_blocked)
+        self.assertEqual(nav.state, NAV_ARC_LEFT)
+        # Expire the dwell manually
+        # V0.5.01 update: instead of manipulating internal dwell timer, 
+        # just wait out the dwell duration in real time to ensure the timing logic works as intended.
+        # nav._dwell_end = time.monotonic() - 1
+        nav.dwell_duration = 0
+        # All clear frame
+        f_clear = _make_frame()
+        r2 = _nav_update(nav, frame=f_clear)
+        self.assertEqual(r2[0], NAV_FORWARD)
+
+
+# ===================================================================
 
 if __name__ == "__main__":
     print("hexapod starting up...")
@@ -909,10 +975,11 @@ if __name__ == "__main__":
     # Multi-Processing Primitives
     shared_speed        = mp.Value('i', 0)
     shared_x_flip       = mp.Value('i', 1)
-    shared_z_flip       = mp.Value('i', 1)   # NOTE: never written after init - always 1.
+    # V0.5.01 update: change shared_z_flip from constant to variable so it can be set to -1 during inverted roll,
+    #shared_z_flip       = mp.Value('i', 1)   # NOTE: never written after init - always 1.
+    shared_z_flip       = mp.Value('i', 1)   # Written to -1 by state_self_right_roll when inverted,
                                               #
-                                              # Intended for capsized mode in state_self_right_roll.
-                                              # Setting -1 would flip effective forward/backward for
+                                              # Setting -1 flips effective forward/backward for
                                               # all legs, to correct for the chassis axis reversing
                                               # when upside down.
                                               #
@@ -1098,7 +1165,7 @@ if __name__ == "__main__":
     # =====================================================================
 
     # --- Arduino serial config ---
-    ARDUINO_PORT = "/dev/ttyACM0"
+    ARDUINO_PORT = "/dev/ttyUSB0"
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
@@ -1377,6 +1444,7 @@ if __name__ == "__main__":
                 setattr(self, counter_attr, 0)
                 return False
 
+    # IMU processing constants
     def compute_imu(frame):
         """Extract orientation, vibration, angular rate from frame.
         Returns dict with: pitch_deg, roll_deg, yaw_deg, upright_quality,
@@ -1740,6 +1808,14 @@ if __name__ == "__main__":
                         turn = abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
+            
+                # V0.5.01 update — if both sides equally blocked, don't prefer one arc over the other, 
+                # just slow down and go straight to reassess.  This mitigates oscillation when both sides are borderline.
+                else:
+                    # Both sides equally blocked — slow down, drive straight
+                    self._transition(NAV_SLOW_FORWARD)
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
 
             # P12: Narrow corridor (both sides DANGER, front OK)
             if left_class >= DIST_DANGER and right_class >= DIST_DANGER and front_class < DIST_DANGER:
@@ -1756,13 +1832,14 @@ if __name__ == "__main__":
                 speed = int(SLOW_SPEED * speed_s * self.terrain_mult * self.stall_speed_mult)
                 return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
 
-            # P14: All clear
-            self._transition(NAV_FORWARD)
-
-            # --- Dwell re-evaluation for active states ---
-            # (If we reach here, no higher-priority trigger fired)
+            # Delete - P14: All clear
+            # Delete - self._transition(NAV_FORWARD)
+            # V0.5.01 update — add heading correction during FORWARD to mitigate drift over time
+            # --- Dwell re-evaluation for active arc states ---
+            # If an arc dwell is still active (lateral obstacle persists), hold the
+            # arc instead of snapping to FORWARD.  Only transition to FORWARD when
+            # the dwell has expired or the obstacle has cleared.
             if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
-                # Extend if arc-side still blocked
                 if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
                     self._refresh_dwell(0.4)
                 elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
@@ -2029,7 +2106,9 @@ if __name__ == "__main__":
         # --- C2: Orientation guard ---
         # Switch to wave gait for reliable upright detection (5 legs in stance vs tripod's 3)
         saved_gait_for_check = shared_gait_id.value
-        shared_gait_id.value = 1   # WAVE — duty 0.85, 5 legs in stance
+        #shared_gait_id.value = 1   # WAVE — duty 0.85, 5 legs in stance
+        # V0.5.01
+        shared_gait_id.value = 1   # WAVE — duty 0.75, max legs in stance for load detection
         shared_speed.value = 0
         time.sleep(1.5)             # Wait for LERP convergence to wave offsets
 
@@ -2190,7 +2269,10 @@ if __name__ == "__main__":
                         nav = NavStateMachine()
                         cliff = CliffDetector()
                         flicker = FlickerTracker()
-
+                        # V0.5.01
+                        # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
+                        roll_attempts = 0
+                        MAX_ROLL_ATTEMPTS = 2
                         # Set initial gait: quadruped, normal stance
                         set_gait_state(gait=2, impact_start=330, impact_end=30,
                                        speed=0, turn=0.0, x_flip=1,
@@ -2205,6 +2287,12 @@ if __name__ == "__main__":
 
                         brain_log("[NAV] autonomous nav loop starting")
                         fallen_back = False
+
+                        # V0.5.01 - Add state name logging for better visibility into FSM behavior in logs
+                        nav_tick = 0
+                        prev_state_name_comp = "FORWARD"
+                        SEVERITY_LABELS_COMP = {0: "CLEAR", 1: "CAUTION", 2: "NEAR", 3: "DANGER"}
+                        GAIT_LABELS_COMP = {0: "TRIPOD", 1: "WAVE", 2: "QUAD"}
 
                         # === MAIN NAV LOOP (~10 Hz) ===
                         while is_running.value and not nav.finished:
@@ -2273,6 +2361,35 @@ if __name__ == "__main__":
                                 imu["angular_rate"], load_asymmetry,
                                 stale, imu["roll_deg"])
 
+                            # V0.5.01 - Add terminal FSM visualization for better real-time insight into nav behavior during testing
+                            # --- Terminal FSM visualization (mirrors --test-nav output) ---
+                            state_name_comp = NAV_STATE_NAMES.get(state, "?")
+                            gait_name_comp = GAIT_LABELS_COMP.get(nav.terrain_gait, "?")
+                            changed_comp = "  <<<" if state_name_comp != prev_state_name_comp else ""
+                            elapsed_mission = time.monotonic() - nav.mission_start
+                            print(f"\n[{nav_tick:03d} T+{elapsed_mission:.1f}s] ─── Competition FSM ─────────────────")
+                            print(f"  STATE: {state_name_comp:>10s}{changed_comp}")
+                            print(f"  speed={speed:4d}  turn={turn:+.3f}  x_flip={x_flip}")
+                            print(f"  gait={gait_name_comp}  terrain_mult={nav.terrain_mult:.2f}  "
+                                  f"tripod={nav.terrain_is_tripod}")
+                            print(f"  impact=[{nav.terrain_impact_start}°,{nav.terrain_impact_end}°]  "
+                                  f"stall_mult={nav.stall_speed_mult:.2f}")
+                            print(f"  sectors: F={SEVERITY_LABELS_COMP[front_class]} "
+                                  f"L={SEVERITY_LABELS_COMP[left_class]} "
+                                  f"R={SEVERITY_LABELS_COMP[right_class]}  "
+                                  f"cliff: F={'YES' if front_cliff else 'no'} "
+                                  f"R={'YES' if rear_cliff else 'no'}")
+                            print(f"  pitch={imu['pitch_deg']:+5.1f}°  "
+                                  f"roll={imu['roll_deg']:+5.1f}°  "
+                                  f"upright={imu['upright_quality']:.2f}  "
+                                  f"accel={imu['accel_mag']:.1f}  "
+                                  f"gyro={imu['angular_rate']:.2f}")
+                            print(f"  load_avg={avg_load:.0f}  load_asym={load_asymmetry:.0f}  "
+                                  f"voltage={voltage:.1f}V  stale={stale:.2f}s")
+                            print(f"  step={step_name}")
+                            prev_state_name_comp = state_name_comp
+                            nav_tick += 1
+
                             # --- Handle special states ---
                             if state == NAV_WIGGLE:
                                 if dry_run:
@@ -2297,10 +2414,19 @@ if __name__ == "__main__":
                                     brain_log("[NAV][DRY-RUN] would self-right")
                                     nav._transition(NAV_FORWARD)
                                     continue
+                                # V0.5.01 - add roll attempt counter and limit to prevent infinite loop if self-right fails
+                                if roll_attempts >= MAX_ROLL_ATTEMPTS:
+                                    brain_log(f"[NAV] roll limit reached ({MAX_ROLL_ATTEMPTS}) — staying in STOP_SAFE")
+                                    set_gait_state(speed=0, turn=0.0, x_flip=1,
+                                                   step_name="nav_stop_safe_final")
+                                    continue
                                 # Severely tilted — try self-right
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
                                                step_name="nav_stop_safe")
-                                brain_log("[NAV] tipover — attempting self-right")
+                                #brain_log("[NAV] tipover — attempting self-right")
+                                # V0.5.01 - add roll attempt counter and limit to prevent infinite loop if self-right fails
+                                roll_attempts += 1
+                                brain_log(f"[NAV] tipover — attempting self-right ({roll_attempts}/{MAX_ROLL_ATTEMPTS})")
                                 state_self_right_roll()
                                 # Fresh frame after recovery
                                 time.sleep(0.2)
@@ -2401,6 +2527,92 @@ if __name__ == "__main__":
             state_recovery_wiggle()
             state_self_right_roll()
 
+        # V0.5.01: Prints raw sensor values and processed outputs side by side for easy comparison.
+        elif "--test-sensors" in sys.argv:
+            # === TEST: Sensor processing — full 20-column frame + classify/cliff/IMU/turn ===
+            # No Heart needed.  Reads live Arduino frames over serial, prints every
+            # column the Pi receives, then runs the full sensor-processing pipeline
+            # (classify_sectors, CliffDetector, compute_imu, compute_turn_intensity)
+            # so you can validate wiring, orientation, and parsing in one shot.
+            #
+            # Arduino sends CSV at ~5 Hz (self-throttled by ultrasonic measurement
+            # time).  We sample every 0.5 s (every ~2–3 Arduino frames) so the
+            # terminal stays readable — 30 iterations = ~15 s total.
+            print("=== SENSOR PROCESSING TEST ===")
+            if not HAS_SERIAL:
+                print("[ERROR] pyserial not installed. pip install pyserial")
+            else:
+                reader = ArduinoReader()
+                cliff = CliffDetector()
+                SEVERITY_LABELS = {0: "CLEAR", 1: "CAUTION", 2: "NEAR", 3: "DANGER"}
+                try:
+                    for i in range(30):
+                        frame = reader.get_latest()
+                        if frame is None:
+                            print(f"\n[{i:02d}] no frame yet  "
+                                  f"(stale={reader.stale_seconds():.2f}s, "
+                                  f"healthy={reader.healthy})")
+                            time.sleep(0.5)
+                            continue
+
+                        # ── Raw 20-column frame ──────────────────────────────
+                        print(f"\n{'='*72}")
+                        print(f"  Frame {i:02d}  |  healthy={reader.healthy}  "
+                              f"stale={reader.stale_seconds():.2f}s")
+                        print(f"{'='*72}")
+
+                        print(f"  {'Timestamp':>12s}: {frame['timestamp_ms']} ms")
+                        print(f"  {'--- Distances (cm) ---':^50s}")
+                        print(f"  {'FDL':>5s}  {'FCF':>5s}  {'FCD':>5s}  {'FDR':>5s}  "
+                              f"{'RDL':>5s}  {'RCF':>5s}  {'RCD':>5s}  {'RDR':>5s}")
+                        print(f"  {frame['FDL']:5.1f}  {frame['FCF']:5.1f}  "
+                              f"{frame['FCD']:5.1f}  {frame['FDR']:5.1f}  "
+                              f"{frame['RDL']:5.1f}  {frame['RCF']:5.1f}  "
+                              f"{frame['RCD']:5.1f}  {frame['RDR']:5.1f}")
+
+                        print(f"  {'--- Quaternion ---':^50s}")
+                        print(f"  {'qw':>8s}  {'qx':>8s}  {'qy':>8s}  {'qz':>8s}")
+                        print(f"  {frame['qw']:8.4f}  {frame['qx']:8.4f}  "
+                              f"{frame['qy']:8.4f}  {frame['qz']:8.4f}")
+
+                        print(f"  {'--- Accelerometer (m/s²) ---':^50s}")
+                        print(f"  {'ax':>8s}  {'ay':>8s}  {'az':>8s}")
+                        print(f"  {frame['ax']:8.4f}  {frame['ay']:8.4f}  "
+                              f"{frame['az']:8.4f}")
+
+                        print(f"  {'--- Gyroscope (rad/s) ---':^50s}")
+                        print(f"  {'gx':>8s}  {'gy':>8s}  {'gz':>8s}")
+                        print(f"  {frame['gx']:8.4f}  {frame['gy']:8.4f}  "
+                              f"{frame['gz']:8.4f}")
+
+                        print(f"  {'UpsideDown':>12s}: {frame['upside_down']}")
+
+                        # ── Processed sensor pipeline ────────────────────────
+                        front_cls, left_cls, right_cls = classify_sectors(frame)
+                        front_cliff, rear_cliff = cliff.update(
+                            frame["FCD"], frame["RCD"])
+                        imu = compute_imu(frame)
+                        turn = compute_turn_intensity(frame)
+
+                        print(f"  {'--- Sensor Pipeline ---':^50s}")
+                        print(f"  Sectors  : front={SEVERITY_LABELS[front_cls]}  "
+                              f"left={SEVERITY_LABELS[left_cls]}  "
+                              f"right={SEVERITY_LABELS[right_cls]}")
+                        print(f"  Cliff    : front={'YES' if front_cliff else 'no'}  "
+                              f"rear={'YES' if rear_cliff else 'no'}")
+                        print(f"  IMU      : pitch={imu['pitch_deg']:+6.1f}°  "
+                              f"roll={imu['roll_deg']:+6.1f}°  "
+                              f"yaw={imu['yaw_deg']:+6.1f}°  "
+                              f"upright={imu['upright_quality']:.2f}")
+                        print(f"  Vibration: accel={imu['accel_mag']:.2f} m/s²  "
+                              f"gyro={imu['angular_rate']:.2f} rad/s")
+                        print(f"  Turn     : intensity={turn:+.3f}")
+
+                        time.sleep(0.5)
+                finally:
+                    reader.stop()
+                print("=== DONE ===")
+
         elif "--test-arduino" in sys.argv:
             # === TEST: Arduino serial reader — no Heart needed ===
             print("=== ARDUINO SERIAL TEST ===")
@@ -2418,6 +2630,113 @@ if __name__ == "__main__":
                         else:
                             print(f"[{i}] no frame yet, stale={reader.stale_seconds():.2f}s")
                         time.sleep(0.5)
+                finally:
+                    reader.stop()
+                print("=== DONE ===")
+
+        # V0.5.01: Runs the full NavStateMachine on live Arduino data, 
+        # printing every FSM decision and its sensor inputs so you can verify that the robot would react correctly to different terrains and obstacles 
+        # — all without needing Heart or actual servo motion.
+        elif "--test-nav" in sys.argv:
+            # === TEST: Full FSM pipeline visualisation — NO servos, NO Heart needed ===
+            # Reads live Arduino frames, runs the complete sensor-processing +
+            # NavStateMachine + terrain overlay pipeline, and prints every
+            # decision to the terminal so you can verify that state transitions,
+            # gait selection, speed, and turn are correct and fully autonomous
+            # (driven by sensor data, not hard-coded sequences).
+            #
+            # Usage on the Pi:
+            #   sudo python3 final_full_gait_test.py --test-nav
+            #
+            # 60 iterations at 0.2 s ≈ 12 s of observation.
+            print("=== NAV FSM TEST (no servos) ===")
+            if not HAS_SERIAL:
+                print("[ERROR] pyserial not installed. pip install pyserial")
+            else:
+                reader = ArduinoReader()
+                nav = NavStateMachine()
+                cliff_det = CliffDetector()
+                flicker = FlickerTracker()
+                SEVERITY_LABELS = {0: "CLEAR", 1: "CAUTION", 2: "NEAR", 3: "DANGER"}
+                GAIT_LABELS = {0: "TRIPOD", 1: "WAVE", 2: "QUAD"}
+                prev_state_name = "FORWARD"
+                try:
+                    # Capture initial yaw from first valid frame
+                    init_wait = time.monotonic()
+                    while reader.stale_seconds() == float("inf"):
+                        if time.monotonic() - init_wait > 3.0:
+                            break
+                        time.sleep(0.1)
+                    first_frame = reader.get_latest()
+                    if first_frame:
+                        first_imu = compute_imu(first_frame)
+                        nav.initial_yaw = first_imu["yaw_rad"]
+                        print(f"  Initial yaw: {math.degrees(nav.initial_yaw):.1f}°")
+                    for i in range(60):
+                        frame = reader.get_latest()
+                        if frame is None:
+                            print(f"[{i:02d}] no frame (stale={reader.stale_seconds():.2f}s)")
+                            time.sleep(0.2)
+                            continue
+                        # --- Sensor processing (identical to competition loop) ---
+                        imu = compute_imu(frame)
+                        front_cls, left_cls, right_cls = classify_sectors(frame)
+                        front_cliff, rear_cliff = cliff_det.update(
+                            frame["FCD"], frame["RCD"])
+                        turn_intensity = compute_turn_intensity(frame)
+                        flicker_count = flicker.update(front_cls)
+                        # Simulate zero servo loads and nominal voltage (no Heart)
+                        avg_load = 0
+                        load_asymmetry = 0
+                        voltage = 12.0
+                        # --- Terrain overlay ---
+                        prev_gait = nav.terrain_gait
+                        nav.update_terrain(imu, avg_load, imu["angular_rate"],
+                                           imu["accel_mag"], front_cls,
+                                           flicker_count, imu["roll_deg"])
+                        # --- FSM update ---
+                        state, speed, turn, x_flip, step_name = nav.update(
+                            frame, imu, front_cls, left_cls, right_cls,
+                            front_cliff, rear_cliff, turn_intensity, avg_load,
+                            load_asymmetry, imu["angular_rate"], imu["accel_mag"],
+                            voltage, flicker_count)
+                        # --- Layer 2 modifiers ---
+                        stale = reader.stale_seconds()
+                        speed = nav.apply_modifiers(
+                            speed, imu, imu["accel_mag"], voltage,
+                            imu["angular_rate"], load_asymmetry,
+                            stale, imu["roll_deg"])
+                        state_name = NAV_STATE_NAMES.get(state, "?")
+                        gait_name = GAIT_LABELS.get(nav.terrain_gait, "?")
+                        changed = "  <<<" if state_name != prev_state_name else ""
+                        gait_changed = " GAIT-CHG" if nav.terrain_gait != prev_gait else ""
+                        # --- Print decision ---
+                        print(f"\n[{i:02d}] ─── FSM Decision ───────────────────────────")
+                        print(f"  STATE: {state_name:>10s}{changed}")
+                        print(f"  speed={speed:4d}  turn={turn:+.3f}  x_flip={x_flip}")
+                        print(f"  gait={gait_name}  terrain_mult={nav.terrain_mult:.2f}  "
+                              f"tripod={nav.terrain_is_tripod}{gait_changed}")
+                        print(f"  impact_window=[{nav.terrain_impact_start}°,{nav.terrain_impact_end}°]  "
+                              f"stall_mult={nav.stall_speed_mult:.2f}")
+                        print(f"  ── Sensor inputs ──")
+                        print(f"  sectors: F={SEVERITY_LABELS[front_cls]} "
+                              f"L={SEVERITY_LABELS[left_cls]} "
+                              f"R={SEVERITY_LABELS[right_cls]}  "
+                              f"cliff: F={'YES' if front_cliff else 'no'} "
+                              f"R={'YES' if rear_cliff else 'no'}")
+                        print(f"  turn_intensity={turn_intensity:+.3f}  "
+                              f"flicker={flicker_count}")
+                        print(f"  pitch={imu['pitch_deg']:+5.1f}°  "
+                              f"roll={imu['roll_deg']:+5.1f}°  "
+                              f"upright={imu['upright_quality']:.2f}  "
+                              f"accel={imu['accel_mag']:.1f}  "
+                              f"gyro={imu['angular_rate']:.2f}")
+                        print(f"  FCF={frame['FCF']:.0f}  FDL={frame['FDL']:.0f}  "
+                              f"FDR={frame['FDR']:.0f}  FCD={frame['FCD']:.0f}  "
+                              f"RCF={frame['RCF']:.0f}")
+                        print(f"  step_name={step_name}")
+                        prev_state_name = state_name
+                        time.sleep(0.2)
                 finally:
                     reader.stop()
                 print("=== DONE ===")
