@@ -400,6 +400,7 @@ class NavStateMachine:
         if new_state != self.state:
             self.prev_state = self.state
             self.state = new_state
+            self.dwell_duration = 0
             brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}->{NAV_STATE_NAMES.get(new_state)}")
 
     def update(self, frame, imu, front_class, left_class, right_class,
@@ -471,8 +472,8 @@ class NavStateMachine:
         if front_cliff:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
+                self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
-            self._start_dwell(0.8)
             return self._backward_action(frame)
 
         # P7: Rear cliff
@@ -519,8 +520,8 @@ class NavStateMachine:
         if self.front_danger_frames >= 2:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
+                self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
-            self._start_dwell(0.8)
             return self._backward_action(frame)
 
         # Reset pivot count when front clears
@@ -559,14 +560,18 @@ class NavStateMachine:
             return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
 
         # P14: All clear
-        self._transition(NAV_FORWARD)
-
-        # Dwell re-evaluation
+        # Fix 67: If ARC dwell is still active, hold arc — prevents fall-through to FORWARD
         if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
             if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
                 self._refresh_dwell(0.4)
             elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
                 self._refresh_dwell(0.4)
+            arc_turn = -abs(turn_intensity) * MAX_TURN_BIAS if self.state == NAV_ARC_LEFT else abs(turn_intensity) * MAX_TURN_BIAS
+            arc_speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+            arc_step = "nav_arc_L" if self.state == NAV_ARC_LEFT else "nav_arc_R"
+            return (self.state, arc_speed, arc_turn, 1, arc_step)
+
+        self._transition(NAV_FORWARD)
 
         # FORWARD with heading correction
         base_speed = CRUISE_SPEED
@@ -1617,17 +1622,22 @@ def run_n9():
     # Scenario 2: Left obstacle approach -> ARC_RIGHT -> clears -> FORWARD
     nav = fresh_nav()
     # Phase 1: approach (left getting closer)
-    distances = [100, 60, 40, 25, 25, 25, 100, 100, 100, 100]
+    distances = [100, 60, 40, 25, 25, 25]
     states_seen = []
     for d in distances:
         frame = make_frame(fdl=d, rdl=d, fdr=100, rdr=100)
         state, _, _, _, _ = fsm_update_simple(nav, frame=frame)
         states_seen.append(state)
-    # Should transition through: FORWARD -> SLOW -> ARC_RIGHT -> FORWARD
     check(cid, NAV_ARC_RIGHT in states_seen,
           f"left obstacle: expected ARC_RIGHT in sequence: {[NAV_STATE_NAMES.get(s) for s in states_seen]}")
+    # Fix 67: ARC dwell keeps robot in ARC_RIGHT; wait for dwell to expire, then clear
+    time.sleep(0.7)  # P11 entry dwell is 0.6s, last obstacle frame restarts it
+    for _ in range(4):
+        frame = make_frame(fdl=100, rdl=100, fdr=100, rdr=100)
+        state, _, _, _, _ = fsm_update_simple(nav, frame=frame)
+        states_seen.append(state)
     check(cid, states_seen[-1] == NAV_FORWARD,
-          f"left obstacle: final state should be FORWARD: got {NAV_STATE_NAMES.get(states_seen[-1])}")
+          f"left obstacle: final state should be FORWARD after dwell expiry: got {NAV_STATE_NAMES.get(states_seen[-1])}")
 
     # Scenario 3: Dead end -> BACKWARD -> PIVOT -> clears -> FORWARD
     nav = fresh_nav()
@@ -1858,6 +1868,162 @@ def run_n11():
           "rear RDL=15 (<20) should be unsafe")
 
 
+
+# =========================================================================
+#  NC: ARC DWELL TIMEOUT + FIX 67/68 REGRESSION
+# =========================================================================
+
+def run_nc():
+    """Test C -- ARC dwell timeout and Fix 67/68 correctness.
+
+    Fix 67: early return in ARC dwell block prevents fall-through to FORWARD
+    logic. When the FSM is in NAV_ARC_LEFT/RIGHT and _dwell_active(), decide()
+    must return an arc action (not FORWARD), with the correct turn sign.
+    After the 0.6s dwell expires naturally the FSM is free to transition.
+
+    Fix 68: _start_dwell(0.8) only fires on the FIRST frame of a P6/P10
+    transition. Repeated frames in the same BACKWARD state must NOT reset
+    dwell_start. dwell_duration persists across _transition() by design --
+    the arc dwell must survive a momentary P14 re-evaluation.
+    """
+    cid = "NC"
+
+    # ------------------------------------------------------------------
+    # C1: ARC_LEFT action returned while dwell active (Fix 67)
+    # Scenario: right-side obstacle triggered ARC_LEFT. Next frame the
+    # obstacle is gone (all-clear), but dwell is still live. The FSM must
+    # NOT return FORWARD -- it must hold the arc action.
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    frame_right_near = make_frame(fdr=25, rdr=25, fdl=100, rdl=100)  # right NEAR, left CLEAR
+    frame_clear = make_frame()
+
+    state0, _, _, _, _ = fsm_update_simple(nav, frame=frame_right_near)
+    check(cid, state0 == NAV_ARC_LEFT,
+          f"C1 setup: expected ARC_LEFT for right-side obstacle, got {NAV_STATE_NAMES.get(state0)}")
+    check(cid, nav._dwell_active(),
+          "C1 setup: dwell must be active immediately after ARC_LEFT entry")
+
+    # All-clear frame while dwell is still active.
+    # Fix 67: returns arc action. Without fix: falls through to NAV_FORWARD.
+    state1, speed1, turn1, x_flip1, step1 = fsm_update_simple(nav, frame=frame_clear)
+    check(cid, state1 == NAV_ARC_LEFT,
+          f"C1 Fix67: all-clear during ARC dwell must stay ARC_LEFT, got {NAV_STATE_NAMES.get(state1)}")
+    check(cid, turn1 <= 0,
+          f"C1 Fix67: ARC_LEFT turn must be <= 0 during dwell, got {turn1:.4f}")
+    check(cid, speed1 > 0,
+          f"C1 Fix67: ARC_LEFT speed must be > 0 during dwell, got {speed1}")
+    check(cid, x_flip1 == 1,
+          f"C1 Fix67: x_flip must be 1 (forward) during ARC, got {x_flip1}")
+    check(cid, isinstance(step1, str) and len(step1) > 0,
+          f"C1 Fix67: step_name must be non-empty string, got {step1!r}")
+
+    # ------------------------------------------------------------------
+    # C2: ARC_RIGHT action returned while dwell active, turn sign positive
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    frame_left_near = make_frame(fdl=25, rdl=25, fdr=100, rdr=100)  # left NEAR, right CLEAR
+
+    state_r0, _, _, _, _ = fsm_update_simple(nav, frame=frame_left_near)
+    check(cid, state_r0 == NAV_ARC_RIGHT,
+          f"C2 setup: expected ARC_RIGHT for left-side obstacle, got {NAV_STATE_NAMES.get(state_r0)}")
+    check(cid, nav._dwell_active(), "C2 setup: dwell must be active after ARC_RIGHT entry")
+
+    state_r1, _, turn_r1, _, _ = fsm_update_simple(nav, frame=frame_clear)
+    check(cid, state_r1 == NAV_ARC_RIGHT,
+          f"C2 Fix67: all-clear during ARC_RIGHT dwell must stay ARC_RIGHT, got {NAV_STATE_NAMES.get(state_r1)}")
+    check(cid, turn_r1 >= 0,
+          f"C2 Fix67: ARC_RIGHT turn must be >= 0 during dwell, got {turn_r1:.4f}")
+
+    # ------------------------------------------------------------------
+    # C3: Dwell expires naturally -- FSM transitions to FORWARD
+    # After the 0.6s dwell timer expires, an all-clear frame must yield FORWARD.
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    fsm_update_simple(nav, frame=frame_right_near)  # enter ARC_LEFT
+    check(cid, nav.state == NAV_ARC_LEFT, "C3 setup: must be in ARC_LEFT")
+
+    ARC_DWELL_S = 0.6  # matches P11 _start_dwell(0.6) in production code
+    nav.dwell_start = nav.dwell_start - ARC_DWELL_S - 0.05  # backdate to force expiry
+
+    check(cid, not nav._dwell_active(),
+          "C3 setup: dwell must be expired after backdating dwell_start")
+
+    state3, _, _, _, _ = fsm_update_simple(nav, frame=frame_clear)
+    check(cid, state3 == NAV_FORWARD,
+          f"C3: after ARC dwell expiry + all-clear must go FORWARD, got {NAV_STATE_NAMES.get(state3)}")
+
+    # ------------------------------------------------------------------
+    # C4: 5-tuple return format is correct during ARC dwell (Fix 67 shape)
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    fsm_update_simple(nav, frame=frame_right_near)  # enter ARC_LEFT
+    result = fsm_update_simple(nav, frame=frame_clear)
+    check(cid, len(result) == 5,
+          f"C4: update() must return 5-tuple during ARC dwell, got {len(result)} elements")
+    st4, sp4, tr4, xf4, step4 = result
+    check(cid, isinstance(st4, int),   f"C4: element[0] state must be int, got {type(st4)}")
+    check(cid, isinstance(sp4, int),   f"C4: element[1] speed must be int, got {type(sp4)}")
+    check(cid, isinstance(tr4, float), f"C4: element[2] turn must be float, got {type(tr4)}")
+    check(cid, xf4 in (1, -1),         f"C4: element[3] x_flip must be 1 or -1, got {xf4}")
+    check(cid, isinstance(step4, str), f"C4: element[4] step_name must be str, got {type(step4)}")
+
+    # ------------------------------------------------------------------
+    # C5: Fix 68 -- _start_dwell fires only on FIRST P6 frame (front cliff)
+    # dwell_start must NOT advance on repeated frames in the same BACKWARD state.
+    # Without Fix 68 each frame resets dwell_start, making the dwell never expire.
+    # ------------------------------------------------------------------
+    import time as _time
+
+    nav = fresh_nav()
+    frame_rear_safe = make_frame(rdl=100, rcf=100, rdr=100)
+
+    state_c1, _, _, _, _ = fsm_update_simple(nav, frame=frame_rear_safe, front_cliff=True)
+    check(cid, state_c1 == NAV_BACKWARD,
+          f"C5 setup: expected BACKWARD on front cliff, got {NAV_STATE_NAMES.get(state_c1)}")
+    dwell_start_frame1 = nav.dwell_start
+
+    _time.sleep(0.02)  # ensure clock advances so a reset would be detectable
+    state_c2, _, _, _, _ = fsm_update_simple(nav, frame=frame_rear_safe, front_cliff=True)
+    check(cid, state_c2 == NAV_BACKWARD,
+          f"C5: second cliff frame must stay BACKWARD, got {NAV_STATE_NAMES.get(state_c2)}")
+    check(cid, nav.dwell_start == dwell_start_frame1,
+          f"C5 Fix68: dwell_start must not reset on repeated P6 frames "
+          f"(frame1={dwell_start_frame1:.6f}, frame2={nav.dwell_start:.6f})")
+
+    # ------------------------------------------------------------------
+    # C6: Fix 68 same guard for P10 (front DANGER 2+ frames)
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    frame_front_danger = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
+
+    fsm_update_simple(nav, frame=frame_front_danger)  # frame 1: counter -> 1, not BACKWARD yet
+    state_p10_1, _, _, _, _ = fsm_update_simple(nav, frame=frame_front_danger)  # frame 2 -> BACKWARD
+    check(cid, state_p10_1 == NAV_BACKWARD,
+          f"C6 setup: expected BACKWARD from P10, got {NAV_STATE_NAMES.get(state_p10_1)}")
+    dwell_p10_frame2 = nav.dwell_start
+
+    _time.sleep(0.02)
+    state_p10_2, _, _, _, _ = fsm_update_simple(nav, frame=frame_front_danger)
+    check(cid, state_p10_2 == NAV_BACKWARD,
+          f"C6: third danger frame must stay BACKWARD, got {NAV_STATE_NAMES.get(state_p10_2)}")
+    check(cid, nav.dwell_start == dwell_p10_frame2,
+          f"C6 Fix68: dwell_start must not reset on repeated P10 frames "
+          f"(frame2={dwell_p10_frame2:.6f}, frame3={nav.dwell_start:.6f})")
+
+    # ------------------------------------------------------------------
+    # C7: Fix 68 -- _transition() resets dwell_duration to 0 to prevent
+    # stale dwells from carrying into the next state.
+    # ------------------------------------------------------------------
+    nav = fresh_nav()
+    fsm_update_simple(nav, frame=frame_right_near)  # enter ARC_LEFT
+    check(cid, nav.dwell_duration > 0,
+          f"C7: dwell_duration must be > 0 after ARC entry, got {nav.dwell_duration}")
+    nav._transition(NAV_FORWARD)  # manually call _transition; must zero dwell
+    check(cid, nav.dwell_duration == 0,
+          f"C7: _transition() must zero dwell_duration (Fix 68), "
+          f"got {nav.dwell_duration}")
+
 # =========================================================================
 #  MAIN — RUN ALL CHECKS
 # =========================================================================
@@ -1881,6 +2047,7 @@ if __name__ == "__main__":
         ("N9", "End-to-end scenario traces", run_n9),
         ("N10", "Reverse safety + finish detection", run_n10),
         ("N11", "Graceful degradation", run_n11),
+        ("NC",  "ARC dwell timeout + Fix 67/68", run_nc),
     ]
 
     for check_id, name, fn in categories:

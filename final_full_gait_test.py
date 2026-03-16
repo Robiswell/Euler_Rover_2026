@@ -616,6 +616,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     te_during_stall = {sid: 0 for sid in ALL_SERVOS}
     stall_entry_time = {sid: 0.0 for sid in ALL_SERVOS}
     overrun_streak = 0
+    overrun_buffer = []          # buffered overrun log entries (drain at 1 Hz)
+    overrun_context_flushed = False  # one-shot: flush ring buffer once per burst
     servo_comm_fails = {sid: 0 for sid in ALL_SERVOS}
     servo_disabled = {sid: False for sid in ALL_SERVOS}
     ref_ff_speed = 0.0
@@ -651,6 +653,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
+    prev_gait_id     = 0  # track gait switches for phase snap (Fix 66)
 
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
@@ -893,6 +896,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         h5_buffer.clear()
                     except:
                         pass
+                # Drain overrun buffer at 1 Hz
+                if overrun_buffer:
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.writelines(overrun_buffer)
+                    except:
+                        pass
+                    overrun_buffer.clear()
 
             # ----------------------------------------------------------
             # 2. STATE SMOOTHING (CPG exponential ramps — Sensors-19-03705)
@@ -914,6 +925,18 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             gait_params = GAITS.get(shared_gait_id.value, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
+
+            # Fix 66: Snap phase parameters on gait switch (eliminates 0.6s convergence lag)
+            current_gait_id = shared_gait_id.value
+            if current_gait_id != prev_gait_id:
+                t_offsets = gait_params['offsets']
+                for sid in ALL_SERVOS:
+                    smooth_offsets[sid] = t_offsets[sid]
+                smooth_duty = t_duty
+                smooth_imp_start = float(shared_impact_start.value)
+                smooth_imp_end = float(shared_impact_end.value)
+                prev_gait_id = current_gait_id
+                # Ramp calls below become no-ops (source == target, so decay produces target)
 
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
             smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
@@ -1088,23 +1111,29 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             while time.perf_counter() - loop_start < target_dt:
                 pass
 
-            # Loop overrun detection
+            # Loop overrun detection (buffered -- no per-tick disk I/O)
             if prev_loop_ms > 18.0:
                 overrun_streak += 1
-                try:
-                    with open(LOG_FILE, "a") as f:
-                        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        f.write(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
-                except:
-                    pass
-                if overrun_streak >= 3:
+                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
+                if overrun_streak >= 3 and not overrun_context_flushed:
                     flush_ring_buffer("OVERRUN-CONTEXT", 50, f"{overrun_streak} consecutive overruns")
+                    overrun_context_flushed = True  # one-shot per burst
             else:
                 overrun_streak = 0
+                overrun_context_flushed = False  # reset when streak breaks
 
     except Exception as e:
         print(f"[heart] fatal error: {e}")
     finally:
+        # Drain any remaining overrun entries
+        if overrun_buffer:
+            try:
+                with open(LOG_FILE, "a") as f:
+                    f.writelines(overrun_buffer)
+            except:
+                pass
+            overrun_buffer.clear()
         flush_stall_log()
         print("[heart] shutting down, returning legs to home...")
         port_handler.clearPort()
@@ -1893,6 +1922,7 @@ if __name__ == "__main__":
             if new_state != self.state:
                 self.prev_state = self.state
                 self.state = new_state
+                self.dwell_duration = 0  # Fix 68: reset stale dwell on state change
                 brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
 
         def update(self, frame, imu, front_class, left_class, right_class,
@@ -1975,8 +2005,8 @@ if __name__ == "__main__":
             if front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self._start_dwell(0.8)  # Fix 68: only start dwell on first transition
                 self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)
                 return self._backward_action(frame)
 
             # P7: Rear cliff
@@ -2024,8 +2054,8 @@ if __name__ == "__main__":
             if self.front_danger_frames >= 2:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self._start_dwell(0.8)  # Fix 68: only start dwell on first transition
                 self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)
                 return self._backward_action(frame)
 
             # Reset pivot count when front clears
@@ -2083,6 +2113,11 @@ if __name__ == "__main__":
                     self._refresh_dwell(0.4)
                 elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
                     self._refresh_dwell(0.4)
+                # Fix 67: Early return prevents fall-through to FORWARD logic while arc dwell is active
+                arc_turn = -abs(turn_intensity) * MAX_TURN_BIAS if self.state == NAV_ARC_LEFT else abs(turn_intensity) * MAX_TURN_BIAS
+                arc_speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                arc_step = "nav_arc_L" if self.state == NAV_ARC_LEFT else "nav_arc_R"
+                return (self.state, arc_speed, arc_turn, 1, arc_step)
 
             # --- FORWARD with heading correction ---
             base_speed = CRUISE_SPEED

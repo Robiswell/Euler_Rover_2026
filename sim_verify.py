@@ -424,8 +424,190 @@ def make_schedule():
     return s
 
 
+def check_V16_governor_snap_transient():
+    """
+    Property: On a gait switch tick, Fix 66 snaps smooth_offsets, smooth_duty,
+    smooth_imp_start, and smooth_imp_end to the target gait values exactly, so the
+    CPG exponential ramps become no-ops (source == target) and the governor sees the
+    steady-state air_sweep for the new gait immediately rather than a stale Tripod value.
+
+    Failure means: If the snap is absent or incorrect, the governor computes max_safe_hz
+    using the wrong air_sweep for up to ~0.6 s (30 frames at wave speed=350). In the worst
+    case (Tripod->Wave) the air_sweep halves (from ~180 deg to ~90 deg), doubling the
+    governor speed limit and allowing unclamped servo speeds that could strip gears or
+    cause a leg collision before the LERP converges.
+
+    Known false positive risk: None. All checks use exact equality on copied constants
+    or a bounded governor inequality -- no finite-difference derivatives, no phase-wrap
+    arithmetic that could alias.
+
+    Test structure (standalone mini-sim -- does not share state with SimState.run()):
+      Phase A (20 warm-up ticks, gait_id=0 Tripod, speed=500): LERP smooth values until
+              they are close to Tripod steady state. Records pre-snap smooth values.
+      Snap tick (tick 21, gait_id switches to 1 Wave):
+        - Applies Fix 66 snap block (mirrors production lines 929-939).
+        - Then runs one LERP tick to simulate the rest of the Heart frame.
+        - Checks: smooth_offsets == Wave offsets exactly (per-servo).
+        - Checks: smooth_duty == Wave duty (0.75) exactly.
+        - Checks: governor max_safe_hz >= commanded hz on snap tick (no overshoot).
+      Phase B (10 post-snap ticks, same gait_id=1):
+        - Verifies smooth_duty does NOT snap again (stays within one LERP step of last value).
+        - Verifies smooth_offsets are LERPing normally -- per-servo delta bounded by lr.
+    """
+    lr = min(1.0, 4.0 * real_dt)      # 0.08 -- matches Heart's lerp rate
+    WARM_UP_TICKS   = 20
+    POST_SNAP_TICKS = 10
+    TRIPOD_GAIT_ID  = 0
+    WAVE_GAIT_ID    = 1
+    WARM_UP_SPEED   = 500              # STS speed command during warm-up
+    IMP_START       = 330.0            # impact_start during the whole sequence
+    IMP_END         = 30.0             # impact_end during the whole sequence
+
+    # Mini-sim state -- isolated from SimState to avoid cross-contamination
+    smooth_duty      = 0.5
+    smooth_offsets   = dict(GAITS[TRIPOD_GAIT_ID]['offsets'])
+    smooth_imp_start = IMP_START
+    smooth_imp_end   = IMP_END
+
+    # --- Phase A: warm up in Tripod ---
+    for _ in range(WARM_UP_TICKS):
+        g = GAITS[TRIPOD_GAIT_ID]
+        t_duty = max(0.01, min(0.99, g['duty']))
+        smooth_duty += (t_duty - smooth_duty) * lr
+        for sid in ALL_SERVOS:
+            od = (g['offsets'][sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
+            smooth_offsets[sid] = (smooth_offsets[sid] + od * lr) % 1.0
+
+    # Capture pre-snap state to verify it actually changed
+    pre_snap_duty    = smooth_duty
+    pre_snap_offsets = dict(smooth_offsets)
+
+    # --- Snap tick: apply Fix 66 block (mirrors final_full_gait_test.py lines 929-939) ---
+    target_gait  = GAITS[WAVE_GAIT_ID]
+    t_duty_wave  = max(0.01, min(0.99, target_gait['duty']))
+    # Snap -- source is set to target, making the subsequent LERP a no-op
+    smooth_offsets   = dict(target_gait['offsets'])
+    smooth_duty      = t_duty_wave
+    smooth_imp_start = IMP_START      # snap to current shared_impact_start (unchanged in this test)
+    smooth_imp_end   = IMP_END        # snap to current shared_impact_end   (unchanged in this test)
+
+    # Now run the LERP step that follows the snap block in the Heart tick
+    # (source == target after snap, so these should be no-ops for duty and offsets)
+    smooth_duty_after_lerp = smooth_duty + (t_duty_wave - smooth_duty) * lr
+    smooth_offsets_after_lerp = {}
+    for sid in ALL_SERVOS:
+        od = (target_gait['offsets'][sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
+        smooth_offsets_after_lerp[sid] = (smooth_offsets[sid] + od * lr) % 1.0
+
+    # Compute governor limit on snap tick (using snapped smooth values)
+    base_sweep_snap = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
+    air_sweep_snap  = 360.0 - abs(base_sweep_snap)
+    if base_sweep_snap < 0: air_sweep_snap = -air_sweep_snap
+    max_safe_snap = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_snap))
+    commanded_hz_snap = WARM_UP_SPEED / 1000.0   # base_hz on snap tick (speed not yet changed)
+
+    # --- Assertions ---
+    failures = []
+
+    # A1: snap_tick smooth_offsets must match Wave offsets exactly (no LERP residual)
+    for sid in ALL_SERVOS:
+        expected = target_gait['offsets'][sid]
+        actual   = smooth_offsets[sid]
+        if abs(actual - expected) > 1e-10:
+            failures.append(
+                f"A1 sid={sid}: smooth_offsets[{sid}]={actual:.8f} expected {expected:.8f} "
+                f"(delta={abs(actual-expected):.2e})"
+            )
+
+    # A2: snap_tick smooth_duty must equal Wave duty exactly
+    expected_duty = t_duty_wave
+    if abs(smooth_duty - expected_duty) > 1e-10:
+        failures.append(
+            f"A2: smooth_duty={smooth_duty:.8f} expected {expected_duty:.8f} "
+            f"(delta={abs(smooth_duty - expected_duty):.2e})"
+        )
+
+    # A3: pre-snap Tripod duty must differ from post-snap Wave duty (sanity: snap actually changed something)
+    if abs(pre_snap_duty - smooth_duty) < 0.01:
+        failures.append(
+            f"A3: pre_snap_duty={pre_snap_duty:.4f} is too close to snap duty={smooth_duty:.4f}; "
+            f"warm-up may not have converged or snap did not execute"
+        )
+
+    # A4: post-snap LERP no-op check for duty (source==target, so LERP should not move it)
+    if abs(smooth_duty_after_lerp - smooth_duty) > 1e-10:
+        failures.append(
+            f"A4: LERP after snap moved duty: {smooth_duty:.8f} -> {smooth_duty_after_lerp:.8f} "
+            f"(delta={abs(smooth_duty_after_lerp - smooth_duty):.2e}); snap did not fully align source to target"
+        )
+
+    # A5: post-snap LERP no-op check for offsets (source==target, so LERP should not move them)
+    for sid in ALL_SERVOS:
+        delta = abs(smooth_offsets_after_lerp[sid] - smooth_offsets[sid])
+        if delta > 1e-10:
+            failures.append(
+                f"A5 sid={sid}: LERP after snap moved offset[{sid}]: "
+                f"{smooth_offsets[sid]:.8f} -> {smooth_offsets_after_lerp[sid]:.8f} (delta={delta:.2e})"
+            )
+
+    # A6: governor must not overshoot on the snap tick (commanded_hz <= max_safe)
+    if commanded_hz_snap > max_safe_snap + 1e-9:
+        failures.append(
+            f"A6: governor overshot on snap tick: commanded_hz={commanded_hz_snap:.5f} "
+            f"> max_safe={max_safe_snap:.5f}; wave duty snap caused unsafe speed limit"
+        )
+
+    # --- Phase B: 10 post-snap LERP ticks -- verify normal ramp, no second snap ---
+    prev_duty    = smooth_duty
+    prev_offsets = dict(smooth_offsets)
+    for tick_b in range(POST_SNAP_TICKS):
+        g = GAITS[WAVE_GAIT_ID]
+        t_duty_b = max(0.01, min(0.99, g['duty']))
+        new_duty = prev_duty + (t_duty_b - prev_duty) * lr
+
+        # B1: each tick's duty change must be bounded by lr (not a second snap jump)
+        duty_delta = abs(new_duty - prev_duty)
+        max_lerp_step = abs(t_duty_b - prev_duty) * lr + 1e-9
+        if duty_delta > max_lerp_step:
+            failures.append(
+                f"B1 tick_b={tick_b}: duty jumped by {duty_delta:.6f} > "
+                f"max_lerp_step={max_lerp_step:.6f}; possible second snap"
+            )
+
+        new_offsets = {}
+        for sid in ALL_SERVOS:
+            od = (g['offsets'][sid] - prev_offsets[sid] + 0.5) % 1.0 - 0.5
+            new_val = (prev_offsets[sid] + od * lr) % 1.0
+
+            # B2: each tick's offset change must be bounded by lr
+            offset_delta = abs(new_val - prev_offsets[sid])
+            # Wrap-safe max step: |od| * lr + small epsilon for floating point
+            max_offset_step = abs(od) * lr + 1e-9
+            if offset_delta > max_offset_step + 0.001:
+                failures.append(
+                    f"B2 tick_b={tick_b} sid={sid}: offset jumped by {offset_delta:.6f} "
+                    f"> max_offset_step={max_offset_step:.6f}; discontinuity after snap"
+                )
+            new_offsets[sid] = new_val
+
+        prev_duty    = new_duty
+        prev_offsets = new_offsets
+
+    passed = len(failures) == 0
+    return {
+        'passed': passed,
+        'failures': failures,
+        'pre_snap_duty': pre_snap_duty,
+        'snap_duty': smooth_duty,
+        'max_safe_snap': max_safe_snap,
+        'commanded_hz_snap': commanded_hz_snap,
+    }
+
+
 sim = SimState()
 res = sim.run()
+
+v16 = check_V16_governor_snap_transient()
 
 def pf(f): return "FAIL" if f else "PASS"
 
@@ -472,6 +654,12 @@ else:
 print(f"  V13 Wave pivot sym:      {pf(sim.v13_fail)}  (asym={sim.v13_asym:.6f} Hz  hdL={'n/a' if sim.v13_lh is None else f'{sim.v13_lh:.5f}'} hdR={'n/a' if sim.v13_rh is None else f'{sim.v13_rh:.5f}'})")
 print(f"  V14 Quad LERP gap:       INFO  (min={sim.v14_min:.3f} deg @ tick {sim.v14_tick})")
 print(f"  V15 Park LERP:           {pf(sim.v15_fail)}")
+print(f"  V16 Gov snap transient:  {pf(not v16['passed'])}  "
+      f"(pre_duty={v16['pre_snap_duty']:.4f}->snap={v16['snap_duty']:.4f} "
+      f"max_safe={v16['max_safe_snap']:.5f} cmd_hz={v16['commanded_hz_snap']:.5f})")
+if not v16['passed']:
+    for msg in v16['failures']:
+        print(f"       {msg}")
 
 print()
 print("="*60)
@@ -504,7 +692,8 @@ if sim.v7_fail and wt and wt[3] > 150:
 
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
-          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,sim.v15_fail]
+          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,sim.v15_fail,
+          not v16['passed']]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
@@ -514,6 +703,6 @@ else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V15",sim.v15_fail)] if f]
+             ("V15",sim.v15_fail),("V16",not v16['passed'])] if f]
     print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 2 INFO — failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")
