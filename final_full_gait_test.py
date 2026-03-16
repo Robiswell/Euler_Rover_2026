@@ -24,6 +24,7 @@ Modes:
   --test-arduino         Serial reader test - print 20 Arduino frames, report health (no Heart)
   --test-sensors         Sensor processing test - classify sectors, cliff, IMU, turn intensity
   --test-nav             Full nav pipeline test - Arduino -> parse -> classify -> FSM transitions
+  --no-verbose-telemetry Disable extended telemetry ([H5] servo detail, [BS] sensor, [BN] nav)
 """
 
 import time
@@ -123,6 +124,10 @@ STALL_THRESHOLD = 750  # raised from 600 for wet sand operation — tune from te
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
 OVERLOAD_MAX_CYCLES = 10  # max TE cycles per servo per session — limits EPROM wear
+
+# Verbose Telemetry — ON by default. Adds [H5] servo detail (5Hz), [BS] sensor (2Hz), [BN] nav decision lines.
+# Disable with --no-verbose-telemetry. Total overhead: ~1.6 KB/s, <1 MB for a 10-minute run.
+VERBOSE_TELEMETRY = "--no-verbose-telemetry" not in sys.argv
 
 # --- KINEMATIC GAIT DICTIONARIES ---
 GAITS = {
@@ -248,6 +253,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     current_per_servo  = {sid: 0 for sid in ALL_SERVOS}   # Last known current per servo (raw mA units)
     parent_pid     = os.getppid()
     last_log_time  = 0
+
+    # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 50Hz loop)
+    h5_buffer  = []       # buffered [H5] lines, drained at 1Hz with log_telemetry
+    h5_counter = 0        # tick counter for 5Hz decimation
+    cmd_speeds   = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
+    phase_angles = {sid: 0.0 for sid in ALL_SERVOS}   # per-servo Buehler target phase (degrees)
 
     GAIT_NAMES = {0: "tripod", 1: "wave", 2: "quad"}
 
@@ -666,6 +677,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f.write(f"[{ts}] [SHUTDOWN] trigger={reason} temps=[{temps_at_shutdown}] loads=[{loads_at_shutdown}]\n")
                 except:
                     pass
+                # Flush pending [H5] verbose telemetry before ring buffer dump
+                if h5_buffer:
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.write("".join(h5_buffer))
+                        h5_buffer.clear()
+                    except:
+                        pass
                 flush_ring_buffer("SHUTDOWN-CONTEXT", 100, reason)
                 is_running.value = False
                 break
@@ -682,6 +701,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 gov_clamp_count = 0
                 for _sid in ALL_SERVOS:
                     te_cycle_counts[_sid] = 0
+                # Drain [H5] verbose telemetry buffer (rides the same 1Hz file open)
+                if h5_buffer:
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.write("".join(h5_buffer))
+                        h5_buffer.clear()
+                    except:
+                        pass
 
             # ----------------------------------------------------------
             # 2. STATE LERPING (Software Inertia)
@@ -798,6 +825,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
                     final_speed = max(-3000, min(3000, int(raw_speed)))
 
+                # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
+                cmd_speeds[sid] = final_speed
+                phase_angles[sid] = actual_phases.get(sid, 0.0)
+
                 abs_speed = int(abs(final_speed))
                 speed_val = (abs_speed | 0x8000) if final_speed < 0 else abs_speed
                 group_sync_write.addParam(sid, [speed_val & 0xff, (speed_val >> 8) & 0xff])
@@ -837,6 +868,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             dt_samples.append(loop_dt_ms)
             if gov_active:
                 gov_clamp_count += 1
+
+            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz
+            h5_counter += 1
+            if VERBOSE_TELEMETRY and h5_counter % 10 == 0:
+                t_off = time.monotonic() - heart_start_mono
+                pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
+                spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
+                pha_str = ",".join(f"{phase_angles[sid]:.1f}" for sid in ALL_SERVOS)
+                h5_buffer.append(
+                    f"[H5] T+{t_off:.3f} P:{pos_str} S:{spd_str} "
+                    f"Ph:{pha_str} FF:{ref_ff_speed:.0f} G:{int(gov_active)} D:{smooth_duty:.2f}\n")
 
             # ----------------------------------------------------------
             # 6. PRECISION TIMING
@@ -2294,6 +2336,29 @@ if __name__ == "__main__":
                         SEVERITY_LABELS_COMP = {0: "CLEAR", 1: "CAUTION", 2: "NEAR", 3: "DANGER"}
                         GAIT_LABELS_COMP = {0: "TRIPOD", 1: "WAVE", 2: "QUAD"}
 
+                        # Verbose telemetry buffers for [BS] sensor and [BN] nav decision lines
+                        bs_buffer = []       # [BS] sensor lines, flushed 1Hz
+                        bn_buffer = []       # [BN] nav decision lines, flushed 1Hz
+                        bs_counter = 0       # tick counter for 2Hz sensor decimation
+                        last_brain_flush = time.monotonic()
+                        # [BN] change detection: only log when state/speed/turn changes or 1Hz heartbeat
+                        last_bn_state = ""
+                        last_bn_speed = -1
+                        last_bn_turn = -999.0
+                        last_bn_time = 0.0
+
+                        def brain_flush_buffers():
+                            """Drain [BS] and [BN] buffers to telemetry log."""
+                            if not bs_buffer and not bn_buffer:
+                                return
+                            try:
+                                with open(LOG_FILE, "a") as f:
+                                    f.write("".join(bs_buffer) + "".join(bn_buffer))
+                                bs_buffer.clear()
+                                bn_buffer.clear()
+                            except:
+                                pass
+
                         # === MAIN NAV LOOP (~10 Hz) ===
                         while is_running.value and not nav.finished:
                             loop_start = time.monotonic()
@@ -2334,6 +2399,17 @@ if __name__ == "__main__":
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
 
+                            # [BS] verbose telemetry: sensor snapshot at 2Hz (every 5th nav tick)
+                            bs_counter += 1
+                            if VERBOSE_TELEMETRY and bs_counter % 5 == 0:
+                                t_off = time.monotonic() - brain_start_mono
+                                bs_buffer.append(
+                                    f"[BS] T+{t_off:.3f} "
+                                    f"F:{frame.get('FDL',0)},{frame.get('FCF',0)},{frame.get('FCD',0)},{frame.get('FDR',0)} "
+                                    f"R:{frame.get('RDL',0)},{frame.get('RCF',0)},{frame.get('RCD',0)},{frame.get('RDR',0)} "
+                                    f"P:{imu['pitch_deg']:+.1f} Ro:{imu['roll_deg']:+.1f} Y:{imu['yaw_deg']:+.1f} "
+                                    f"Ac:{imu['accel_mag']:.1f} Gy:{imu['angular_rate']:.2f} U:{imu['upright_quality']:.2f}\n")
+
                             # Servo loads snapshot
                             loads = list(shared_servo_loads)
                             load_info = compute_servo_loads(loads)
@@ -2360,6 +2436,30 @@ if __name__ == "__main__":
                                 speed, imu, imu["accel_mag"], voltage,
                                 imu["angular_rate"], load_asymmetry,
                                 stale, imu["roll_deg"])
+
+                            # [BN] verbose telemetry: nav decisions on state/speed/turn change or 1Hz heartbeat
+                            if VERBOSE_TELEMETRY:
+                                state_name_bn = NAV_STATE_NAMES.get(state, "?")
+                                now_mono = time.monotonic()
+                                bn_changed = (state_name_bn != last_bn_state or
+                                              abs(speed - last_bn_speed) > 50 or
+                                              abs(turn - last_bn_turn) > 0.05 or
+                                              now_mono - last_bn_time > 1.0)
+                                if bn_changed:
+                                    t_off = now_mono - brain_start_mono
+                                    bn_buffer.append(
+                                        f"[BN] T+{t_off:.3f} St:{state_name_bn} "
+                                        f"Sec:{front_class}/{left_class}/{right_class} "
+                                        f"Clf:{int(front_cliff)}/{int(rear_cliff)} "
+                                        f"Spd:{speed} Trn:{turn:+.3f} TI:{turn_intensity:.2f} "
+                                        f"Gait:{nav.terrain_gait} TM:{nav.terrain_mult:.2f} "
+                                        f"SM:{nav.stall_speed_mult:.2f} "
+                                        f"Imp:{nav.terrain_impact_start}/{nav.terrain_impact_end} "
+                                        f"Flk:{flicker_count}\n")
+                                    last_bn_state = state_name_bn
+                                    last_bn_speed = speed
+                                    last_bn_turn = turn
+                                    last_bn_time = now_mono
 
                             # V0.5.01 - Add terminal FSM visualization for better real-time insight into nav behavior during testing
                             # --- Terminal FSM visualization (mirrors --test-nav output) ---
@@ -2446,11 +2546,20 @@ if __name__ == "__main__":
                                            impact_end=nav.terrain_impact_end,
                                            step_name=step_name)
 
+                            # --- Flush verbose telemetry buffers (1Hz) ---
+                            if VERBOSE_TELEMETRY and time.monotonic() - last_brain_flush > 1.0:
+                                brain_flush_buffers()
+                                last_brain_flush = time.monotonic()
+
                             # --- Loop timing ---
                             elapsed = time.monotonic() - loop_start
                             sleep_time = max(0.0, 0.1 - elapsed)
                             if sleep_time > 0:
                                 time.sleep(sleep_time)
+
+                        # --- Nav loop exit: flush remaining buffers ---
+                        if VERBOSE_TELEMETRY:
+                            brain_flush_buffers()
 
                         # --- Nav loop exit ---
                         if not fallen_back:
