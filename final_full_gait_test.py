@@ -92,6 +92,15 @@ LEFT_SERVOS        = [2, 3, 4]
 RIGHT_SERVOS       = [1, 6, 5]
 ALL_SERVOS         = LEFT_SERVOS + RIGHT_SERVOS
 
+# Body Geometry (CAD-verified — verified from physical robot measurements)
+# These values are the foundation for all ground-clearance calculations.
+#   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  — chassis height above ground at leg angle θ
+#   clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM  — must stay > MIN_GROUND_CLEARANCE
+LEG_EFFECTIVE_RADIUS    = 74.058   # mm — shaft center to ground at θ=0° (inner arc contact point)
+SHAFT_TO_CHASSIS_BOTTOM = 45.0     # mm — shaft center to bottom face of servo body
+MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance on flat surfaces
+FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
+
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
 VOLTAGE_MIN  = 10.5  # 10.5V = 3.5V/cell floor — raised from 10.0 for cold-weather cell protection (no hardware BMS)
@@ -155,8 +164,107 @@ GAITS = {
 }
 
 # -----------------------------------------------------------------
+# CPG / HOPF OSCILLATOR PARAMETERS (Sensors-19-03705)
+# -----------------------------------------------------------------
+# Exponential ramp rate κ for smooth gait transitions.
+# Controls convergence speed of duty (ε) and phase offset (φ) ramps.
+# κ·dt ≈ 0.16 at 50 Hz → 95% settled in ~0.6 s (paper recommends 0.5–1.0 s).
+KAPPA_TRANSITION = 8.0  # 1/s — exponential decay rate for φ/ε ramps
+
+# Adjacent-leg pairs: no two adjacent legs may be in swing (air) simultaneously.
+# Layout: RIGHT front→back = 1,6,5 | LEFT front→back = 2,3,4
+# Adjacency includes ipsilateral neighbours AND contralateral front/rear pairs.
+ADJACENT_LEGS = {
+    1: [6, 2],    # R-front  ↔ R-mid, L-front
+    6: [1, 5],    # R-mid    ↔ R-front, R-rear
+    5: [6, 4],    # R-rear   ↔ R-mid, L-rear
+    2: [3, 1],    # L-front  ↔ L-mid, R-front
+    3: [2, 4],    # L-mid    ↔ L-front, L-rear
+    4: [3, 5],    # L-rear   ↔ L-mid, R-rear
+}
+
+# -----------------------------------------------------------------
 # KINEMATIC CORE HELPERS
 # -----------------------------------------------------------------
+def compute_max_safe_speed(impact_start, impact_end, duty, ff_cap=FEEDFORWARD_CAP):
+    """
+    Maximum cycle frequency (Hz) where air-phase feedforward stays below
+    the cap, avoiding phase lag that reduces chassis ground clearance.
+
+    Physics:
+      Air-phase angular velocity = air_sweep × freq / (1 − duty)
+      Feedforward = angular_velocity × VELOCITY_SCALAR
+      For ff ≤ cap:  freq ≤ cap / (VELOCITY_SCALAR × air_sweep / (1 − duty))
+
+    Returns (max_hz, max_speed_int) where max_speed_int = int(max_hz × 1000).
+    """
+    stance_sweep = (impact_end - impact_start + 180) % 360 - 180
+    air_sweep_deg = 360.0 - abs(stance_sweep)
+    if air_sweep_deg < 1.0:
+        return 10.0, 9999  # degenerate — near-zero air sweep, no practical limit
+    max_deg_per_sec = ff_cap / VELOCITY_SCALAR   # 269.7 °/s at cap=499
+    max_hz = max_deg_per_sec * (1.0 - duty) / air_sweep_deg
+    return max_hz, int(max_hz * 1000)
+
+
+def compute_min_clearance(impact_start, impact_end, phase_lag_deg=0.0):
+    """
+    Minimum chassis ground clearance (mm) during stance phase,
+    accounting for phase-tracking lag at stance start.
+
+    Physics:
+      At stance start, the leg is at angle (impact_half + phase_lag) from vertical.
+      h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)
+      clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM
+    """
+    stance_sweep = abs((impact_end - impact_start + 180) % 360 - 180)
+    half_sweep = stance_sweep / 2.0
+    worst_angle = half_sweep + phase_lag_deg
+    h = LEG_EFFECTIVE_RADIUS * math.cos(math.radians(worst_angle))
+    return h - SHAFT_TO_CHASSIS_BOTTOM
+
+
+def compute_max_clearance_hz(impact_start, impact_end, duty,
+                             min_clearance=MIN_GROUND_CLEARANCE,
+                             ff_cap=FEEDFORWARD_CAP, kp=KP_PHASE):
+    """
+    Maximum cycle frequency (Hz) that maintains minimum ground clearance,
+    accounting for phase lag from feedforward cap clipping.
+
+    Physics (Sensors-19-03705 adapted for servo dynamics):
+      When air-phase feedforward exceeds ff_cap, it is clipped.
+      The remaining error is corrected by KP_PHASE at ~kp °/STS,
+      creating a steady-state phase lag = (ff_needed − ff_cap) / kp.
+      At stance entry, the leg angle = half_stance_sweep + phase_lag.
+      clearance = LEG_EFFECTIVE_RADIUS × cos(angle) − SHAFT_TO_CHASSIS_BOTTOM
+      Solving for max_hz where clearance = min_clearance gives the governor limit.
+
+    Returns max_hz (float).  Caller converts to speed via int(max_hz × 1000).
+    """
+    stance_sweep = (impact_end - impact_start + 180) % 360 - 180
+    half_stance = abs(stance_sweep) / 2.0
+    air_sweep = 360.0 - abs(stance_sweep)
+
+    if air_sweep < 1.0 or duty >= 0.99:
+        return 10.0  # degenerate — near-zero air sweep, no practical limit
+
+    # Max angle from vertical that still gives min_clearance
+    ratio = (SHAFT_TO_CHASSIS_BOTTOM + min_clearance) / LEG_EFFECTIVE_RADIUS
+    if ratio >= 1.0:
+        return 0.0  # geometry cannot provide clearance even at rest
+    max_total_angle = math.degrees(math.acos(ratio))
+
+    max_lag = max(0.0, max_total_angle - half_stance)
+    if max_lag <= 0.0:
+        return 0.0  # impact angles already too wide for clearance at rest
+
+    # max_ff = cap + allowable lag × kp  (invert lag = (ff − cap) / kp)
+    max_ff = ff_cap + max_lag * kp
+    max_deg_per_sec = max_ff / VELOCITY_SCALAR
+    max_hz = max_deg_per_sec * (1.0 - duty) / air_sweep
+    return max_hz
+
+
 def get_air_sweep(stance_sweep):
     """
     Authoritative air-phase sweep calculation.
@@ -186,6 +294,81 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed):
         angle = end_ang + (air_sweep * progress)
 
     return angle % 360
+
+
+def cpg_asymmetric_omega(base_hz, duty, t_leg):
+    """
+    Hopf-CPG asymmetric frequency (Sensors-19-03705 Eq. 8).
+
+    During stance (t_leg <= duty) the oscillator advances slower,
+    during swing (t_leg > duty) it advances faster, so that the
+    total cycle period is preserved while the duty split is honoured.
+
+    Returns the phase-rate multiplier to apply to base_hz for this tick.
+
+    Math:  ω_stance = 1 / duty          (normalised so stance·ω_s + swing·ω_sw = 1)
+           ω_swing  = 1 / (1 − duty)
+    The caller already integrates master_time += |hz| * real_dt, so we
+    return a dimensionless scale factor.
+
+    NOTE: Not called in the Heart loop because the Buehler clock's
+    stance/air split already implements this asymmetry geometrically
+    (different angular sweeps in different time fractions). Exposed
+    for Brain-level analysis, testing, and future CPG extensions.
+    """
+    if duty <= 0.01 or duty >= 0.99:
+        return 1.0  # degenerate — fall back to uniform rate
+    if t_leg <= duty:
+        return 1.0 / duty        # stance: slower phase advance
+    else:
+        return 1.0 / (1.0 - duty)  # swing: faster phase advance
+
+
+def cpg_exp_ramp(current, target, kappa, dt):
+    """
+    Exponential parameter ramp (Sensors-19-03705 Eq. 12/13).
+
+    φ(t) = φ_target + (φ_current − φ_target) · e^(−κ·dt)
+
+    Replaces linear LERP for smoother, monotonic convergence.
+    At κ=8, dt=0.02: factor ≈ 0.85 → 95% settled in ~0.6 s.
+    """
+    decay = math.exp(-kappa * dt)
+    return target + (current - target) * decay
+
+
+def cpg_exp_ramp_circular(current, target, kappa, dt, period=1.0):
+    """
+    Circular-aware exponential ramp for phase offsets in [0, period).
+
+    Computes shortest-arc delta, applies exponential decay, wraps result.
+    """
+    half = period / 2.0
+    delta = (target - current + half) % period - half  # shortest signed delta
+    new_target = current + delta  # unwrapped target
+    result = cpg_exp_ramp(current, new_target, kappa, dt)
+    return result % period
+
+
+def cpg_check_adjacent_swing(smooth_offsets, smooth_duty, master_time_L, master_time_R):
+    """
+    Adjacent-swing stability check (Sensors-19-03705 Section 4.2).
+
+    Returns True if no two adjacent legs are simultaneously in swing phase.
+    Used as a diagnostic — does NOT block commands (safety is via offsets).
+    """
+    in_swing = {}
+    for sid in ALL_SERVOS:
+        mt = master_time_L if sid in LEFT_SERVOS else master_time_R
+        t_leg = (mt + smooth_offsets[sid]) % 1.0
+        in_swing[sid] = (t_leg > smooth_duty)
+
+    for sid, neighbours in ADJACENT_LEGS.items():
+        if in_swing.get(sid, False):
+            for nbr in neighbours:
+                if in_swing.get(nbr, False):
+                    return False  # violation: two adjacent legs both in swing
+    return True  # stable
 
 
 # =================================================================
@@ -447,7 +630,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             f.write(f"=== HEXAPOD SESSION {datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')} ===\n")
             f.write(f"Pi: {socket.gethostname()} | Py: {sys.version.split()[0]} | PID: {os.getpid()}\n")
             f.write(f"Constants: STALL_THRESH={STALL_THRESHOLD} V_SCALAR={VELOCITY_SCALAR} "
-                    f"KP_PHASE={KP_PHASE} OVERLOAD_TIME={OVERLOAD_PREVENTION_TIME}s\n")
+                    f"KP_PHASE={KP_PHASE} OVERLOAD_TIME={OVERLOAD_PREVENTION_TIME}s "
+                    f"KAPPA={KAPPA_TRANSITION}\n")
             f.write(f"Voltage: {voltage_reading:.1f}V | Home: {HOME_POSITIONS}\n")
             f.write(f"Bus: {PORT_NAME} @ {BAUDRATE} | Servos: {ALL_SERVOS}\n")
             f.write("=" * 50 + "\n")
@@ -711,15 +895,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         pass
 
             # ----------------------------------------------------------
-            # 2. STATE LERPING (Software Inertia)
+            # 2. STATE SMOOTHING (CPG exponential ramps — Sensors-19-03705)
             # ----------------------------------------------------------
             target_hz   = (shared_speed.value * shared_x_flip.value * shared_z_flip.value) / 1000.0
             target_turn = shared_turn_bias.value
 
+            # Speed/turn: keep linear LERP (command inputs, not CPG parameters)
             lerp_rate    = min(1.0, 4.0 * real_dt)
             smooth_hz   += (target_hz   - smooth_hz)   * lerp_rate
             smooth_turn += (target_turn - smooth_turn) * lerp_rate
 
+            # Impact angles: keep linear circular LERP (geometric, not CPG)
             d_s = (shared_impact_start.value - smooth_imp_start + 180) % 360 - 180
             smooth_imp_start = (smooth_imp_start + d_s * lerp_rate) % 360
 
@@ -729,13 +915,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             gait_params = GAITS.get(shared_gait_id.value, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
 
-            # Duty LERP rate matched to hz/turn (was 1.0x, now 4.0x)
-            smooth_duty += (t_duty - smooth_duty) * lerp_rate
+            # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
+            smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
 
+            # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
             t_offsets = gait_params['offsets']
             for sid in ALL_SERVOS:
-                o_diff = (t_offsets[sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
-                smooth_offsets[sid] = (smooth_offsets[sid] + o_diff * lerp_rate) % 1.0
+                smooth_offsets[sid] = cpg_exp_ramp_circular(
+                    smooth_offsets[sid], t_offsets[sid], KAPPA_TRANSITION, real_dt)
 
             # ----------------------------------------------------------
             # 3. DRIVE CALCULATIONS & SAFETY GOVERNOR
@@ -747,6 +934,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             air_sweep    = get_air_sweep(stance_sweep)
 
             max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
+
+            # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
+            # When air-phase feedforward exceeds FEEDFORWARD_CAP, phase lag widens the
+            # stance entry angle, reducing ground clearance.  This governor dynamically
+            # caps Hz for the current duty/impact angles so the worst-case clearance
+            # remains safe — applies to all gaits, all states, including turns.
+            # (Sensors-19-03705 Section 3 — bounded swing velocity for stability)
+            max_clr_hz = compute_max_clearance_hz(smooth_imp_start, smooth_imp_end, smooth_duty)
+            max_safe_hz = min(max_safe_hz, max_clr_hz)
+
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
@@ -791,7 +988,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     else:
                         deg_per_sec = (abs(air_sweep) * abs(leg_hz)) / (1.0 - smooth_duty)
 
-                    ff_speed = min(499.0, deg_per_sec * VELOCITY_SCALAR)
+                    ff_speed = min(FEEDFORWARD_CAP, deg_per_sec * VELOCITY_SCALAR)
 
                     if sid == 1:
                         ref_ff_speed = ff_speed
@@ -1034,8 +1231,8 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', 320)
-    shared_impact_end   = mp.Value('i', 40)
+    shared_impact_start = mp.Value('i', 330)  # 330/30 = 60° sweep — safe static clearance ~19mm
+    shared_impact_end   = mp.Value('i', 30)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_heartbeat    = mp.Value('i', 0)
     shared_stall_override = mp.Value('b', False)  # When True, stall detection is suppressed.
@@ -2256,6 +2453,15 @@ if __name__ == "__main__":
                 print("=== COMPETITION DRY-RUN (speed=0, sensors active, logging only) ===")
             else:
                 print("=== COMPETITION MODE (autonomous nav) ===")
+            # Confirm clearance governor integration
+            default_duty = GAITS[2]['duty']  # quad is default gait
+            default_clr_hz = compute_max_clearance_hz(330, 30, default_duty)
+            print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
+            print(f"    default config: 330°/30° quad(duty={default_duty}) → "
+                  f"max_speed={int(default_clr_hz * 1000)}")
+            print(f"    body: radius={LEG_EFFECTIVE_RADIUS}mm, "
+                  f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm, "
+                  f"min_clearance={MIN_GROUND_CLEARANCE}mm")
 
             # --- Timed fallback sequence (used when sensors unavailable) ---
             def run_timed_fallback():
@@ -2467,6 +2673,13 @@ if __name__ == "__main__":
                             gait_name_comp = GAIT_LABELS_COMP.get(nav.terrain_gait, "?")
                             changed_comp = "  <<<" if state_name_comp != prev_state_name_comp else ""
                             elapsed_mission = time.monotonic() - nav.mission_start
+                            # Clearance governor: compute Brain-side limit for display
+                            cur_duty = GAITS[nav.terrain_gait]['duty']
+                            clr_hz = compute_max_clearance_hz(
+                                nav.terrain_impact_start, nav.terrain_impact_end, cur_duty)
+                            clr_speed = int(clr_hz * 1000)
+                            outer_hz = abs(speed / 1000.0) + abs(turn)
+                            gov_tag = " GOV" if outer_hz > clr_hz + 0.001 else ""
                             print(f"\n[{nav_tick:03d} T+{elapsed_mission:.1f}s] ─── Competition FSM ─────────────────")
                             print(f"  STATE: {state_name_comp:>10s}{changed_comp}")
                             print(f"  speed={speed:4d}  turn={turn:+.3f}  x_flip={x_flip}")
@@ -2474,6 +2687,8 @@ if __name__ == "__main__":
                                   f"tripod={nav.terrain_is_tripod}")
                             print(f"  impact=[{nav.terrain_impact_start}°,{nav.terrain_impact_end}°]  "
                                   f"stall_mult={nav.stall_speed_mult:.2f}")
+                            print(f"  clearance_gov: max_speed={clr_speed}  "
+                                  f"outer_hz={outer_hz:.3f}/{clr_hz:.3f}{gov_tag}")
                             print(f"  sectors: F={SEVERITY_LABELS_COMP[front_class]} "
                                   f"L={SEVERITY_LABELS_COMP[left_class]} "
                                   f"R={SEVERITY_LABELS_COMP[right_class]}  "
@@ -2574,60 +2789,124 @@ if __name__ == "__main__":
                         brain_log("[NAV] Arduino reader stopped")
         elif "--test-tripod" in sys.argv:
             # === TEST: Tripod phase only ===
+            # Ground clearance derivation (CAD-verified dimensions):
+            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 74.058 × cos(θ) mm
+            #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 45 mm
+            #   At 330/30 (±30° sweep), speed=600: air-phase ff needs 666 STS but capped at 499
+            #     → ~14° phase lag → effective angle ~44° → clearance drops to ~8mm → chassis drags
+            #   Fix: 340/20 (±20° sweep), speed=450 → ff ≈ 533 STS (barely capped)
+            #     → ~2.8° phase lag → effective angle ~22.8° → clearance ~23mm ✓
+            tripod_impact_start = 340  # degrees — derived from body geometry (max safe ~36°, use 20° with lag margin)
+            tripod_impact_end   = 20   # degrees — symmetric about vertical
+            tripod_duty = GAITS[0]['duty']  # 0.5
+            max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
+            tripod_speed = min(450, max_speed)
             print("=== TEST MODE: TRIPOD ===")
-            set_gait_state(gait=0, impact_start=330, impact_end=30, step_name="test_tripod_init")
+            print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
+                  f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
+            print(f"    Impact angles: {tripod_impact_start}°/{tripod_impact_end}° "
+                  f"({abs((tripod_impact_end - tripod_impact_start + 180) % 360 - 180)}° sweep), "
+                  f"max safe speed={max_speed} (ff not capped up to {max_hz:.2f} Hz)")
+            print(f"    Min clearance at stance extremes: "
+                  f"{compute_min_clearance(tripod_impact_start, tripod_impact_end):.1f}mm (static), "
+                  f"{compute_min_clearance(tripod_impact_start, tripod_impact_end, phase_lag_deg=3.0):.1f}mm (with ~3° lag)")
+            set_gait_state(gait=0, impact_start=tripod_impact_start, impact_end=tripod_impact_end, step_name="test_tripod_init")
 
-            set_gait_state(speed=600, step_name="forward");                                    stall_tsleep(12)
-            set_gait_state(turn=-0.2, step_name="carve_left");                                 stall_tsleep(10)
-            set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
-            set_gait_state(turn=0.2, step_name="carve_right");                                 stall_tsleep(10)
-            set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
-            set_gait_state(speed=0, turn=-0.5, step_name="pivot_left");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=600, step_name="straight");                         stall_tsleep(3)
-            set_gait_state(speed=0, turn=0.5, step_name="pivot_right");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=600, step_name="straight");                         stall_tsleep(3)
+            set_gait_state(speed=tripod_speed, step_name="forward");                               stall_tsleep(12)
+            set_gait_state(turn=-0.15, step_name="carve_left");                                    stall_tsleep(10)
+            set_gait_state(turn=0.0, step_name="straight");                                        stall_tsleep(3)
+            set_gait_state(turn=0.15, step_name="carve_right");                                    stall_tsleep(10)
+            set_gait_state(turn=0.0, step_name="straight");                                        stall_tsleep(3)
+            set_gait_state(speed=0, turn=-0.4, step_name="pivot_left");                            stall_tsleep(10)
+            set_gait_state(turn=0.0, speed=tripod_speed, step_name="straight");                    stall_tsleep(3)
+            set_gait_state(speed=0, turn=0.4, step_name="pivot_right");                            stall_tsleep(10)
+            set_gait_state(turn=0.0, speed=tripod_speed, step_name="straight");                    stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
-            set_gait_state(speed=-600, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-tripod_speed, turn=0.0, step_name="reverse");                    stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
 
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
+            # Clearance analysis (same framework as test-tripod):
+            #   Quad duty=0.7 → air phase is only 30% of cycle → higher ff demand per Hz.
+            #   330/30 sweep: half=30°, static clearance=19.1mm.
+            #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
+            quad_impact_start = 330
+            quad_impact_end   = 30
+            quad_duty = GAITS[2]['duty']  # 0.7
+            max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
+            max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty)
+            max_clr_speed_q = int(max_clr_hz_q * 1000)
+            quad_speed = min(300, max_clr_speed_q)
             print("=== TEST MODE: QUADRUPED ===")
-            set_gait_state(gait=2, impact_start=330, impact_end=30, step_name="test_quad_init")
+            print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
+                  f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
+            print(f"    Impact angles: {quad_impact_start}°/{quad_impact_end}° "
+                  f"({abs((quad_impact_end - quad_impact_start + 180) % 360 - 180)}° sweep), "
+                  f"max safe speed={max_clr_speed_q} (clearance governor)")
+            print(f"    Min clearance at stance extremes: "
+                  f"{compute_min_clearance(quad_impact_start, quad_impact_end):.1f}mm (static), "
+                  f"{compute_min_clearance(quad_impact_start, quad_impact_end, phase_lag_deg=3.0):.1f}mm (with ~3° lag)")
+            set_gait_state(gait=2, impact_start=quad_impact_start, impact_end=quad_impact_end, step_name="test_quad_init")
 
-            set_gait_state(speed=300, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=quad_speed, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.15, step_name="carve_left");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.15, step_name="carve_right");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.4, step_name="pivot_left");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=300, step_name="straight");                         stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=quad_speed, step_name="straight");                  stall_tsleep(3)
             set_gait_state(speed=0, turn=0.4, step_name="pivot_right");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=300, step_name="straight");                         stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=quad_speed, step_name="straight");                  stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
-            set_gait_state(speed=-300, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-quad_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            set_gait_state(speed=300, impact_start=345, impact_end=15, step_name="walking_tall");   stall_tsleep(15)
-            set_gait_state(impact_start=325, impact_end=35, step_name="stealth_crawl");              stall_tsleep(15)
+            # Walking tall: 345/15 (narrow 30° sweep) — high clearance, governor allows more speed
+            wt_clr = int(compute_max_clearance_hz(345, 15, quad_duty) * 1000)
+            set_gait_state(speed=min(300, wt_clr), impact_start=345, impact_end=15, step_name="walking_tall");   stall_tsleep(15)
+            # Stealth crawl: 325/35 (70° sweep) — governor limits speed to protect clearance
+            sc_clr = int(compute_max_clearance_hz(325, 35, quad_duty) * 1000)
+            set_gait_state(speed=min(300, sc_clr), impact_start=325, impact_end=35, step_name="stealth_crawl");  stall_tsleep(15)
 
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
+            # Clearance analysis:
+            #   Wave duty=0.75 → air phase is only 25% of cycle → highest ff demand per Hz.
+            #   330/30 sweep: half=30°, static clearance=19.1mm.
+            #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
+            wave_impact_start = 330
+            wave_impact_end   = 30
+            wave_duty = GAITS[1]['duty']  # 0.75
+            max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
+            max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty)
+            max_clr_speed_w = int(max_clr_hz_w * 1000)
+            wave_speed = min(180, max_clr_speed_w)
             print("=== TEST MODE: WAVE ===")
-            set_gait_state(gait=1, impact_start=330, impact_end=30, step_name="test_wave_init")
+            print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
+                  f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
+            print(f"    Impact angles: {wave_impact_start}°/{wave_impact_end}° "
+                  f"({abs((wave_impact_end - wave_impact_start + 180) % 360 - 180)}° sweep), "
+                  f"max safe speed={max_clr_speed_w} (clearance governor)")
+            print(f"    Min clearance at stance extremes: "
+                  f"{compute_min_clearance(wave_impact_start, wave_impact_end):.1f}mm (static), "
+                  f"{compute_min_clearance(wave_impact_start, wave_impact_end, phase_lag_deg=3.0):.1f}mm (with ~3° lag)")
+            set_gait_state(gait=1, impact_start=wave_impact_start, impact_end=wave_impact_end, step_name="test_wave_init")
 
-            set_gait_state(speed=180, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=wave_speed, turn=0.0, step_name="forward");                   stall_tsleep(12)
             set_gait_state(turn=-0.1, step_name="carve_left");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.1, step_name="carve_right");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.3, step_name="pivot_left");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=180, step_name="straight");                         stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=wave_speed, step_name="straight");                  stall_tsleep(3)
             set_gait_state(speed=0, turn=0.3, step_name="pivot_right");                        stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=180, step_name="straight");                         stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=wave_speed, step_name="straight");                  stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
-            set_gait_state(speed=-180, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-wave_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            set_gait_state(speed=180, impact_start=315, impact_end=15, step_name="cog_shift_hill_climb"); stall_tsleep(20)
+            # COG shift hill climb: 315/15 (60° sweep, offset downhill) — governor limits
+            hc_clr = int(compute_max_clearance_hz(315, 15, wave_duty) * 1000)
+            set_gait_state(speed=min(180, hc_clr), impact_start=315, impact_end=15, step_name="cog_shift_hill_climb"); stall_tsleep(20)
 
         elif "--test-recovery" in sys.argv:
             # === TEST: Recovery phase only ===
@@ -2827,6 +3106,15 @@ if __name__ == "__main__":
                               f"tripod={nav.terrain_is_tripod}{gait_changed}")
                         print(f"  impact_window=[{nav.terrain_impact_start}°,{nav.terrain_impact_end}°]  "
                               f"stall_mult={nav.stall_speed_mult:.2f}")
+                        # Clearance governor: compute limit for display
+                        cur_duty_tn = GAITS[nav.terrain_gait]['duty']
+                        clr_hz_tn = compute_max_clearance_hz(
+                            nav.terrain_impact_start, nav.terrain_impact_end, cur_duty_tn)
+                        clr_speed_tn = int(clr_hz_tn * 1000)
+                        outer_hz_tn = abs(speed / 1000.0) + abs(turn)
+                        gov_tag_tn = " GOV" if outer_hz_tn > clr_hz_tn + 0.001 else ""
+                        print(f"  clearance_gov: max_speed={clr_speed_tn}  "
+                              f"outer_hz={outer_hz_tn:.3f}/{clr_hz_tn:.3f}{gov_tag_tn}")
                         print(f"  ── Sensor inputs ──")
                         print(f"  sectors: F={SEVERITY_LABELS[front_cls]} "
                               f"L={SEVERITY_LABELS[left_cls]} "
