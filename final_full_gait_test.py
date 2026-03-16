@@ -901,9 +901,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     try:
                         with open(LOG_FILE, "a") as f:
                             f.writelines(overrun_buffer)
-                        overrun_buffer.clear()
                     except:
                         pass
+                    overrun_buffer.clear()
 
             # ----------------------------------------------------------
             # 2. STATE SMOOTHING (CPG exponential ramps — Sensors-19-03705)
@@ -1131,9 +1131,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             try:
                 with open(LOG_FILE, "a") as f:
                     f.writelines(overrun_buffer)
-                overrun_buffer.clear()
             except:
                 pass
+            overrun_buffer.clear()
         flush_stall_log()
         print("[heart] shutting down, returning legs to home...")
         port_handler.clearPort()
