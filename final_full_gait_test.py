@@ -457,6 +457,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
         try:
             if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_SIZE:
                 os.rename(LOG_FILE, LOG_FILE + f".{int(time.time())}.old")
+                # Prune old logs -- keep only the 10 most recent .old files
+                import glob as _glob
+                old_files = sorted(_glob.glob(LOG_FILE + ".*.old"), reverse=True)
+                for stale in old_files[10:]:
+                    try:
+                        os.remove(stale)
+                    except OSError:
+                        pass
             with open(LOG_FILE, "a") as f:
                 ts        = datetime.datetime.now().strftime("%H:%M:%S")
                 gait_name = GAIT_NAMES.get(shared_gait_id.value, str(shared_gait_id.value))
@@ -1456,6 +1464,8 @@ if __name__ == "__main__":
     MISSION_TIMEOUT_S = 90
     FINISH_WALL_DIST_CM = 10
     FINISH_WALL_SUSTAIN_S = 2.0
+    NAV_IMU_SETTLE_TICKS = 5  # ignore IMU safety checks for first 0.5s (BNO085 convergence)
+    RAPID_ROTATION_THRESHOLD = 3.5  # rad/s (~200 deg/s) -- walking oscillation peaks ~2.0
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -1626,6 +1636,7 @@ if __name__ == "__main__":
     DIST_CAUTION = 1
     DIST_CLEAR = 0
     DIST_UNKNOWN = 1  # treat unknown same as caution
+    CLIFF_WARMUP = 5  # frames before cliff detection active (sensor settle)
 
     def classify_distance(cm):
         """Classify a single distance reading into severity level."""
@@ -1672,9 +1683,10 @@ if __name__ == "__main__":
 
         def __init__(self, alpha=0.2):
             self._alpha = alpha
-            self._ground_ema = 15.0  # initial guess: ground ~15cm from sensor
+            self._ground_ema = 25.0  # initial guess: ground ~25cm from sensor
             self._consecutive_front = 0
             self._consecutive_rear = 0
+            self._warmup_frames = 0
 
         def update(self, fcd, rcd):
             """Update cliff detection with new FCD and RCD readings.
@@ -1693,14 +1705,24 @@ if __name__ == "__main__":
                 setattr(self, counter_attr, 0)
                 return False
 
+            # 300.0 = max range timeout (acoustic scatter on sand) -- treat as blind zone
+            if reading >= 300.0:
+                setattr(self, counter_attr, 0)
+                return False
+
             if reading is None:
                 # Defensive: possible cliff, increment
                 setattr(self, counter_attr, count + 1)
                 return count + 1 >= 2
 
-            # Update ground EMA with valid low readings
+            # Update ground EMA with valid low readings (runs even during warmup so baseline converges)
             if 0 < reading <= 40:
                 self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
+
+            # Warmup: suppress detection but EMA already updated above
+            self._warmup_frames += 1
+            if self._warmup_frames <= CLIFF_WARMUP:
+                return False
 
             # Cliff candidate: absolute > 30 OR delta > EMA + 10
             is_candidate = (reading > 30) or (reading > self._ground_ema + 10)
@@ -1903,6 +1925,7 @@ if __name__ == "__main__":
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
+            self._tick_count = 0
 
         def _dwell_active(self):
             """True if current dwell timer hasn't expired."""
@@ -1968,18 +1991,21 @@ if __name__ == "__main__":
             else:
                 self.front_danger_frames = 0
 
+            self._tick_count += 1
+
             # === LAYER 1: State transitions (priority order) ===
 
-            # P1: Tipover
-            if upright < 0.15:
-                self._transition(NAV_STOP_SAFE)
-                return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
+            if self._tick_count >= NAV_IMU_SETTLE_TICKS:
+                # P1: Tipover
+                if upright < 0.15:
+                    self._transition(NAV_STOP_SAFE)
+                    return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
-            # P2: Unexpected rapid rotation (not during pivot)
-            if angular_rate > 1.5 and self.state != NAV_PIVOT_TURN:
-                self._transition(NAV_STOP_SAFE)
-                brain_log(f"[NAV] rapid rotation {angular_rate:.2f} rad/s")
-                return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
+                # P2: Unexpected rapid rotation (not during pivot)
+                if angular_rate > RAPID_ROTATION_THRESHOLD and self.state not in (NAV_PIVOT_TURN, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD, NAV_WIGGLE):
+                    self._transition(NAV_STOP_SAFE)
+                    brain_log(f"[NAV] rapid rotation {angular_rate:.2f} rad/s")
+                    return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
             # P3: Critical battery
             if voltage < 10.5:  # VOLTAGE_MIN for 3S
