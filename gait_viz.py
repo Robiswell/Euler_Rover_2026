@@ -48,7 +48,7 @@ LEG_SPLAY = {1: -35, 2: -35, 6: 0, 3: 0, 5: 35, 4: 35}
 GAITS = {
     0: {'name': 'Tripod',    'duty': 0.5,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave',      'duty': 0.85,
+    1: {'name': 'Wave',      'duty': 0.75,
         'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
     2: {'name': 'Quadruped', 'duty': 0.7,
         'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
@@ -564,22 +564,19 @@ def plot_wiggle(output_dir, duration=3.0):
 
 def plot_self_right(output_dir):
     stages = [
-        (0.0, 1.0, 'LERP convergence'),
-        (1.0, 6.0, 'Load weight'),
-        (6.0, 16.0, 'Inertial snap'),
-        (16.0, 21.0, 'Settle'),
+        (0.0, 5.0, 'Load weight'),
+        (5.0, 15.0, 'Inertial snap'),
+        (15.0, 20.0, 'Settle'),
     ]
 
-    n_steps = int(21.0 / HEART_DT)
+    n_steps = int(20.0 / HEART_DT)
     times = [i * HEART_DT for i in range(n_steps)]
 
     speeds = []
     for t in times:
-        if t < 1.0:
-            speeds.append(ROLL_LOAD_SPEED * (t / 1.0))
-        elif t < 6.0:
+        if t < 5.0:
             speeds.append(ROLL_LOAD_SPEED)
-        elif t < 16.0:
+        elif t < 15.0:
             speeds.append(ROLL_SNAP_SPEED)
         else:
             speeds.append(ROLL_SETTLE_SPEED)
@@ -825,10 +822,13 @@ Examples:
     ALL_PLOTS = [k for k in PLOT_FUNCS.keys() if k != 'transition']
     plots_to_run = ALL_PLOTS if args.plot == 'all' else [args.plot]
 
+    ONCE_PLOTS = {'self_right', 'wiggle'}
     generated = []
-    for gid in gait_ids:
+    for i, gid in enumerate(gait_ids):
         gait_name = GAITS[gid]['name']
         for plot_name in plots_to_run:
+            if plot_name in ONCE_PLOTS and i > 0:
+                continue
             try:
                 path = PLOT_FUNCS[plot_name](args, gid)
                 generated.append(path)

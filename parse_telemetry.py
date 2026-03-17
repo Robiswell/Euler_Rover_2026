@@ -869,27 +869,33 @@ def plot_nav_timeline(bn_records, bs_records, output_dir):
     print(f"  [+] nav_timeline.png")
 
 
-def get_buehler_angle(phase_fraction, duty, impact_start_deg, impact_end_deg):
-    """Compute Buehler clock angle from phase fraction and gait parameters."""
+def get_buehler_angle(phase_fraction, duty, impact_start_deg, impact_end_deg, is_reversed=False):
+    """Compute Buehler clock angle -- matches gait engine formula exactly."""
+    start = impact_end_deg if is_reversed else impact_start_deg
+    end = impact_start_deg if is_reversed else impact_end_deg
+    stance_sweep = (end - start + 180) % 360 - 180
+    if is_reversed:
+        stance_sweep = -stance_sweep
+    air_sign = -1 if stance_sweep >= 0 else 1
+    air_sweep = air_sign * (360 - abs(stance_sweep))
     phase = phase_fraction % 1.0
     if phase < duty:
-        # Stance (ground contact) -- linear sweep from impact_start to impact_end
         stance_frac = phase / duty
-        angle = impact_start_deg + stance_frac * ((impact_end_deg - impact_start_deg) % 360)
+        angle = start + stance_frac * stance_sweep
     else:
-        # Swing (air phase) -- linear sweep from impact_end back to impact_start
         swing_frac = (phase - duty) / (1.0 - duty)
-        angle = impact_end_deg + swing_frac * ((impact_start_deg - impact_end_deg) % 360)
+        angle = end + swing_frac * air_sweep
     return angle % 360
 
 
 def plot_phase_timeline(h5_records, output_dir):
     if not h5_records or 'phases' not in h5_records[0]:
         return
-    times = [r['time_s'] for r in h5_records if 'phases' in r]
+    times = []
     phases_by_servo = [[] for _ in range(6)]
     for r in h5_records:
         if 'phases' in r and len(r['phases']) == 6:
+            times.append(r['time_s'])
             for i in range(6):
                 phases_by_servo[i].append(r['phases'][i])
 
@@ -898,14 +904,6 @@ def plot_phase_timeline(h5_records, output_dir):
         if len(phases_by_servo[i]) == len(times):
             ax.plot(times, phases_by_servo[i], color=SERVO_COLORS[i],
                     linewidth=0.8, alpha=0.8, label=SERVO_NAMES[i])
-
-    # Add duty cycle reference lines if available
-    duty_vals = [r['duty'] for r in h5_records if 'duty' in r]
-    if duty_vals:
-        avg_duty = sum(duty_vals) / len(duty_vals)
-        duty_angle = avg_duty * 360.0
-        ax.axhline(y=duty_angle, color='gray', linestyle='--', alpha=0.5,
-                    label=f'Duty boundary ({duty_angle:.0f}deg)')
 
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Buehler Angle (degrees)')
@@ -1000,7 +998,7 @@ def plot_real_vs_theoretical(h5_records, bn_records, output_dir):
 
             # Real position converted to degrees
             pos = r['positions'][idx]
-            deg = ((pos - HOME_POSITIONS[sid]) * DIRECTION_MAP[sid] / ENCODER_RESOLUTION) * 360.0
+            deg = (((pos - HOME_POSITIONS[sid]) * DIRECTION_MAP[sid] / ENCODER_RESOLUTION) * 360.0) % 360
             real_deg.append(deg)
 
             # Theoretical Buehler angle
@@ -1021,9 +1019,9 @@ def plot_real_vs_theoretical(h5_records, bn_records, output_dir):
         ax = axes[idx]
         if times_real:
             ax.plot(times_real, real_deg, color=SERVO_COLORS[idx],
-                    linewidth=0.8, alpha=0.8, label='Real')
+                    linewidth=0.8, alpha=0.8, label='Encoder (raw)')
             ax.plot(times_real, theo_deg, color=SERVO_COLORS[idx],
-                    linewidth=0.8, alpha=0.6, linestyle='--', label='Theoretical')
+                    linewidth=0.8, alpha=0.6, linestyle='--', label='Buehler (from phase)')
         for tt in transition_times:
             ax.axvline(x=tt, color='gray', linestyle=':', alpha=0.5)
         ax.set_title(SERVO_NAMES[idx], fontsize=10)
@@ -1033,11 +1031,13 @@ def plot_real_vs_theoretical(h5_records, bn_records, output_dir):
     axes[3].set_xlabel('Time (s)')
     axes[4].set_xlabel('Time (s)')
     axes[5].set_xlabel('Time (s)')
-    fig.suptitle('Real vs Theoretical Servo Positions', fontsize=12)
+    fig.suptitle('Encoder Position vs Buehler Mapping', fontsize=12)
+    fig.text(0.5, 0.01, 'Note: Buehler trace derived from recorded phase data, not independent theoretical prediction',
+             ha='center', fontsize=8, color='gray')
     fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, 'real_vs_theoretical.png'), dpi=150)
+    fig.savefig(os.path.join(output_dir, 'encoder_vs_buehler.png'), dpi=150)
     plt.close(fig)
-    print(f"  [+] real_vs_theoretical.png")
+    print(f"  [+] encoder_vs_buehler.png")
 
 
 # ── Main ────────────────────────────────────────────────────────────────
