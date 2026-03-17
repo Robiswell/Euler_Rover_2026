@@ -1691,7 +1691,7 @@ if __name__ == "__main__":
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
             # P2: Unexpected rapid rotation (not during pivot)
-            if angular_rate > 1.5 and self.state != NAV_PIVOT_TURN:
+            if angular_rate > 3.5 and self.state not in (NAV_PIVOT_TURN, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD, NAV_WIGGLE):
                 self._transition(NAV_STOP_SAFE)
                 brain_log(f"[NAV] rapid rotation {angular_rate:.2f} rad/s")
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
@@ -1749,6 +1749,33 @@ if __name__ == "__main__":
                 self.stall_speed_mult = 1.0
                 self._last_stall_clear_time = now
 
+            # --- Dwell guard: non-emergency transitions (P9-P14) respect active dwell ---
+            # Emergency transitions (P1-P8) above always fire regardless.
+            if self._dwell_active() and self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT,
+                                                        NAV_BACKWARD, NAV_PIVOT_TURN,
+                                                        NAV_FORWARD, NAV_SLOW_FORWARD):
+                if self.state == NAV_ARC_LEFT:
+                    turn = -abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_ARC_LEFT, speed, turn, 1, "nav_arc_L")
+                elif self.state == NAV_ARC_RIGHT:
+                    turn = abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
+                elif self.state == NAV_BACKWARD:
+                    return self._backward_action(frame)
+                elif self.state == NAV_PIVOT_TURN:
+                    turn = self.pivot_direction * PIVOT_TURN_BIAS
+                    step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
+                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
+                elif self.state == NAV_FORWARD:
+                    base_speed = TRIPOD_CRUISE_SPEED if self.terrain_is_tripod else CRUISE_SPEED
+                    speed = int(base_speed * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_FORWARD, speed, 0.0, 1, "nav_fwd")
+                elif self.state == NAV_SLOW_FORWARD:
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
+
             # P9: Dead end (front DANGER + both sides DANGER + came from BACKWARD)
             if (front_class >= DIST_DANGER and left_class >= DIST_DANGER
                     and right_class >= DIST_DANGER
@@ -1803,6 +1830,7 @@ if __name__ == "__main__":
             # P13: Front CAUTION or NEAR
             if front_class >= DIST_CAUTION:
                 self._transition(NAV_SLOW_FORWARD)
+                self._start_dwell(0.3)
                 speed_s = speed_scale_from_front(front_class)
                 turn = -turn_intensity * MAX_TURN_BIAS * 0.5
                 speed = int(SLOW_SPEED * speed_s * self.terrain_mult * self.stall_speed_mult)
@@ -1810,6 +1838,7 @@ if __name__ == "__main__":
 
             # P14: All clear
             self._transition(NAV_FORWARD)
+            self._start_dwell(0.3)
 
             # --- Dwell re-evaluation for active states ---
             # (If we reach here, no higher-priority trigger fired)
