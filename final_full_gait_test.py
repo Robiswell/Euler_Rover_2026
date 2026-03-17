@@ -190,7 +190,8 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed):
 # =================================================================
 def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, shared_gait_id,
                 shared_impact_start, shared_impact_end, shared_servo_loads, shared_heartbeat,
-                shared_stall_override, shared_roll_mode, shared_voltage, is_running):
+                shared_stall_override, shared_roll_mode, shared_voltage, is_running,
+                shared_phase_error=None):
     """
     50Hz kinematics loop. Runs as a separate process.
     GroupSyncRead for position and load every tick. Temp/voltage/current
@@ -838,6 +839,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             group_sync_write.txPacket()
             group_sync_write.clearParam()
             max_phase_error_prev = max_phase_error_frame
+            if shared_phase_error is not None:
+                shared_phase_error.value = max_phase_error_prev
 
             # ----------------------------------------------------------
             # 5. RING BUFFER + ACCUMULATOR UPDATES (no disk I/O)
@@ -977,6 +980,8 @@ if __name__ == "__main__":
     shared_voltage      = mp.Value('f', 12.0)      # Latest battery voltage from Heart telemetry,
                                                    # readable by Brain for pre-roll voltage check.
     is_running          = mp.Value('b', True)
+    shared_phase_error  = mp.Value('f', 0.0)       # Latest max_phase_error_prev from gait_worker,
+                                                    # readable by Brain/NavStateMachine for PhErr guard.
 
     for i in range(len(ALL_SERVOS)):
         shared_servo_loads[i] = -1
@@ -985,7 +990,7 @@ if __name__ == "__main__":
         shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
         shared_gait_id, shared_impact_start, shared_impact_end,
         shared_servo_loads, shared_heartbeat, shared_stall_override,
-        shared_roll_mode, shared_voltage, is_running
+        shared_roll_mode, shared_voltage, is_running, shared_phase_error
     ))
     gait_process.start()
 
@@ -1749,6 +1754,35 @@ if __name__ == "__main__":
                 self.stall_speed_mult = 1.0
                 self._last_stall_clear_time = now
 
+            # --- PhErr settling guard: hold current action when phase error is high ---
+            # When max_phase_error_prev > PHERR_ENGAGE_DEG, the gait engine is desynchronised.
+            # Non-emergency transitions (P9-P14) are blocked until phase error drops below
+            # PHERR_RELEASE_DEG, so the robot holds its current direction while re-syncing.
+            # Emergency transitions (P1-P8) above always fire regardless.
+            if (shared_phase_error.value > PHERR_ENGAGE_DEG
+                    and self.state not in (NAV_STOP_SAFE, NAV_WIGGLE)):
+                if self.state == NAV_ARC_LEFT:
+                    turn = -abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_ARC_LEFT, speed, turn, 1, "nav_arc_L")
+                elif self.state == NAV_ARC_RIGHT:
+                    turn = abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
+                elif self.state == NAV_BACKWARD:
+                    return self._backward_action(frame)
+                elif self.state == NAV_PIVOT_TURN:
+                    turn = self.pivot_direction * PIVOT_TURN_BIAS
+                    step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
+                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
+                elif self.state == NAV_FORWARD:
+                    base_speed = TRIPOD_CRUISE_SPEED if self.terrain_is_tripod else CRUISE_SPEED
+                    speed = int(base_speed * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_FORWARD, speed, 0.0, 1, "nav_fwd")
+                elif self.state == NAV_SLOW_FORWARD:
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
+
             # --- Dwell guard: non-emergency transitions (P9-P14) respect active dwell ---
             # Emergency transitions (P1-P8) above always fire regardless.
             if self._dwell_active() and self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT,
@@ -1830,7 +1864,7 @@ if __name__ == "__main__":
             # P13: Front CAUTION or NEAR
             if front_class >= DIST_CAUTION:
                 self._transition(NAV_SLOW_FORWARD)
-                self._start_dwell(0.3)
+                self._start_dwell(1.0)
                 speed_s = speed_scale_from_front(front_class)
                 turn = -turn_intensity * MAX_TURN_BIAS * 0.5
                 speed = int(SLOW_SPEED * speed_s * self.terrain_mult * self.stall_speed_mult)
@@ -1838,7 +1872,7 @@ if __name__ == "__main__":
 
             # P14: All clear
             self._transition(NAV_FORWARD)
-            self._start_dwell(0.3)
+            self._start_dwell(1.0)
 
             # --- Dwell re-evaluation for active states ---
             # (If we reach here, no higher-priority trigger fired)
