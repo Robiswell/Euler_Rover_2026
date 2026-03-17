@@ -1691,6 +1691,7 @@ if __name__ == "__main__":
         def update(self, fcd, rcd):
             """Update cliff detection with new FCD and RCD readings.
             Returns (front_cliff, rear_cliff) booleans."""
+            self._warmup_frames += 1
             front_cliff = self._check_cliff(fcd, is_front=True)
             rear_cliff = self._check_cliff(rcd, is_front=False)
             return front_cliff, rear_cliff
@@ -1720,7 +1721,6 @@ if __name__ == "__main__":
                 self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
 
             # Warmup: suppress detection but EMA already updated above
-            self._warmup_frames += 1
             if self._warmup_frames <= CLIFF_WARMUP:
                 return False
 
