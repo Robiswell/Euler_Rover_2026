@@ -61,12 +61,12 @@ DEFAULT_IMPACT_END = 40.0
 KAPPA_TRANSITION = 8.0
 HEART_DT = 0.02  # 50Hz control loop
 
-# Self-right sequence (from state_self_right_roll)
-ROLL_LOAD_SPEED = 400
-ROLL_SNAP_SPEED = -600
-ROLL_SETTLE_SPEED = 400
-ROLL_IMPACT_START = 140
-ROLL_IMPACT_END = 220
+# Self-right sequence (counter-rotating roll from state_self_right_roll)
+ROLL_SPEED = 500          # Raw STS units for counter-rotate attempts
+ROLL_DURATION = 1.5       # seconds per attempt (under OVERLOAD_PREVENTION_TIME)
+ROLL_SETTLE_TIME = 0.5    # seconds between attempts
+ROLL_FRONT_SERVOS = {1, 2}
+ROLL_REAR_SERVOS = {4, 5}
 
 # Wiggle recovery (from state_recovery_wiggle)
 WIGGLE_SPEED = 350
@@ -563,62 +563,80 @@ def plot_wiggle(output_dir, duration=3.0):
 
 
 def plot_self_right(output_dir):
-    stages = [
-        (0.0, 5.0, 'Load weight'),
-        (5.0, 15.0, 'Inertial snap'),
-        (15.0, 20.0, 'Settle'),
-    ]
+    """Visualize counter-rotating self-right sequence.
 
-    n_steps = int(20.0 / HEART_DT)
+    Panel 1: Speed command profile (base speed vs time)
+    Panel 2: Per-servo effective speed (front/rear/middle differentiation)
+    """
+    total_time = 2 * ROLL_DURATION + 2 * ROLL_SETTLE_TIME  # ~4s
+    n_steps = int(total_time / HEART_DT)
     times = [i * HEART_DT for i in range(n_steps)]
 
-    speeds = []
+    # Build base speed timeline
+    t1 = ROLL_DURATION                          # end of counter_A
+    t2 = t1 + ROLL_SETTLE_TIME                  # end of settle_1
+    t3 = t2 + ROLL_DURATION                     # end of counter_B
+    t4 = t3 + ROLL_SETTLE_TIME                  # end of settle_2
+
+    base_speeds = []
     for t in times:
-        if t < 5.0:
-            speeds.append(ROLL_LOAD_SPEED)
-        elif t < 15.0:
-            speeds.append(ROLL_SNAP_SPEED)
+        if t < t1:
+            base_speeds.append(ROLL_SPEED)
+        elif t < t2:
+            base_speeds.append(0)
+        elif t < t3:
+            base_speeds.append(-ROLL_SPEED)
         else:
-            speeds.append(ROLL_SETTLE_SPEED)
+            base_speeds.append(0)
+
+    # Per-servo speeds (counter-rotating: front vs rear vs middle)
+    servo_speeds = {sid: [] for sid in ALL_SERVOS}
+    for base in base_speeds:
+        for sid in ALL_SERVOS:
+            if sid in ROLL_FRONT_SERVOS:
+                servo_speeds[sid].append(base)
+            elif sid in ROLL_REAR_SERVOS:
+                servo_speeds[sid].append(-base)
+            else:  # middle — spin same as front to prevent kickstand
+                servo_speeds[sid].append(base)
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9), sharex=True)
 
-    ax1.plot(times, speeds, color='#2c3e50', linewidth=2)
-    ax1.set_ylabel('Speed Command', fontsize=11)
+    # Panel 1: Base speed command
+    ax1.plot(times, base_speeds, color='#2c3e50', linewidth=2)
+    ax1.set_ylabel('Base Speed Command (STS)', fontsize=11)
     ax1.grid(True, alpha=0.3)
-    ax1.set_title('Self-Right Recovery Sequence (UNVALIDATED)', fontsize=12, fontweight='bold')
+    ax1.set_title('Counter-Rotating Self-Right Sequence', fontsize=12, fontweight='bold')
+    ax1.axhline(y=0, color='gray', linewidth=0.5)
 
+    stages = [
+        (0, t1, 'Counter-rotate A'),
+        (t1, t2, 'Settle'),
+        (t2, t3, 'Counter-rotate B'),
+        (t3, t4, 'Settle'),
+    ]
     for t_start, t_end, label in stages:
         ax1.axvline(x=t_start, color='gray', linestyle='--', linewidth=1, alpha=0.6)
-        ax1.text((t_start + t_end) / 2, max(speeds) * 0.9, label,
-                 ha='center', fontsize=8, alpha=0.7)
+        y_pos = ROLL_SPEED * 0.85 if 'A' in label else (-ROLL_SPEED * 0.85 if 'B' in label else 0)
+        ax1.text((t_start + t_end) / 2, y_pos, label,
+                 ha='center', fontsize=9, alpha=0.7)
 
-    g = GAITS[1]
-    duty = g['duty']
-    offsets = g['offsets']
-    z_flip = -1
-
-    servo_angles = {sid: [] for sid in ALL_SERVOS}
-    phases = {sid: offsets[sid] for sid in ALL_SERVOS}
-
-    for i, t in enumerate(times):
-        hz = speeds[i] / 1000.0
-        for sid in ALL_SERVOS:
-            phases[sid] = (phases[sid] + hz * HEART_DT) % 1.0
-            t_leg = phases[sid]
-            angle = get_buehler_angle(t_leg, duty, ROLL_IMPACT_START, ROLL_IMPACT_END)
-            if z_flip == -1:
-                angle = 360 - angle
-            servo_angles[sid].append(angle)
-
+    # Panel 2: Per-servo effective speed
     for sid in ALL_SERVOS:
-        ax2.plot(times, servo_angles[sid], color=SERVO_COLORS[sid],
+        ax2.plot(times, servo_speeds[sid], color=SERVO_COLORS[sid],
                  label=SERVO_NAMES[sid], linewidth=1.5)
 
     ax2.set_xlabel('Time (s)', fontsize=11)
-    ax2.set_ylabel('Buehler Angle (deg)', fontsize=11)
+    ax2.set_ylabel('Effective Servo Speed (STS)', fontsize=11)
     ax2.legend(loc='upper right', fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3)
+    ax2.axhline(y=0, color='gray', linewidth=0.5)
+
+    # Annotate servo groups
+    ax2.text(t1 / 2, ROLL_SPEED * 0.7, 'Front (1,2) + Middle (3,6)',
+             ha='center', fontsize=8, color='#2980b9', alpha=0.8)
+    ax2.text(t1 / 2, -ROLL_SPEED * 0.7, 'Rear (4,5) opposite',
+             ha='center', fontsize=8, color='#e74c3c', alpha=0.8)
 
     for t_start, t_end, label in stages:
         ax2.axvline(x=t_start, color='gray', linestyle='--', linewidth=1, alpha=0.6)

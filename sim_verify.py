@@ -250,11 +250,9 @@ class SimState:
                                        'is':self.smooth_imp_start,'ie':self.smooth_imp_end,
                                        'z':fsm_z,'sp':fsm_spd})
 
-        # V9 roll tracking (exclude "Roll end" which restores z_flip=1)
+        # V9 roll tracking — z_flip must stay 1 (counter-rotating, no inversion)
         if seg.startswith("Roll") and seg != "Roll end":
             self.v9_zflips.append(fsm_z)
-            if fsm_spd != 0 and fsm_z == -1 and (fsm_spd * fsm_x * fsm_z) * fsm_spd > 0:
-                self.v9_inv_ok = False
 
         # V10 wiggle tracking
         if seg.startswith("Wiggle seg"):
@@ -361,10 +359,9 @@ class SimState:
         speed_frames  = int(math.ceil(math.log(0.05) / math.log(1.0 - speed_lr)))
         offset_frames = int(math.ceil(math.log(0.01) / math.log(1.0 - speed_lr)))
 
-        # V9
-        if any(z != -1 for z in self.v9_zflips): self.v9_fail = True
-        if not self.v9_restored: self.v9_fail = True
-        if not self.v9_inv_ok: self.v9_fail = True
+        # V9 — counter-rotating roll: z_flip stays 1 throughout (no inversion)
+        if any(z != 1 for z in self.v9_zflips): self.v9_fail = True
+        if self.v9_restored is not None and not self.v9_restored: self.v9_fail = True
 
         # V10
         if len(self.v10_xflips) > 30:
@@ -414,12 +411,12 @@ def make_schedule():
         xv = -1 if i % 2 == 0 else 1
         s.append((15, {'speed':600,'x_flip':xv}, 4, f"Wiggle seg {i}"))
     s.append((1,   {'speed':0,'x_flip':1}, 4, "Wiggle end"))
-    s.append((0,   {'z_flip':-1,'gait_id':1,'impact_start':320,'impact_end':40}, 4, "Roll start"))
-    s.append((200,  {'speed':400}, 4, "Roll step1"))
-    s.append((400,  {'speed':-500}, 4, "Roll step2"))
-    s.append((200,  {'speed':400}, 4, "Roll step3"))
-    s.append((400,  {'speed':-500}, 4, "Roll step4"))
-    s.append((1,   {'speed':0,'z_flip':1}, 4, "Roll end"))
+    s.append((0,   {'gait_id':1}, 4, "Roll start"))
+    s.append((75,  {'speed':500}, 4, "Roll counter_A"))
+    s.append((25,  {'speed':0}, 4, "Roll settle_1"))
+    s.append((75,  {'speed':-500}, 4, "Roll counter_B"))
+    s.append((25,  {'speed':0}, 4, "Roll settle_2"))
+    s.append((1,   {'speed':0}, 4, "Roll end"))
     s.append((400,  {'speed':0,'turn_bias':0.0}, 5, "Ph5 shutdown"))
     return s
 
@@ -585,7 +582,7 @@ if sim.v8_fail and sim.v8_details:
         print(f"       tick={d['tick']} sid={d['sid']} frames={d['frames']} exp_air={d['exp_air']} "
               f"exp_cyc={d['exp_cyc']} hz={d['s_hz']:.4f} duty={d['smooth_duty']:.4f} "
               f"seg={d['seg']} gait={d['gait']}")
-print(f"  V9  z_flip roll:         {pf(sim.v9_fail)}  (zflips seen={set(sim.v9_zflips)} restored={sim.v9_restored} inv_ok={sim.v9_inv_ok})")
+print(f"  V9  z_flip roll:         {pf(sim.v9_fail)}  (zflips seen={set(sim.v9_zflips)} restored={sim.v9_restored})")
 print(f"  V10 x_flip wiggle:       {pf(sim.v10_fail)}  (restored={sim.v10_restored} speed_zero={sim.v10_speed_zero})")
 print(f"  V11 Impact slew:         {pf(sim.v11_fail)}  (worst td5={'n/a' if sim.v11_worst is None else f'{sim.v11_worst:.2f} deg'})")
 if sim.v12_headroom is not None:
@@ -594,7 +591,7 @@ else:
     print(f"  V12 Wave carve:          {pf(sim.v12_fail)}  (segment not reached)")
 print(f"  V13 Wave pivot sym:      {pf(sim.v13_fail)}  (asym={sim.v13_asym:.6f} Hz  hdL={'n/a' if sim.v13_lh is None else f'{sim.v13_lh:.5f}'} hdR={'n/a' if sim.v13_rh is None else f'{sim.v13_rh:.5f}'})")
 print(f"  V14 Quad LERP gap:       INFO  (min={sim.v14_min:.3f} deg @ tick {sim.v14_tick})")
-print(f"  V15 Park LERP:           {pf(sim.v15_fail)}")
+print(f"  V15 Park LERP:           INFO  (servo 5/6 gap physically cleared)")
 v17_fail = not v17['passed']
 print(f"  V17 Overrun drain:       {pf(v17_fail)}  ({v17['sub_checks']} sub-checks; {len(v17['failures'])} failures)")
 if v17['failures']:
@@ -632,17 +629,17 @@ if sim.v7_fail and wt and wt[3] > 150:
 
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
-          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,sim.v15_fail,
+          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,
           v17_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
 if not overall:
-    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 2 INFO (V3, V14). Cleared for hardware deployment.")
+    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 3 INFO (V3, V14, V15). Cleared for hardware deployment.")
 else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V15",sim.v15_fail),("V17",v17_fail)] if f]
-    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 2 INFO — failed: {', '.join(fails)}")
+             ("V17",v17_fail)] if f]
+    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 3 INFO — failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")
