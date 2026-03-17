@@ -108,8 +108,8 @@ DIRECTION_MAP = {
 
 # Calibrated zero points (Legs pointing straight down)
 HOME_POSITIONS = {
-    1: 2233, 2: 2731, 3: 4086,
-    4: 2606, 5: 253,  6: 771,
+    1: 3447, 2: 955,  3: 1420,
+    4: 1569, 5: 3197, 6: 3175,
 }
 
 # Servo ID -> shared_servo_loads array index (0-based, clean mapping)
