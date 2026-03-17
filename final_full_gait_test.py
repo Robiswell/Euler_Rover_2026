@@ -280,6 +280,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 jit_mean = sum(dt_samples) / len(dt_samples) if dt_samples else 0.0
                 jit_std = (sum((x - jit_mean) ** 2 for x in dt_samples) / len(dt_samples)) ** 0.5 if dt_samples else 0.0
                 gov_pct = int(round(gov_clamp_count * 100 / max(1, len(dt_samples)))) if dt_samples else 0
+                pherr_gov_str = f" PhGov:{int((1.0 - last_ph_scale) * 100):02d}%" if pherr_gov_active else ""
                 te_str = ",".join(str(te_cycle_counts[sid]) for sid in ALL_SERVOS)
                 stall_dur_parts = []
                 for s in ALL_SERVOS:
@@ -294,7 +295,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
                         f"{ghost_tag}{vwarn_tag}{twarn_tag}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
-                        f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}°"
+                        f" Gov:{gov_pct:02d}%{pherr_gov_str} TE:{te_str} PhErr:{ref_phase_error:+.1f}°"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
         except:
             pass
@@ -459,6 +460,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     max_phase_error_prev = 0.0
     pherr_gov_active     = False
     pherr_low_scale_start = None
+    last_ph_scale         = 1.0   # last computed ph_scale; 1.0 when governor inactive
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
@@ -730,6 +732,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if pherr_gov_active:
                 ph_scale = max(PHERR_FLOOR_SCALE,
                                1.0 - (max_phase_error_prev - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+                last_ph_scale = ph_scale
                 hz_L *= ph_scale
                 hz_R *= ph_scale
                 if ph_scale < 0.5:
@@ -1135,7 +1138,7 @@ if __name__ == "__main__":
     # =====================================================================
 
     # --- Arduino serial config ---
-    ARDUINO_PORT = "/dev/ttyACM0"
+    ARDUINO_PORT = "/dev/ttyACM_ARDUINO"
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
