@@ -1700,11 +1700,6 @@ if __name__ == "__main__":
             counter_attr = "_consecutive_front" if is_front else "_consecutive_rear"
             count = getattr(self, counter_attr)
 
-            # Warmup: ignore readings until sensors settle
-            self._warmup_frames += 1
-            if self._warmup_frames <= CLIFF_WARMUP:
-                return False
-
             if reading == -1:
                 # Ground in blind zone (very close) — NOT a cliff. Reset.
                 setattr(self, counter_attr, 0)
@@ -1720,9 +1715,14 @@ if __name__ == "__main__":
                 setattr(self, counter_attr, count + 1)
                 return count + 1 >= 2
 
-            # Update ground EMA with valid low readings
+            # Update ground EMA with valid low readings (runs even during warmup so baseline converges)
             if 0 < reading <= 40:
                 self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
+
+            # Warmup: suppress detection but EMA already updated above
+            self._warmup_frames += 1
+            if self._warmup_frames <= CLIFF_WARMUP:
+                return False
 
             # Cliff candidate: absolute > 30 OR delta > EMA + 10
             is_candidate = (reading > 30) or (reading > self._ground_ema + 10)
