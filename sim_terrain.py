@@ -683,7 +683,7 @@ def main():
     print("=" * 65)
     chassis_bottom_mm = 74.058 - 45.0
     print(f"  Body ground clearance (calculated from CAD):")
-    print(f"    Leg outer reach at 0 splay: 122.058 mm")
+    print(f"    Leg outer reach at 0 splay: 125 mm (physical) / 122.058 mm (CAD)")
     print(f"    Shaft center -> chassis bottom: 45 mm")
     print(f"    Ground clearance (shaft to ground): 122.058 - 48.0 = 74.058 mm")
     print(f"    Chassis bottom from ground: 74.058 - 45.0 = {chassis_bottom_mm:.1f} mm")
