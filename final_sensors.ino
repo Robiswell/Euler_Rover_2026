@@ -288,7 +288,7 @@ void setup() {
   // Use an I2C timeout to prevent the sketch from hanging forever if the IMU/bus stalls.
   //  I2C transfer can legitimately take more than 3 ms. If Wire resets the bus that early,
   //   imu.begin() can fail and you'll see "BNO085 not detected" even though the wiring is
-  Wire.setWireTimeout(25000, true);  // FIX 5: 3 ms I2C timeout, reset bus on timeout
+  Wire.setWireTimeout(25000, true);  // FIX 5: 25 ms I2C timeout, reset bus on timeout
 
   // IMU initialisation (BNO085 at address 0x4A)
   if (!imu.begin(0x4A, Wire)) {
@@ -340,9 +340,12 @@ void loop() {
   }
   prev_millis = loop_start;
 
-  // --- Read 8 ultrasonic sensors sequentially (avoids crosstalk) ---
+  // --- Read 8 ultrasonic sensors in interleaved order (reduces acoustic crosstalk) ---
+  // Alternates front/rear so physically adjacent sensors never fire back-to-back.
+  static const uint8_t FIRE_ORDER[8] = {0, 5, 2, 7, 4, 1, 6, 3};
   for (int i = 0; i < 8; i++) {
-    distances_cm[i] = measureClassified((uint8_t)i);
+    uint8_t idx = FIRE_ORDER[i];
+    distances_cm[idx] = measureClassified(idx);
     delay(SENSOR_GAP_MS);
   }
 

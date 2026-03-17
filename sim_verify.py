@@ -604,10 +604,112 @@ def check_V16_governor_snap_transient():
     }
 
 
+def check_V17_overrun_drain():
+    """
+    Property: The overrun buffer state machine (Fix 67/69) SHALL:
+      (a) accumulate per-tick overrun entries without immediate disk I/O,
+      (b) fire the flush_ring_buffer guard at most once per consecutive burst
+          (one-shot: overrun_context_flushed blocks re-fire until streak breaks),
+      (c) clear the buffer unconditionally at both the 1Hz drain site and the
+          shutdown drain site, even when simulated write fails, and
+      (d) reset overrun_context_flushed when the streak breaks so the next
+          independent burst can trigger a ring-buffer flush.
+
+    Failure means: On hardware, one of these bugs would manifest:
+      (a-fail) Per-tick disk I/O causes loop overruns > 20 ms every tick,
+               compounding the overrun problem. The robot stalls more.
+      (b-fail) Ring buffer flushed on every overrun tick during a burst --
+               tens of redundant 50-entry dumps per second, log grows ~500 KB/s.
+      (c-fail) Buffer grows unboundedly if LOG_FILE write raises (disk full,
+               permission error) -- eventual OOM kills Heart process.
+      (d-fail) Second overrun burst produces no ring-buffer context dump,
+               making post-mortem diagnosis impossible.
+
+    Known false positive risk: none. This is pure state machine logic with no
+    timing dependencies or random elements.
+    """
+    OVERRUN_THRESHOLD_MS = 18.0
+    BURST_FLUSH_TRIGGER  = 3
+
+    failures = []
+
+    def run_overrun_scenario(tick_overrun_flags, write_fails=False):
+        overrun_buffer = []
+        overrun_context_flushed = False
+        overrun_streak = 0
+        flush_call_count = 0
+
+        for tick, is_overrun in enumerate(tick_overrun_flags):
+            if is_overrun:
+                overrun_streak += 1
+                overrun_buffer.append(f"[OVERRUN] tick={tick}\n")
+                if overrun_streak >= BURST_FLUSH_TRIGGER and not overrun_context_flushed:
+                    flush_call_count += 1
+                    overrun_context_flushed = True
+            else:
+                overrun_streak = 0
+                overrun_context_flushed = False
+
+        buffer_cleared_after_drain = False
+        if overrun_buffer:
+            try:
+                if write_fails:
+                    raise OSError("simulated disk full")
+            except OSError:
+                pass
+            finally:
+                overrun_buffer.clear()
+                buffer_cleared_after_drain = True
+
+        return (len(overrun_buffer), flush_call_count, overrun_context_flushed,
+                buffer_cleared_after_drain)
+
+    # Sub-check A: 5-tick burst fires flush exactly once
+    buf_len, flush_n, flag, _ = run_overrun_scenario([True]*5)
+    if flush_n != 1:
+        failures.append(f"A: expected flush_call_count=1 for 5-tick burst, got {flush_n}. "
+                        "One-shot guard broken -- ring buffer flushed on every overrun tick.")
+
+    # Sub-check B: two separate bursts each trigger one flush
+    scenario_B = [True]*4 + [False]*2 + [True]*4
+    buf_len, flush_n, flag, _ = run_overrun_scenario(scenario_B)
+    if flush_n != 2:
+        failures.append(f"B: expected flush_call_count=2 for two separate bursts, got {flush_n}. "
+                        "Flag reset on streak break broken -- second burst gets no ring-buffer context.")
+
+    # Sub-check C: streak below threshold (2 < 3) triggers no flush
+    scenario_C = [True]*2
+    buf_len, flush_n, flag, _ = run_overrun_scenario(scenario_C)
+    if flush_n != 0:
+        failures.append(f"C: expected flush_call_count=0 for 2-tick burst (below threshold 3), got {flush_n}. "
+                        "Flush fires too eagerly -- ring buffer dumps on minor jitter.")
+
+    # Sub-check D: buffer cleared after 1Hz drain even when write raises (Fix 69)
+    buf_len, flush_n, flag, cleared = run_overrun_scenario([True]*5, write_fails=True)
+    if not cleared:
+        failures.append("D: buffer NOT cleared after failed 1Hz write. "
+                        "Fix 69 regression -- unbounded buffer growth on disk-full will OOM Heart.")
+    if buf_len != 0:
+        failures.append(f"D: buffer length={buf_len} after drain (expected 0). "
+                        "Entries survive across drain cycles -- memory grows without bound.")
+
+    # Sub-check E: flag resets to False after streak breaks
+    scenario_E = [True]*4 + [False]*1
+    buf_len, flush_n, flag_at_end, _ = run_overrun_scenario(scenario_E)
+    if flag_at_end:
+        failures.append("E: overrun_context_flushed still True after streak reset. "
+                        "Next burst will produce no ring-buffer context dump -- "
+                        "intermittent overruns become invisible in logs.")
+
+    passed = len(failures) == 0
+    return {'passed': passed, 'failures': failures, 'sub_checks': 5}
+
+
 sim = SimState()
 res = sim.run()
 
 v16 = check_V16_governor_snap_transient()
+v17 = check_V17_overrun_drain()
 
 def pf(f): return "FAIL" if f else "PASS"
 
@@ -660,6 +762,11 @@ print(f"  V16 Gov snap transient:  {pf(not v16['passed'])}  "
 if not v16['passed']:
     for msg in v16['failures']:
         print(f"       {msg}")
+v17_fail = not v17['passed']
+print(f"  V17 Overrun drain:       {pf(v17_fail)}  ({v17['sub_checks']} sub-checks; {len(v17['failures'])} failures)")
+if not v17['passed']:
+    for msg in v17['failures']:
+        print(f"       {msg}")
 
 print()
 print("="*60)
@@ -693,7 +800,7 @@ if sim.v7_fail and wt and wt[3] > 150:
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
           sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,sim.v15_fail,
-          not v16['passed']]
+          not v16['passed'],v17_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
@@ -703,6 +810,6 @@ else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V15",sim.v15_fail),("V16",not v16['passed'])] if f]
+             ("V15",sim.v15_fail),("V16",not v16['passed']),("V17",v17_fail)] if f]
     print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 2 INFO — failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")

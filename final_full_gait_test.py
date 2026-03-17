@@ -100,6 +100,7 @@ LEG_EFFECTIVE_RADIUS    = 74.058   # mm — shaft center to ground at θ=0° (in
 SHAFT_TO_CHASSIS_BOTTOM = 45.0     # mm — shaft center to bottom face of servo body
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance on flat surfaces
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
+SERVO_SPEED_GOVERNOR_CAP = 2800.0  # 91% of STS3215 max (3072), safe operational ceiling
 
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
@@ -964,7 +965,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             stance_sweep = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
             air_sweep    = get_air_sweep(stance_sweep)
 
-            max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
+            max_safe_hz = (SERVO_SPEED_GOVERNOR_CAP / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
 
             # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
             # When air-phase feedforward exceeds FEEDFORWARD_CAP, phase lag widens the
@@ -1718,7 +1719,9 @@ if __name__ == "__main__":
 
             # Update ground EMA with valid low readings (runs even during warmup so baseline converges)
             if 0 < reading <= 40:
-                self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
+                # Asymmetric EMA: slow-track body dips (scraping), fast-track increases (cliff edges)
+                ema_alpha = self._alpha / 4 if reading < self._ground_ema else self._alpha
+                self._ground_ema = ema_alpha * reading + (1 - ema_alpha) * self._ground_ema
 
             # Warmup: suppress detection but EMA already updated above
             if self._warmup_frames <= CLIFF_WARMUP:
@@ -2397,7 +2400,7 @@ if __name__ == "__main__":
                 (TE cycling) still fires independently via load magnitude check
 
         Geometry (from design specs):
-          Leg radius = 75mm, arc = 210°. Chassis 510x280x75mm.
+          Leg radius = 74.058mm (effective), arc = 210°. Chassis 511x220x80mm.
           Inverted window: 140/220 (±40° around 180°). Legs reach floor when inverted. ✓
 
         Physics caveat: even with DIRECTION_MAP bypass, lateral friction on wet sand
