@@ -78,6 +78,10 @@ NAV_STATE_NAMES = {
     4: "BACKWARD", 5: "PIVOT", 6: "WIGGLE", 7: "STOP_SAFE",
 }
 
+NAV_IMU_SETTLE_TICKS = 5  # ignore IMU safety checks for first 0.5s (BNO085 convergence)
+CLIFF_WARMUP = 5  # frames before cliff detection active (sensor settle)
+RAPID_ROTATION_THRESHOLD = 3.5  # rad/s (~200 deg/s) -- walking oscillation peaks ~2.0
+
 # Suppress brain_log in test context
 def brain_log(msg):
     pass
@@ -185,13 +189,15 @@ class CliffDetector:
 
     def __init__(self, alpha=0.2):
         self._alpha = alpha
-        self._ground_ema = 15.0
+        self._ground_ema = 25.0
         self._consecutive_front = 0
         self._consecutive_rear = 0
+        self._warmup_frames = 0
 
     def update(self, fcd, rcd):
         """Update cliff detection with new FCD and RCD readings.
         Returns (front_cliff, rear_cliff) booleans."""
+        self._warmup_frames += 1
         front_cliff = self._check_cliff(fcd, is_front=True)
         rear_cliff = self._check_cliff(rcd, is_front=False)
         return front_cliff, rear_cliff
@@ -205,14 +211,22 @@ class CliffDetector:
             setattr(self, counter_attr, 0)
             return False
 
+        # 300.0 = max range timeout (acoustic scatter on sand) -- treat as blind zone
+        if reading >= 300.0:
+            setattr(self, counter_attr, 0)
+            return False
+
         if reading is None:
             setattr(self, counter_attr, count + 1)
             return count + 1 >= 2
 
-        # Update ground EMA with valid low readings (before candidate check,
-        # matching production _check_cliff line 1367-1368)
+        # Update ground EMA with valid low readings (runs during warmup so baseline converges)
         if 0 < reading <= 40:
             self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
+
+        # Warmup: suppress detection but EMA already updated above
+        if self._warmup_frames <= CLIFF_WARMUP:
+            return False
 
         # Cliff candidate: absolute > 30 OR delta > EMA + 10
         is_candidate = (reading > 30) or (reading > self._ground_ema + 10)
@@ -384,6 +398,7 @@ class NavStateMachine:
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0
+        self._tick_count = 0
 
     def _dwell_active(self):
         return (time.monotonic() - self.dwell_start) < self.dwell_duration
@@ -443,15 +458,18 @@ class NavStateMachine:
         else:
             self.front_danger_frames = 0
 
-        # P1: Tipover
-        if upright < 0.15:
-            self._transition(NAV_STOP_SAFE)
-            return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
+        self._tick_count += 1
 
-        # P2: Unexpected rapid rotation
-        if angular_rate > 1.5 and self.state != NAV_PIVOT_TURN:
-            self._transition(NAV_STOP_SAFE)
-            return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
+        if self._tick_count >= NAV_IMU_SETTLE_TICKS:
+            # P1: Tipover
+            if upright < 0.15:
+                self._transition(NAV_STOP_SAFE)
+                return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
+
+            # P2: Unexpected rapid rotation
+            if angular_rate > RAPID_ROTATION_THRESHOLD and self.state not in (NAV_PIVOT_TURN, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD, NAV_WIGGLE):
+                self._transition(NAV_STOP_SAFE)
+                return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
         # P3: Critical battery
         if voltage < 10.5:
@@ -1052,32 +1070,79 @@ def run_n3():
     cid = "N3"
 
     # --- P1: Tipover (upright < 0.15) ---
+    # Fix 70: P1 suppressed for first NAV_IMU_SETTLE_TICKS ticks (BNO085 convergence).
+    # Warm up 4 safe ticks so tick 5 (_tick_count=5 >= 5) fires P1.
     nav = fresh_nav()
     imu_tip = make_imu(upright_quality=0.1)
+    for _ in range(4):
+        fsm_update_simple(nav)
     state, speed, turn, x_flip, step = fsm_update_simple(nav, imu=imu_tip)
     check(cid, state == NAV_STOP_SAFE, f"P1 tipover: state={state} expected {NAV_STOP_SAFE}")
     check(cid, speed == 0, f"P1 tipover: speed={speed} expected 0")
 
-    # --- P2: Rapid rotation (angular_rate > 1.5, not pivot) ---
+    # --- P2: Rapid rotation (angular_rate > RAPID_ROTATION_THRESHOLD=3.5, Fix 72) ---
+    # Fix 70: P2 also suppressed during settle. Fix 72: threshold raised 1.5->3.5.
     nav = fresh_nav()
-    imu_spin = make_imu(angular_rate=2.0)
+    imu_spin = make_imu(angular_rate=4.0)
+    for _ in range(4):
+        fsm_update_simple(nav)
     state, speed, turn, x_flip, step = fsm_update_simple(nav, imu=imu_spin)
     check(cid, state == NAV_STOP_SAFE, f"P2 rotation: state={state} expected {NAV_STOP_SAFE}")
 
-    # P2 should NOT fire during pivot — set state to PIVOT, use all-danger frame
+    # P2 should NOT fire during pivot -- set state to PIVOT, use all-danger frame
     # to prevent P14 from overriding state, so we stay in PIVOT through the check
     nav2 = fresh_nav()
     nav2.state = NAV_PIVOT_TURN
     nav2.prev_state = NAV_BACKWARD
     nav2.consecutive_pivot_count = 0
     nav2.front_danger_frames = 2
-    imu_spin2 = make_imu(angular_rate=2.0)
+    nav2._tick_count = NAV_IMU_SETTLE_TICKS  # past settle guard
+    imu_spin2 = make_imu(angular_rate=4.0)
     # All-danger frame with rear safe so P9 fires (pivot), not P2 STOP_SAFE
     frame_deadend2 = make_frame(fdl=10, fcf=10, fdr=10, rdl=100, rdr=100, rcf=100)
     state2, _, _, _, step2 = fsm_update_simple(nav2, frame=frame_deadend2, imu=imu_spin2)
     # P9 triggers PIVOT_TURN; P2 is skipped because state is PIVOT_TURN
     check(cid, state2 == NAV_PIVOT_TURN,
           f"P2 during pivot should be exempted: state={NAV_STATE_NAMES.get(state2)} step={step2}")
+
+    # --- N3.A: P1 suppressed during IMU settle period (Fix 70) ---
+    # Physical failure caught: BNO085 reports garbage upright_quality on startup
+    # (reads near 0 during quaternion convergence) -> robot stops before moving.
+    nav_a = fresh_nav()
+    imu_tip_a = make_imu(upright_quality=0.05)
+    for tick in range(1, 4):  # ticks 1-3: settle guard active (_tick_count < 5)
+        s_a, _, _, _, _ = fsm_update_simple(nav_a, imu=imu_tip_a)
+        check(cid, s_a != NAV_STOP_SAFE,
+              f"N3.A: P1 should be suppressed during IMU settle tick {tick}: got {NAV_STATE_NAMES.get(s_a)}")
+
+    # --- N3.B: P2 suppressed during IMU settle period (Fix 70) ---
+    # Physical failure caught: gyro spins up noisily on boot -> spurious STOP_SAFE.
+    nav_b = fresh_nav()
+    imu_spin_b = make_imu(angular_rate=4.0)
+    for tick in range(1, 4):  # ticks 1-3: settle guard active
+        s_b, _, _, _, _ = fsm_update_simple(nav_b, imu=imu_spin_b)
+        check(cid, s_b != NAV_STOP_SAFE,
+              f"N3.B: P2 should be suppressed during IMU settle tick {tick}: got {NAV_STATE_NAMES.get(s_b)}")
+
+    # angular_rate=2.0 no longer triggers P2 (threshold raised 1.5->3.5, Fix 72)
+    # Catches regression: old threshold would stop robot during normal walking arcs.
+    nav_b2 = fresh_nav()
+    nav_b2._tick_count = NAV_IMU_SETTLE_TICKS  # past settle
+    s_b2, _, _, _, _ = fsm_update_simple(nav_b2, imu=make_imu(angular_rate=2.0))
+    check(cid, s_b2 != NAV_STOP_SAFE,
+          f"N3.B: angular_rate=2.0 should NOT trigger P2 (threshold now 3.5): got {NAV_STATE_NAMES.get(s_b2)}")
+
+    # --- N3.C: P2 suppressed in ARC_LEFT, ARC_RIGHT, BACKWARD, WIGGLE (Fix 72) ---
+    # Physical failure caught: walking rotation oscillation (~2-3 rad/s) during
+    # arcs/reversals was triggering STOP_SAFE mid-maneuver.
+    for exempt_state in (NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD, NAV_WIGGLE):
+        nav_c = fresh_nav()
+        nav_c.state = exempt_state
+        nav_c._tick_count = NAV_IMU_SETTLE_TICKS  # past settle
+        s_c, _, _, _, step_c = fsm_update_simple(nav_c, imu=make_imu(angular_rate=5.0))
+        check(cid, s_c != NAV_STOP_SAFE,
+              f"N3.C: P2 should be suppressed in {NAV_STATE_NAMES.get(exempt_state)}: "
+              f"got {NAV_STATE_NAMES.get(s_c)} step={step_c}")
 
     # --- P3: Critical battery (voltage < 10.5) ---
     nav = fresh_nav()
@@ -1295,6 +1360,8 @@ def run_n5():
 
     # FCD > 30 absolute -> cliff candidate
     cliff = CliffDetector()
+    for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
+        cliff.update(15, 15)
     # Frame 1: candidate, not confirmed yet
     fc1, rc1 = cliff.update(35, 15)
     check(cid, fc1 is False, f"single frame should not confirm cliff: got {fc1}")
@@ -1317,14 +1384,16 @@ def run_n5():
 
     # RCD rear cliff
     cliff4 = CliffDetector()
+    for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
+        cliff4.update(15, 15)
     _, rc1 = cliff4.update(15, 35)  # rear candidate
     _, rc2 = cliff4.update(15, 35)  # rear confirmed
     check(cid, rc2 is True, f"rear cliff should confirm after 2 frames: got {rc2}")
 
     # Ground EMA updates from valid readings in (0, 40]
     # update(fcd=20, rcd=15): both are non-candidates (< 30 and < EMA+10)
-    #   fcd=20: not candidate, EMA = 0.2*20 + 0.8*15.0 = 16.0
-    #   rcd=15: not candidate, EMA = 0.2*15 + 0.8*16.0 = 15.8
+    #   EMA_init=25.0, fcd=20: EMA = 0.2*20 + 0.8*25.0 = 24.0
+    #   rcd=15: EMA = 0.2*15 + 0.8*24.0 = 22.2
     cliff5 = CliffDetector()
     initial_ema = cliff5._ground_ema
     cliff5.update(20, 15)  # valid non-candidate readings
@@ -1347,6 +1416,7 @@ def run_n5():
     # RCD=-1 to avoid rear reading polluting the shared EMA.
     cliff7 = CliffDetector()
     cliff7._ground_ema = 10.0
+    cliff7._warmup_frames = CLIFF_WARMUP + 1  # bypass warmup for delta test
     fc_d1, _ = cliff7.update(28, -1)
     fc_d2, _ = cliff7.update(28, -1)
     check(cid, fc_d2 is True, f"delta-based cliff should confirm: reading=28 > EMA(~10)+10")
@@ -1358,6 +1428,37 @@ def run_n5():
     fc_reset, _ = cliff8.update(35, 15)  # candidate again, count=1
     check(cid, fc_reset is False,
           "after -1 reset, single candidate should not confirm cliff")
+
+    # --- N5.A: 300.0 reading treated as blind zone, not cliff (Fix 71) ---
+    # Physical failure caught: acoustic scatter on sand returns HC-SR04 max-range
+    # timeout (300cm). Without this fix it triggers spurious cliff stops.
+    cliff_a = CliffDetector()
+    for _ in range(CLIFF_WARMUP):  # warm past warmup counter
+        cliff_a.update(15, 15)
+    fc_300, _ = cliff_a.update(300.0, 15)   # 1st frame with 300
+    fc_300b, _ = cliff_a.update(300.0, 15)  # 2nd frame -- would confirm if treated as cliff
+    check(cid, fc_300b is False,
+          f"N5.A: 300.0 reading should NOT trigger cliff (blind zone sentinel): got {fc_300b}")
+
+    # --- N5.B: Warmup suppression for cliff detection (Fix 71) ---
+    # Physical failure caught: HC-SR04 returns invalid readings on first frames ->
+    # spurious cliff detection before sensor has settled.
+    # _warmup_frames increments once per update() call. CLIFF_WARMUP=5.
+    # Updates 1-5: suppressed. Update 6: first active (candidate, count=1).
+    # Update 7: confirmed (count=2).
+    cliff_b = CliffDetector()
+    for i in range(CLIFF_WARMUP):  # updates 1-5: cliff still in warmup
+        fc_b, _ = cliff_b.update(50.0, 15)  # fcd=50 > 30 = cliff candidate if active
+        check(cid, fc_b is False,
+              f"N5.B: front cliff suppressed during warmup update {i + 1}: got {fc_b}")
+    # Update 6: first active check -- candidate (count=1), not yet confirmed
+    fc_b4, _ = cliff_b.update(50.0, 15)
+    check(cid, fc_b4 is False,
+          f"N5.B: single active candidate should not confirm cliff: got {fc_b4}")
+    # Update 5: second consecutive active candidate -- confirmed
+    fc_b5, _ = cliff_b.update(50.0, 15)
+    check(cid, fc_b5 is True,
+          f"N5.B: cliff should confirm after warmup + 2 consecutive frames: got {fc_b5}")
 
 
 # =========================================================================
@@ -1673,6 +1774,8 @@ def run_n9():
     # Scenario 4: Cliff at speed -> BACKWARD -> clears -> FORWARD
     nav = fresh_nav()
     cliff = CliffDetector()
+    for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
+        cliff.update(15, 15)
     # 2 cliff frames
     cliff.update(50, 15)  # candidate
     fc, _ = cliff.update(50, 15)  # confirmed
@@ -1833,6 +1936,8 @@ def run_n11():
 
     # IMU dead (qmag < 0.5) -> upright_quality=0.0 -> triggers P1 STOP_SAFE
     nav = fresh_nav()
+    for _ in range(NAV_IMU_SETTLE_TICKS - 1):  # warmup past IMU settle guard
+        fsm_update_simple(nav)
     frame_dead_imu = make_frame(qw=0.0, qx=0.0, qy=0.0, qz=0.0)
     imu_dead = compute_imu(frame_dead_imu)
     check(cid, imu_dead["upright_quality"] == 0.0,

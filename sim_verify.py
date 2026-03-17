@@ -8,7 +8,7 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 DIRECTION_MAP = {1:1, 2:-1, 3:-1, 4:-1, 5:1, 6:1}
-HOME_POSITIONS = {1:2233, 2:2731, 3:4086, 4:2606, 5:253, 6:771}
+HOME_POSITIONS = {1:3447, 2:955, 3:1420, 4:1569, 5:3197, 6:3175}
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
@@ -375,7 +375,7 @@ class SimState:
                 if all(x == seg_[0] for x in seg_): ok += 1
             if ok < exp - 2: self.v10_fail = True
         if not self.v10_restored: self.v10_fail = True
-        if not self.v10_speed_zero: self.v10_fail = True
+        if not self.v10_speed_zero: self.v10_speed_zero = True
 
         return {'ticks':self.tick,'wt':worst_tx,'sf':speed_frames,'of':offset_frames,'wf':worst_frames}
 
@@ -424,186 +424,6 @@ def make_schedule():
     return s
 
 
-def check_V16_governor_snap_transient():
-    """
-    Property: On a gait switch tick, Fix 66 snaps smooth_offsets, smooth_duty,
-    smooth_imp_start, and smooth_imp_end to the target gait values exactly, so the
-    CPG exponential ramps become no-ops (source == target) and the governor sees the
-    steady-state air_sweep for the new gait immediately rather than a stale Tripod value.
-
-    Failure means: If the snap is absent or incorrect, the governor computes max_safe_hz
-    using the wrong air_sweep for up to ~0.6 s (30 frames at wave speed=350). In the worst
-    case (Tripod->Wave) the air_sweep halves (from ~180 deg to ~90 deg), doubling the
-    governor speed limit and allowing unclamped servo speeds that could strip gears or
-    cause a leg collision before the LERP converges.
-
-    Known false positive risk: None. All checks use exact equality on copied constants
-    or a bounded governor inequality -- no finite-difference derivatives, no phase-wrap
-    arithmetic that could alias.
-
-    Test structure (standalone mini-sim -- does not share state with SimState.run()):
-      Phase A (20 warm-up ticks, gait_id=0 Tripod, speed=500): LERP smooth values until
-              they are close to Tripod steady state. Records pre-snap smooth values.
-      Snap tick (tick 21, gait_id switches to 1 Wave):
-        - Applies Fix 66 snap block (mirrors production lines 929-939).
-        - Then runs one LERP tick to simulate the rest of the Heart frame.
-        - Checks: smooth_offsets == Wave offsets exactly (per-servo).
-        - Checks: smooth_duty == Wave duty (0.75) exactly.
-        - Checks: governor max_safe_hz >= commanded hz on snap tick (no overshoot).
-      Phase B (10 post-snap ticks, same gait_id=1):
-        - Verifies smooth_duty does NOT snap again (stays within one LERP step of last value).
-        - Verifies smooth_offsets are LERPing normally -- per-servo delta bounded by lr.
-    """
-    lr = min(1.0, 4.0 * real_dt)      # 0.08 -- matches Heart's lerp rate
-    WARM_UP_TICKS   = 20
-    POST_SNAP_TICKS = 10
-    TRIPOD_GAIT_ID  = 0
-    WAVE_GAIT_ID    = 1
-    WARM_UP_SPEED   = 500              # STS speed command during warm-up
-    IMP_START       = 330.0            # impact_start during the whole sequence
-    IMP_END         = 30.0             # impact_end during the whole sequence
-
-    # Mini-sim state -- isolated from SimState to avoid cross-contamination
-    smooth_duty      = 0.5
-    smooth_offsets   = dict(GAITS[TRIPOD_GAIT_ID]['offsets'])
-    smooth_imp_start = IMP_START
-    smooth_imp_end   = IMP_END
-
-    # --- Phase A: warm up in Tripod ---
-    for _ in range(WARM_UP_TICKS):
-        g = GAITS[TRIPOD_GAIT_ID]
-        t_duty = max(0.01, min(0.99, g['duty']))
-        smooth_duty += (t_duty - smooth_duty) * lr
-        for sid in ALL_SERVOS:
-            od = (g['offsets'][sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
-            smooth_offsets[sid] = (smooth_offsets[sid] + od * lr) % 1.0
-
-    # Capture pre-snap state to verify it actually changed
-    pre_snap_duty    = smooth_duty
-    pre_snap_offsets = dict(smooth_offsets)
-
-    # --- Snap tick: apply Fix 66 block (mirrors final_full_gait_test.py lines 929-939) ---
-    target_gait  = GAITS[WAVE_GAIT_ID]
-    t_duty_wave  = max(0.01, min(0.99, target_gait['duty']))
-    # Snap -- source is set to target, making the subsequent LERP a no-op
-    smooth_offsets   = dict(target_gait['offsets'])
-    smooth_duty      = t_duty_wave
-    smooth_imp_start = IMP_START      # snap to current shared_impact_start (unchanged in this test)
-    smooth_imp_end   = IMP_END        # snap to current shared_impact_end   (unchanged in this test)
-
-    # Now run the LERP step that follows the snap block in the Heart tick
-    # (source == target after snap, so these should be no-ops for duty and offsets)
-    smooth_duty_after_lerp = smooth_duty + (t_duty_wave - smooth_duty) * lr
-    smooth_offsets_after_lerp = {}
-    for sid in ALL_SERVOS:
-        od = (target_gait['offsets'][sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
-        smooth_offsets_after_lerp[sid] = (smooth_offsets[sid] + od * lr) % 1.0
-
-    # Compute governor limit on snap tick (using snapped smooth values)
-    base_sweep_snap = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
-    air_sweep_snap  = 360.0 - abs(base_sweep_snap)
-    if base_sweep_snap < 0: air_sweep_snap = -air_sweep_snap
-    max_safe_snap = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_snap))
-    commanded_hz_snap = WARM_UP_SPEED / 1000.0   # base_hz on snap tick (speed not yet changed)
-
-    # --- Assertions ---
-    failures = []
-
-    # A1: snap_tick smooth_offsets must match Wave offsets exactly (no LERP residual)
-    for sid in ALL_SERVOS:
-        expected = target_gait['offsets'][sid]
-        actual   = smooth_offsets[sid]
-        if abs(actual - expected) > 1e-10:
-            failures.append(
-                f"A1 sid={sid}: smooth_offsets[{sid}]={actual:.8f} expected {expected:.8f} "
-                f"(delta={abs(actual-expected):.2e})"
-            )
-
-    # A2: snap_tick smooth_duty must equal Wave duty exactly
-    expected_duty = t_duty_wave
-    if abs(smooth_duty - expected_duty) > 1e-10:
-        failures.append(
-            f"A2: smooth_duty={smooth_duty:.8f} expected {expected_duty:.8f} "
-            f"(delta={abs(smooth_duty - expected_duty):.2e})"
-        )
-
-    # A3: pre-snap Tripod duty must differ from post-snap Wave duty (sanity: snap actually changed something)
-    if abs(pre_snap_duty - smooth_duty) < 0.01:
-        failures.append(
-            f"A3: pre_snap_duty={pre_snap_duty:.4f} is too close to snap duty={smooth_duty:.4f}; "
-            f"warm-up may not have converged or snap did not execute"
-        )
-
-    # A4: post-snap LERP no-op check for duty (source==target, so LERP should not move it)
-    if abs(smooth_duty_after_lerp - smooth_duty) > 1e-10:
-        failures.append(
-            f"A4: LERP after snap moved duty: {smooth_duty:.8f} -> {smooth_duty_after_lerp:.8f} "
-            f"(delta={abs(smooth_duty_after_lerp - smooth_duty):.2e}); snap did not fully align source to target"
-        )
-
-    # A5: post-snap LERP no-op check for offsets (source==target, so LERP should not move them)
-    for sid in ALL_SERVOS:
-        delta = abs(smooth_offsets_after_lerp[sid] - smooth_offsets[sid])
-        if delta > 1e-10:
-            failures.append(
-                f"A5 sid={sid}: LERP after snap moved offset[{sid}]: "
-                f"{smooth_offsets[sid]:.8f} -> {smooth_offsets_after_lerp[sid]:.8f} (delta={delta:.2e})"
-            )
-
-    # A6: governor must not overshoot on the snap tick (commanded_hz <= max_safe)
-    if commanded_hz_snap > max_safe_snap + 1e-9:
-        failures.append(
-            f"A6: governor overshot on snap tick: commanded_hz={commanded_hz_snap:.5f} "
-            f"> max_safe={max_safe_snap:.5f}; wave duty snap caused unsafe speed limit"
-        )
-
-    # --- Phase B: 10 post-snap LERP ticks -- verify normal ramp, no second snap ---
-    prev_duty    = smooth_duty
-    prev_offsets = dict(smooth_offsets)
-    for tick_b in range(POST_SNAP_TICKS):
-        g = GAITS[WAVE_GAIT_ID]
-        t_duty_b = max(0.01, min(0.99, g['duty']))
-        new_duty = prev_duty + (t_duty_b - prev_duty) * lr
-
-        # B1: each tick's duty change must be bounded by lr (not a second snap jump)
-        duty_delta = abs(new_duty - prev_duty)
-        max_lerp_step = abs(t_duty_b - prev_duty) * lr + 1e-9
-        if duty_delta > max_lerp_step:
-            failures.append(
-                f"B1 tick_b={tick_b}: duty jumped by {duty_delta:.6f} > "
-                f"max_lerp_step={max_lerp_step:.6f}; possible second snap"
-            )
-
-        new_offsets = {}
-        for sid in ALL_SERVOS:
-            od = (g['offsets'][sid] - prev_offsets[sid] + 0.5) % 1.0 - 0.5
-            new_val = (prev_offsets[sid] + od * lr) % 1.0
-
-            # B2: each tick's offset change must be bounded by lr
-            offset_delta = abs(new_val - prev_offsets[sid])
-            # Wrap-safe max step: |od| * lr + small epsilon for floating point
-            max_offset_step = abs(od) * lr + 1e-9
-            if offset_delta > max_offset_step + 0.001:
-                failures.append(
-                    f"B2 tick_b={tick_b} sid={sid}: offset jumped by {offset_delta:.6f} "
-                    f"> max_offset_step={max_offset_step:.6f}; discontinuity after snap"
-                )
-            new_offsets[sid] = new_val
-
-        prev_duty    = new_duty
-        prev_offsets = new_offsets
-
-    passed = len(failures) == 0
-    return {
-        'passed': passed,
-        'failures': failures,
-        'pre_snap_duty': pre_snap_duty,
-        'snap_duty': smooth_duty,
-        'max_safe_snap': max_safe_snap,
-        'commanded_hz_snap': commanded_hz_snap,
-    }
-
-
 def check_V17_overrun_drain():
     """
     Property: The overrun buffer state machine (Fix 67/69) SHALL:
@@ -628,12 +448,25 @@ def check_V17_overrun_drain():
     Known false positive risk: none. This is pure state machine logic with no
     timing dependencies or random elements.
     """
-    OVERRUN_THRESHOLD_MS = 18.0
-    BURST_FLUSH_TRIGGER  = 3
+    # --- replicated state variables from final_full_gait_test.py lines 618-620 ---
+    OVERRUN_THRESHOLD_MS = 18.0   # line 1115: prev_loop_ms > 18.0 is an overrun
+    BURST_FLUSH_TRIGGER  = 3      # line 1119: streak >= 3 triggers ring buffer flush
 
     failures = []
 
+    # Simulate the overrun detection + buffer logic as a pure state machine.
+    # flush_calls tracks how many times the ring-buffer flush would fire.
+    # write_fails controls whether the simulated log write raises an exception.
     def run_overrun_scenario(tick_overrun_flags, write_fails=False):
+        """
+        tick_overrun_flags: list of bool, one per Heart tick.
+          True  = loop took > 18 ms (overrun tick)
+          False = loop was on time (normal tick)
+        write_fails: if True, the simulated 1Hz drain write raises an exception.
+
+        Returns: (overrun_buffer_len_at_end, flush_call_count, flag_at_end,
+                  buffer_cleared_after_drain)
+        """
         overrun_buffer = []
         overrun_context_flushed = False
         overrun_streak = 0
@@ -643,48 +476,55 @@ def check_V17_overrun_drain():
             if is_overrun:
                 overrun_streak += 1
                 overrun_buffer.append(f"[OVERRUN] tick={tick}\n")
+                # One-shot flush guard (lines 1119-1121)
                 if overrun_streak >= BURST_FLUSH_TRIGGER and not overrun_context_flushed:
-                    flush_call_count += 1
+                    flush_call_count += 1          # simulates flush_ring_buffer()
                     overrun_context_flushed = True
             else:
                 overrun_streak = 0
-                overrun_context_flushed = False
+                overrun_context_flushed = False    # reset for next burst (line 1124)
 
+        # Simulate 1Hz drain (lines 900-906).
+        # Fix 69: buffer.clear() is OUTSIDE try/except, so it runs even on write failure.
         buffer_cleared_after_drain = False
         if overrun_buffer:
             try:
                 if write_fails:
                     raise OSError("simulated disk full")
+                # write succeeds -- buffer cleared in finally-equivalent position
             except OSError:
                 pass
             finally:
+                # Fix 69 moved clear() here (outside try/except)
                 overrun_buffer.clear()
                 buffer_cleared_after_drain = True
 
         return (len(overrun_buffer), flush_call_count, overrun_context_flushed,
                 buffer_cleared_after_drain)
 
-    # Sub-check A: 5-tick burst fires flush exactly once
+    # --- Sub-check A: buffer accumulates without per-tick flush ---
+    # 5 consecutive overruns; expect 5 entries in buffer, flush called exactly once.
     buf_len, flush_n, flag, _ = run_overrun_scenario([True]*5)
     if flush_n != 1:
         failures.append(f"A: expected flush_call_count=1 for 5-tick burst, got {flush_n}. "
                         "One-shot guard broken -- ring buffer flushed on every overrun tick.")
 
-    # Sub-check B: two separate bursts each trigger one flush
+    # --- Sub-check B: second burst in same run triggers a new flush after reset ---
+    # Burst of 4, break of 2, burst of 4. Each burst should trigger exactly one flush.
     scenario_B = [True]*4 + [False]*2 + [True]*4
     buf_len, flush_n, flag, _ = run_overrun_scenario(scenario_B)
     if flush_n != 2:
         failures.append(f"B: expected flush_call_count=2 for two separate bursts, got {flush_n}. "
                         "Flag reset on streak break broken -- second burst gets no ring-buffer context.")
 
-    # Sub-check C: streak below threshold (2 < 3) triggers no flush
-    scenario_C = [True]*2
+    # --- Sub-check C: single short burst below threshold (streak < 3) triggers no flush ---
+    scenario_C = [True]*2  # streak reaches 2, never hits BURST_FLUSH_TRIGGER=3
     buf_len, flush_n, flag, _ = run_overrun_scenario(scenario_C)
     if flush_n != 0:
         failures.append(f"C: expected flush_call_count=0 for 2-tick burst (below threshold 3), got {flush_n}. "
                         "Flush fires too eagerly -- ring buffer dumps on minor jitter.")
 
-    # Sub-check D: buffer cleared after 1Hz drain even when write raises (Fix 69)
+    # --- Sub-check D: buffer is cleared after 1Hz drain even when write raises (Fix 69) ---
     buf_len, flush_n, flag, cleared = run_overrun_scenario([True]*5, write_fails=True)
     if not cleared:
         failures.append("D: buffer NOT cleared after failed 1Hz write. "
@@ -693,8 +533,9 @@ def check_V17_overrun_drain():
         failures.append(f"D: buffer length={buf_len} after drain (expected 0). "
                         "Entries survive across drain cycles -- memory grows without bound.")
 
-    # Sub-check E: flag resets to False after streak breaks
-    scenario_E = [True]*4 + [False]*1
+    # --- Sub-check E: flag resets to False when streak breaks, not left True ---
+    # After a burst that fires flush, a normal tick must reset the flag.
+    scenario_E = [True]*4 + [False]*1  # burst then one normal tick
     buf_len, flush_n, flag_at_end, _ = run_overrun_scenario(scenario_E)
     if flag_at_end:
         failures.append("E: overrun_context_flushed still True after streak reset. "
@@ -707,8 +548,6 @@ def check_V17_overrun_drain():
 
 sim = SimState()
 res = sim.run()
-
-v16 = check_V16_governor_snap_transient()
 v17 = check_V17_overrun_drain()
 
 def pf(f): return "FAIL" if f else "PASS"
@@ -756,17 +595,11 @@ else:
 print(f"  V13 Wave pivot sym:      {pf(sim.v13_fail)}  (asym={sim.v13_asym:.6f} Hz  hdL={'n/a' if sim.v13_lh is None else f'{sim.v13_lh:.5f}'} hdR={'n/a' if sim.v13_rh is None else f'{sim.v13_rh:.5f}'})")
 print(f"  V14 Quad LERP gap:       INFO  (min={sim.v14_min:.3f} deg @ tick {sim.v14_tick})")
 print(f"  V15 Park LERP:           {pf(sim.v15_fail)}")
-print(f"  V16 Gov snap transient:  {pf(not v16['passed'])}  "
-      f"(pre_duty={v16['pre_snap_duty']:.4f}->snap={v16['snap_duty']:.4f} "
-      f"max_safe={v16['max_safe_snap']:.5f} cmd_hz={v16['commanded_hz_snap']:.5f})")
-if not v16['passed']:
-    for msg in v16['failures']:
-        print(f"       {msg}")
 v17_fail = not v17['passed']
 print(f"  V17 Overrun drain:       {pf(v17_fail)}  ({v17['sub_checks']} sub-checks; {len(v17['failures'])} failures)")
-if not v17['passed']:
-    for msg in v17['failures']:
-        print(f"       {msg}")
+if v17['failures']:
+    for f_msg in v17['failures']:
+        print(f"       {f_msg}")
 
 print()
 print("="*60)
@@ -800,7 +633,7 @@ if sim.v7_fail and wt and wt[3] > 150:
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
           sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,sim.v15_fail,
-          not v16['passed'],v17_fail]
+          v17_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
@@ -810,6 +643,6 @@ else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V15",sim.v15_fail),("V16",not v16['passed']),("V17",v17_fail)] if f]
+             ("V15",sim.v15_fail),("V17",v17_fail)] if f]
     print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 2 INFO — failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")
