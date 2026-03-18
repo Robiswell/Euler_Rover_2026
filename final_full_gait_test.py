@@ -355,7 +355,12 @@ def compute_roll_corner_drop(turn_bias, worst_angle, duty):
 
     # Inside leg sees a larger effective angle due to faster rotation.
     # Turn bias shifts the inside leg's phase, widening its worst angle.
-    bias_angle_shift = abs(turn_bias) * worst_angle * 0.5  # proportional to turn effort
+    # The 0.5 is a linearization coefficient: actual phase lag depends on
+    # feedforward dynamics, but 0.5 * ROLL_SAFETY_FACTOR(2.0) ~= 1.0 net,
+    # giving a first-order approximation. Validate on hardware.
+    # duty is accepted but not yet used -- reserved for future duty-dependent
+    # roll modeling (higher duty = more stance time = more constrained roll).
+    bias_angle_shift = abs(turn_bias) * worst_angle * 0.5
     theta_inside = math.radians(worst_angle + bias_angle_shift)
     theta_outside = math.radians(max(0.0, worst_angle - bias_angle_shift))
 
