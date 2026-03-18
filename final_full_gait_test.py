@@ -454,8 +454,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 50Hz loop)
     h5_buffer  = []       # buffered [H5] lines, drained at 1Hz with log_telemetry
     h5_counter = 0        # tick counter for 5Hz decimation
-    cmd_speeds   = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
-    phase_angles = {sid: 0.0 for sid in ALL_SERVOS}   # per-servo Buehler target phase (degrees)
+    cmd_speeds     = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
+    phase_angles   = {sid: 0.0 for sid in ALL_SERVOS}  # per-servo actual phase from encoders (degrees)
+    target_angles  = {sid: 0.0 for sid in ALL_SERVOS}  # per-servo Buehler target phase (degrees)
 
     GAIT_NAMES = {0: "tripod", 1: "wave", 2: "quad"}
 
@@ -1120,6 +1121,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
                 phase_angles[sid] = actual_phases.get(sid, 0.0)
+                target_angles[sid] = target_phase if not (is_stalled[sid] or servo_disabled[sid] or abs(leg_hz) < 0.001) else phase_angles[sid]
 
                 abs_speed = int(abs(final_speed))
                 speed_val = (abs_speed | 0x8000) if final_speed < 0 else abs_speed
@@ -1170,9 +1172,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
                 spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
                 pha_str = ",".join(f"{phase_angles[sid]:.1f}" for sid in ALL_SERVOS)
+                tgt_str = ",".join(f"{target_angles[sid]:.1f}" for sid in ALL_SERVOS)
                 h5_buffer.append(
                     f"[H5] T+{t_off:.3f} P:{pos_str} S:{spd_str} "
-                    f"Ph:{pha_str} FF:{ref_ff_speed:.0f} G:{int(gov_active)} D:{smooth_duty:.2f}\n")
+                    f"Ph:{pha_str} PhT:{tgt_str} FF:{ref_ff_speed:.0f} G:{int(gov_active)} D:{smooth_duty:.2f}\n")
 
             # ----------------------------------------------------------
             # 6. PRECISION TIMING
@@ -2783,6 +2786,7 @@ if __name__ == "__main__":
                                 voltage, flicker_count)
 
                             # --- Apply Layer 2 modifiers ---
+                            pre_mod_speed = speed  # capture before modifiers for [BN] telemetry
                             speed = nav.apply_modifiers(
                                 speed, imu, imu["accel_mag"], voltage,
                                 imu["angular_rate"], load_asymmetry,
@@ -2802,7 +2806,7 @@ if __name__ == "__main__":
                                         f"[BN] T+{t_off:.3f} St:{state_name_bn} "
                                         f"Sec:{front_class}/{left_class}/{right_class} "
                                         f"Clf:{int(front_cliff)}/{int(rear_cliff)} "
-                                        f"Spd:{speed} Trn:{turn:+.3f} TI:{turn_intensity:.2f} "
+                                        f"Spd:{speed} BSpd:{pre_mod_speed} Trn:{turn:+.3f} TI:{turn_intensity:.2f} "
                                         f"Gait:{nav.terrain_gait} TM:{nav.terrain_mult:.2f} "
                                         f"SM:{nav.stall_speed_mult:.2f} "
                                         f"Imp:{nav.terrain_impact_start}/{nav.terrain_impact_end} "
