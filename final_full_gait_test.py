@@ -286,31 +286,39 @@ def compute_min_clearance(impact_start, impact_end, phase_lag_deg=0.0):
 
 def compute_max_clearance_hz(impact_start, impact_end, duty,
                              min_clearance=MIN_GROUND_CLEARANCE,
-                             ff_cap=FEEDFORWARD_CAP, kp=KP_PHASE):
+                             ff_cap=FEEDFORWARD_CAP, kp=KP_PHASE,
+                             turn_bias=0.0):
     """
     Maximum cycle frequency (Hz) that maintains minimum ground clearance,
-    accounting for phase lag from feedforward cap clipping.
+    accounting for phase lag from feedforward cap clipping and body roll
+    during turns.
 
-    Physics (Sensors-19-03705 §3, adapted for servo dynamics):
+    Physics (Sensors-19-03705 S3, adapted for servo dynamics):
       When air-phase feedforward exceeds ff_cap, it is clipped.
-      The remaining error is corrected by KP_PHASE at ~kp °/STS,
-      creating a steady-state phase lag = (ff_needed − ff_cap) / kp.
+      The remaining error is corrected by KP_PHASE at ~kp deg/STS,
+      creating a steady-state phase lag = (ff_needed - ff_cap) / kp.
       At stance entry, the leg angle = worst_static_angle + phase_lag.
       For asymmetric sweeps, worst_static_angle > half_sweep.
-      clearance = LEG_EFFECTIVE_RADIUS × cos(angle) − SHAFT_TO_CHASSIS_BOTTOM
-      Solving for max_hz where clearance = min_clearance gives the governor limit.
+      clearance = LEG_EFFECTIVE_RADIUS * cos(angle) - SHAFT_TO_CHASSIS_BOTTOM
+      During turns, roll_drop from compute_roll_corner_drop() is added to
+      the clearance requirement, tightening the Hz limit.
+      Solving for max_hz where clearance = min_clearance + roll_drop.
 
-    Returns max_hz (float).  Caller converts to speed via int(max_hz × 1000).
+    Returns max_hz (float).  Caller converts to speed via int(max_hz * 1000).
     """
     stance_sweep = (impact_end - impact_start + 180) % 360 - 180
     worst_static = _max_angle_from_vertical(impact_start, impact_end)
     air_sweep = 360.0 - abs(stance_sweep)
 
     if air_sweep < 1.0 or duty >= 0.99:
-        return 10.0  # degenerate — near-zero air sweep, no practical limit
+        return 10.0  # degenerate -- near-zero air sweep, no practical limit
 
-    # Max angle from vertical that still gives min_clearance
-    ratio = (SHAFT_TO_CHASSIS_BOTTOM + min_clearance) / LEG_EFFECTIVE_RADIUS
+    # Roll-aware: add corner drop from body tilt during turns
+    roll_drop = compute_roll_corner_drop(turn_bias, worst_static, duty)
+    effective_clearance = min_clearance + roll_drop
+
+    # Max angle from vertical that still gives effective_clearance
+    ratio = (SHAFT_TO_CHASSIS_BOTTOM + effective_clearance) / LEG_EFFECTIVE_RADIUS
     if ratio >= 1.0:
         return 0.0  # geometry cannot provide clearance even at rest
     max_total_angle = math.degrees(math.acos(ratio))
@@ -319,7 +327,7 @@ def compute_max_clearance_hz(impact_start, impact_end, duty,
     if max_lag <= 0.0:
         return 0.0  # impact angles already too wide for clearance at rest
 
-    # max_ff = cap + allowable lag × kp  (invert lag = (ff − cap) / kp)
+    # max_ff = cap + allowable lag * kp  (invert lag = (ff - cap) / kp)
     max_ff = ff_cap + max_lag * kp
     max_deg_per_sec = max_ff / VELOCITY_SCALAR
     max_hz = max_deg_per_sec * (1.0 - duty) / air_sweep
@@ -1032,19 +1040,13 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
 
             # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
-            # When air-phase feedforward exceeds FEEDFORWARD_CAP, phase lag widens the
-            # stance entry angle, reducing ground clearance.  This governor dynamically
-            # caps Hz for the current duty/impact angles so the worst-case clearance
-            # remains safe -- applies to all gaits, all states, including turns.
             # Roll-aware: during turns, body tilt drops inside chassis corner closer
-            # to ground. We add roll_drop to the clearance requirement so the governor
-            # tightens the Hz limit proportionally to turn_bias.
+            # to ground. compute_max_clearance_hz internally adds roll_drop to the
+            # clearance requirement, tightening the Hz limit proportionally to turn_bias.
             # (Sensors-19-03705 Section 3 -- bounded swing velocity for stability)
-            worst_angle = _max_angle_from_vertical(smooth_imp_start, smooth_imp_end)
-            roll_drop = compute_roll_corner_drop(smooth_turn, worst_angle, smooth_duty)
-            effective_min_clearance = MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN + roll_drop
             max_clr_hz = compute_max_clearance_hz(smooth_imp_start, smooth_imp_end, smooth_duty,
-                                                  min_clearance=effective_min_clearance)
+                                                  min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN,
+                                                  turn_bias=smooth_turn)
             max_safe_hz = min(max_safe_hz, max_clr_hz)
 
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
