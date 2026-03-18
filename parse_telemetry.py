@@ -1040,6 +1040,335 @@ def plot_real_vs_theoretical(h5_records, bn_records, output_dir):
     print(f"  [+] encoder_vs_buehler.png")
 
 
+# ── Run stats extraction ────────────────────────────────────────────────
+
+def extract_run_stats(records):
+    """Extract summary statistics from a parsed telemetry run.
+
+    Returns a dict of key metrics for comparison across runs.
+    """
+    stats = {}
+    if not records:
+        return stats
+
+    # Duration
+    stats['duration_s'] = records[-1].get('t', records[-1].get('time_s', 0))
+
+    # Voltage
+    volts = [r['voltage'] for r in records if 'voltage' in r]
+    if volts:
+        stats['voltage_min'] = min(volts)
+        stats['voltage_max'] = max(volts)
+        stats['voltage_mean'] = sum(volts) / len(volts)
+        stats['voltage_drop'] = volts[0] - volts[-1] if len(volts) > 1 else 0.0
+
+    # Loads
+    all_max_loads = []
+    per_servo_loads = {i: [] for i in range(6)}
+    for r in records:
+        if 'loads' in r and len(r['loads']) == 6:
+            all_max_loads.append(max(r['loads']))
+            for i, load in enumerate(r['loads']):
+                per_servo_loads[i].append(load)
+    if all_max_loads:
+        stats['load_max'] = max(all_max_loads)
+        stats['load_mean'] = sum(all_max_loads) / len(all_max_loads)
+        stats['load_p95'] = sorted(all_max_loads)[int(len(all_max_loads) * 0.95)]
+    for i in range(6):
+        if per_servo_loads[i]:
+            stats[f'load_{SERVO_NAMES[i]}_max'] = max(per_servo_loads[i])
+            stats[f'load_{SERVO_NAMES[i]}_mean'] = sum(per_servo_loads[i]) / len(per_servo_loads[i])
+
+    # Stalls
+    stall_frames = [r for r in records if 'stall' in r and r['stall']]
+    stats['stall_count'] = len(stall_frames)
+    stall_servos = {}
+    for r in stall_frames:
+        for sid in r['stall']:
+            stall_servos[sid] = stall_servos.get(sid, 0) + 1
+    stats['stall_by_servo'] = stall_servos
+
+    # Governor
+    gov = [r['governor'] for r in records if 'governor' in r]
+    if gov:
+        stats['governor_max'] = max(gov)
+        stats['governor_mean'] = sum(gov) / len(gov)
+        stats['governor_above_50'] = sum(1 for g in gov if g > 50) / len(gov) * 100
+
+    # Phase error
+    pe = [abs(r['phase_err']) for r in records if 'phase_err' in r]
+    if pe:
+        stats['phase_err_max'] = max(pe)
+        stats['phase_err_mean'] = sum(pe) / len(pe)
+
+    # Temperatures
+    max_temps = []
+    for r in records:
+        if 'temps' in r and len(r['temps']) == 6:
+            real_temps = [t for t in r['temps'] if t != 125]  # filter EMI ghosts
+            if real_temps:
+                max_temps.append(max(real_temps))
+    if max_temps:
+        stats['temp_max'] = max(max_temps)
+        stats['temp_mean'] = sum(max_temps) / len(max_temps)
+
+    # Loop timing
+    loops = [r['loop_ms'] for r in records if 'loop_ms' in r]
+    if loops:
+        stats['loop_max_ms'] = max(loops)
+        stats['loop_mean_ms'] = sum(loops) / len(loops)
+        stats['loop_overruns'] = sum(1 for l in loops if l > 22)
+
+    # Gaits used
+    gaits = [r['gait'] for r in records if 'gait' in r]
+    if gaits:
+        stats['gaits_used'] = list(set(gaits))
+
+    # TE cycles
+    te_total = 0
+    for r in records:
+        if 'te_cycles' in r:
+            te_total += sum(r['te_cycles'])
+    stats['te_cycles_total'] = te_total
+
+    return stats
+
+
+def format_comparison_table(current_stats, baseline_stats):
+    """Format a comparison table between current run and baseline run.
+
+    Returns a list of lines (strings) for the delta table.
+    """
+    lines = []
+    lines.append("=" * 78)
+    lines.append("  TELEMETRY COMPARISON: CURRENT vs BASELINE")
+    lines.append("=" * 78)
+    lines.append(f"{'Metric':<30} {'Current':>12} {'Baseline':>12} {'Delta':>12} {'Verdict':>8}")
+    lines.append("-" * 78)
+
+    def row(label, key, fmt=".1f", lower_better=True, threshold=None):
+        cur = current_stats.get(key)
+        base = baseline_stats.get(key)
+        if cur is None and base is None:
+            return
+        cur_s = f"{cur:{fmt}}" if cur is not None else "N/A"
+        base_s = f"{base:{fmt}}" if base is not None else "N/A"
+        if cur is not None and base is not None:
+            delta = cur - base
+            delta_s = f"{delta:+{fmt}}"
+            if threshold is not None:
+                if abs(delta) < threshold:
+                    verdict = "  ~"
+                elif (lower_better and delta > 0) or (not lower_better and delta < 0):
+                    verdict = " WORSE"
+                else:
+                    verdict = " BETTER"
+            else:
+                if (lower_better and delta > 0) or (not lower_better and delta < 0):
+                    verdict = " WORSE"
+                elif delta == 0:
+                    verdict = "  ~"
+                else:
+                    verdict = " BETTER"
+        else:
+            delta_s = "N/A"
+            verdict = "  ?"
+        lines.append(f"{label:<30} {cur_s:>12} {base_s:>12} {delta_s:>12} {verdict:>8}")
+
+    row("Duration (s)", "duration_s", ".0f", lower_better=False, threshold=5)
+    row("Voltage min (V)", "voltage_min", ".2f", lower_better=False)
+    row("Voltage mean (V)", "voltage_mean", ".2f", lower_better=False)
+    row("Voltage drop (V)", "voltage_drop", ".2f", lower_better=True)
+    lines.append("-" * 78)
+    row("Load max (raw)", "load_max", ".0f", lower_better=True)
+    row("Load mean (raw)", "load_mean", ".0f", lower_better=True)
+    row("Load P95 (raw)", "load_p95", ".0f", lower_better=True)
+    for name in SERVO_NAMES:
+        row(f"  {name} load max", f"load_{name}_max", ".0f", lower_better=True)
+    lines.append("-" * 78)
+    row("Stall events", "stall_count", ".0f", lower_better=True)
+    row("Governor max (%)", "governor_max", ".1f", lower_better=True)
+    row("Governor mean (%)", "governor_mean", ".1f", lower_better=True)
+    row("Governor >50% (%frames)", "governor_above_50", ".1f", lower_better=True)
+    lines.append("-" * 78)
+    row("Phase error max (deg)", "phase_err_max", ".1f", lower_better=True)
+    row("Phase error mean (deg)", "phase_err_mean", ".1f", lower_better=True)
+    row("Temp max (C)", "temp_max", ".1f", lower_better=True)
+    row("Temp mean (C)", "temp_mean", ".1f", lower_better=True)
+    lines.append("-" * 78)
+    row("Loop max (ms)", "loop_max_ms", ".1f", lower_better=True)
+    row("Loop mean (ms)", "loop_mean_ms", ".1f", lower_better=True)
+    row("Loop overruns (>22ms)", "loop_overruns", ".0f", lower_better=True)
+    row("TE recovery cycles", "te_cycles_total", ".0f", lower_better=True)
+    lines.append("=" * 78)
+
+    # Stall breakdown comparison
+    cur_stalls = current_stats.get('stall_by_servo', {})
+    base_stalls = baseline_stats.get('stall_by_servo', {})
+    if cur_stalls or base_stalls:
+        lines.append("\nStall breakdown by servo:")
+        all_sids = sorted(set(list(cur_stalls.keys()) + list(base_stalls.keys())))
+        for sid in all_sids:
+            c = cur_stalls.get(sid, 0)
+            b = base_stalls.get(sid, 0)
+            delta = c - b
+            lines.append(f"  {sid}: {c} (was {b}, {delta:+d})")
+
+    # Gaits comparison
+    cur_gaits = current_stats.get('gaits_used', [])
+    base_gaits = baseline_stats.get('gaits_used', [])
+    if cur_gaits or base_gaits:
+        lines.append(f"\nGaits used: {', '.join(sorted(cur_gaits))} (baseline: {', '.join(sorted(base_gaits))})")
+
+    return lines
+
+
+def plot_comparison_overlay(current_records, baseline_records, output_dir):
+    """Generate overlay plots comparing current vs baseline run."""
+    fig, axes = plt.subplots(4, 1, figsize=(14, 14), sharex=False)
+
+    # Normalize baseline times
+    if baseline_records and 't' not in baseline_records[0]:
+        baseline_records = normalize_time(baseline_records)
+
+    # Panel 1: Voltage overlay
+    for recs, label, color, alpha in [
+        (current_records, 'Current', '#2196F3', 1.0),
+        (baseline_records, 'Baseline', '#9E9E9E', 0.6),
+    ]:
+        vt = [r['t'] for r in recs if 'voltage' in r]
+        vv = [r['voltage'] for r in recs if 'voltage' in r]
+        if vv:
+            axes[0].plot(vt, vv, color=color, linewidth=1.2, alpha=alpha, label=label)
+    axes[0].axhline(y=VOLTAGE_MIN, color='r', linestyle='--', alpha=0.3)
+    axes[0].set_ylabel('Voltage (V)')
+    axes[0].set_title('Current vs Baseline Comparison')
+    axes[0].legend(fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    # Panel 2: Max load overlay
+    for recs, label, color, alpha in [
+        (current_records, 'Current', '#E91E63', 1.0),
+        (baseline_records, 'Baseline', '#9E9E9E', 0.6),
+    ]:
+        lt = []
+        ll = []
+        for r in recs:
+            if 'loads' in r and len(r['loads']) == 6:
+                lt.append(r['t'])
+                ll.append(max(r['loads']))
+        if ll:
+            axes[1].plot(lt, ll, color=color, linewidth=0.8, alpha=alpha, label=label)
+    axes[1].axhline(y=STALL_THRESHOLD, color='r', linestyle='--', alpha=0.3,
+                     label=f'Stall ({STALL_THRESHOLD})')
+    axes[1].set_ylabel('Max Servo Load')
+    axes[1].legend(fontsize=8)
+    axes[1].grid(True, alpha=0.3)
+
+    # Panel 3: Governor overlay
+    for recs, label, color, alpha in [
+        (current_records, 'Current', '#4CAF50', 1.0),
+        (baseline_records, 'Baseline', '#9E9E9E', 0.6),
+    ]:
+        gt = [r['t'] for r in recs if 'governor' in r]
+        gg = [r['governor'] for r in recs if 'governor' in r]
+        if gg:
+            axes[2].plot(gt, gg, color=color, linewidth=0.8, alpha=alpha, label=label)
+    axes[2].set_ylabel('Governor %')
+    axes[2].legend(fontsize=8)
+    axes[2].grid(True, alpha=0.3)
+
+    # Panel 4: Phase error overlay
+    for recs, label, color, alpha in [
+        (current_records, 'Current', '#FF5722', 1.0),
+        (baseline_records, 'Baseline', '#9E9E9E', 0.6),
+    ]:
+        pt = [r['t'] for r in recs if 'phase_err' in r]
+        pp = [abs(r['phase_err']) for r in recs if 'phase_err' in r]
+        if pp:
+            axes[3].plot(pt, pp, color=color, linewidth=0.8, alpha=alpha, label=label)
+    axes[3].set_ylabel('|Phase Error| (deg)')
+    axes[3].set_xlabel('Time (s)')
+    axes[3].legend(fontsize=8)
+    axes[3].grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, 'comparison_overlay.png'), dpi=150)
+    plt.close(fig)
+    print(f"  [+] comparison_overlay.png")
+
+
+def parse_sim_baseline(filepath):
+    """Parse sim_verify.py output to extract predicted thresholds.
+
+    Returns a dict of metric predictions from simulation.
+    """
+    sim = {}
+    if not filepath or not os.path.exists(filepath):
+        return sim
+
+    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        text = f.read()
+
+    # Extract governor headroom predictions
+    gov_match = re.search(r'governor.*?(\d+\.?\d*)%', text, re.IGNORECASE)
+    if gov_match:
+        sim['governor_predicted'] = float(gov_match.group(1))
+
+    # Extract phase error predictions
+    pe_match = re.search(r'phase.?err.*?(\d+\.?\d*)', text, re.IGNORECASE)
+    if pe_match:
+        sim['phase_err_predicted'] = float(pe_match.group(1))
+
+    # Extract speed/duty info
+    duty_match = re.search(r'duty.*?(\d+\.?\d*)', text, re.IGNORECASE)
+    if duty_match:
+        sim['duty_predicted'] = float(duty_match.group(1))
+
+    return sim
+
+
+def format_sim_comparison(run_stats, sim_stats):
+    """Compare real telemetry against simulation predictions.
+
+    Returns a list of lines showing where reality diverges from the model.
+    """
+    lines = []
+    if not sim_stats:
+        return lines
+
+    lines.append("")
+    lines.append("=" * 78)
+    lines.append("  SIM vs REALITY: Model Prediction Accuracy")
+    lines.append("=" * 78)
+    lines.append(f"{'Metric':<30} {'Real':>12} {'Sim Pred':>12} {'Gap':>12} {'Status':>8}")
+    lines.append("-" * 78)
+
+    def sim_row(label, real_key, sim_key, fmt=".1f"):
+        real = run_stats.get(real_key)
+        pred = sim_stats.get(sim_key)
+        if real is None or pred is None:
+            return
+        gap = real - pred
+        pct = abs(gap / pred * 100) if pred != 0 else 0
+        if pct < 15:
+            status = "  OK"
+        elif pct < 30:
+            status = " DRIFT"
+        else:
+            status = "DIVERGE"
+        lines.append(f"{label:<30} {real:{fmt}:>12} {pred:{fmt}:>12} {gap:+{fmt}:>12} {status:>8}")
+
+    sim_row("Governor max (%)", "governor_max", "governor_predicted")
+    sim_row("Phase error max (deg)", "phase_err_max", "phase_err_predicted")
+
+    lines.append("=" * 78)
+    lines.append("")
+    lines.append("Status: OK = within 15%, DRIFT = 15-30% off, DIVERGE = >30% off")
+    lines.append("DIVERGE means the sim model may need recalibration for this terrain/load.")
+    return lines
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1051,6 +1380,10 @@ def main():
                         default='telemetry_output')
     parser.add_argument('--overlay', action='store_true',
                         help='Generate real vs theoretical overlay plot')
+    parser.add_argument('--baseline', default=None,
+                        help='Path to baseline Heart telemetry log for comparison')
+    parser.add_argument('--sim-baseline', default=None,
+                        help='Path to sim_verify.py output (text) to compare against')
     args = parser.parse_args()
 
     # Validate input
@@ -1116,7 +1449,80 @@ def main():
     if args.overlay and h5_records and bn_records:
         plot_real_vs_theoretical(h5_records, bn_records, args.output_dir)
 
-    print(f"\nDone. {len(os.listdir(args.output_dir))} plots generated.")
+    # Extract and print run stats (always)
+    run_stats = extract_run_stats(records)
+    print("\n" + "=" * 50)
+    print("  RUN SUMMARY STATS")
+    print("=" * 50)
+    stat_labels = [
+        ("Duration", "duration_s", ".0f", "s"),
+        ("Voltage", "voltage_min", ".2f", "V min"),
+        ("Load max", "load_max", ".0f", "raw"),
+        ("Load P95", "load_p95", ".0f", "raw"),
+        ("Stalls", "stall_count", ".0f", "events"),
+        ("Governor max", "governor_max", ".1f", "%"),
+        ("Governor mean", "governor_mean", ".1f", "%"),
+        ("Phase err max", "phase_err_max", ".1f", "deg"),
+        ("Phase err mean", "phase_err_mean", ".1f", "deg"),
+        ("Temp max", "temp_max", ".1f", "C"),
+        ("Loop max", "loop_max_ms", ".1f", "ms"),
+        ("Loop overruns", "loop_overruns", ".0f", ">22ms"),
+        ("TE cycles", "te_cycles_total", ".0f", "total"),
+    ]
+    for label, key, fmt, unit in stat_labels:
+        val = run_stats.get(key)
+        if val is not None:
+            print(f"  {label:<20} {val:{fmt}} {unit}")
+    stalls = run_stats.get('stall_by_servo', {})
+    if stalls:
+        print(f"  {'Stall breakdown':<20} {', '.join(f'{k}:{v}' for k, v in sorted(stalls.items()))}")
+    gaits = run_stats.get('gaits_used', [])
+    if gaits:
+        print(f"  {'Gaits used':<20} {', '.join(sorted(gaits))}")
+    print("=" * 50)
+
+    # Baseline comparison (--baseline flag)
+    if args.baseline:
+        if not os.path.exists(args.baseline):
+            print(f"Warning: Baseline file {args.baseline} not found, skipping comparison")
+        else:
+            print(f"\nComparing against baseline: {args.baseline}")
+            baseline_records = parse_heart_log(args.baseline)
+            if baseline_records:
+                baseline_records = normalize_time(baseline_records)
+                baseline_stats = extract_run_stats(baseline_records)
+
+                # Print delta table
+                comparison_lines = format_comparison_table(run_stats, baseline_stats)
+                for line in comparison_lines:
+                    print(line)
+
+                # Generate overlay plot
+                plot_comparison_overlay(records, baseline_records, args.output_dir)
+
+                # Save delta table to file
+                delta_path = os.path.join(args.output_dir, 'comparison_delta.txt')
+                with open(delta_path, 'w') as f:
+                    f.write('\n'.join(comparison_lines))
+                print(f"  [+] comparison_delta.txt")
+            else:
+                print("Warning: No records found in baseline file")
+
+    # Sim baseline comparison (--sim-baseline flag)
+    if args.sim_baseline:
+        sim_stats = parse_sim_baseline(args.sim_baseline)
+        if sim_stats:
+            sim_lines = format_sim_comparison(run_stats, sim_stats)
+            for line in sim_lines:
+                print(line)
+            sim_path = os.path.join(args.output_dir, 'sim_vs_reality.txt')
+            with open(sim_path, 'w') as f:
+                f.write('\n'.join(sim_lines))
+            print(f"  [+] sim_vs_reality.txt")
+        else:
+            print(f"Warning: Could not parse sim baseline from {args.sim_baseline}")
+
+    print(f"\nDone. {len(os.listdir(args.output_dir))} files generated.")
 
 
 if __name__ == '__main__':
