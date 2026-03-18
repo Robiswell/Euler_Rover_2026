@@ -106,6 +106,15 @@ MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance on flat surfa
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
 SERVO_SPEED_GOVERNOR_CAP = 2800.0  # 91% of STS3215 max (3072), safe operational ceiling
 
+# Phase-Error Governor — throttles gait clock when servos can't track commanded phase
+# Exponential ramp from CPG paper (Sensors 2019, 19(17), 3705, Eqs. 20-21)
+PHERR_ENGAGE_DEG   = 30.0   # deg — engage governor when max servo phase error exceeds this
+PHERR_RELEASE_DEG  = 20.0   # deg — release governor (hysteresis band prevents toggle)
+PHERR_FLOOR_SCALE  = 0.35   # minimum Hz multiplier at full throttle (35% of max_safe_hz)
+PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near threshold, aggressive at high error)
+PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
+KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
+
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
 VOLTAGE_MIN  = 10.5  # 10.5V = 3.5V/cell floor — raised from 10.0 for cold-weather cell protection (no hardware BMS)
@@ -480,6 +489,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 ghost_tag = " [GHOST]" if ghost_event else ""
                 vwarn_tag = f" [V_WARN:{volt_dip_ctr}]" if volt_dip_ctr > 100 else ""
                 twarn_tag = f" [T_WARN:{temp_spike_ctr}]" if temp_spike_ctr > 10 else ""
+                phgov_tag = f" [PhGov:{int(round((1.0 - ph_scale) * 100))}%]" if pherr_gov_active else ""
                 # Tier 2 diagnostic fields (appended to existing format)
                 jit_max = max(dt_samples) if dt_samples else 0.0
                 jit_mean = sum(dt_samples) / len(dt_samples) if dt_samples else 0.0
@@ -497,7 +507,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"T:{temps_str} Tc:{temp_spike_ctr:02d} | "
                         f"L:{loads_str} | Stall:{stall_ids} | "
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
-                        f"{ghost_tag}{vwarn_tag}{twarn_tag}"
+                        f"{ghost_tag}{vwarn_tag}{twarn_tag}{phgov_tag}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
                         f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}°"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
@@ -667,6 +677,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
     prev_gait_id     = 0  # track gait switches for phase snap (Fix 66)
+
+    # PhErr governor state (CPG paper Eqs. 20-21 exponential ramp)
+    max_phase_error_prev = 0.0   # worst-case servo phase error from previous tick (degrees)
+    pherr_gov_active     = False # True when governor is engaged (hysteresis)
+    pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor — stuck timeout
+    ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
 
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
@@ -980,6 +996,30 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             max_clr_hz = compute_max_clearance_hz(smooth_imp_start, smooth_imp_end, smooth_duty)
             max_safe_hz = min(max_safe_hz, max_clr_hz)
 
+            # PhErr governor: throttle Hz when servos can't track commanded phase
+            # Exponential ramp (CPG paper Eqs. 20-21) — gentle near threshold, aggressive at high error
+            if max_phase_error_prev >= PHERR_ENGAGE_DEG:
+                pherr_gov_active = True
+            elif max_phase_error_prev < PHERR_RELEASE_DEG:
+                pherr_gov_active = False
+            if pherr_gov_active:
+                ph_scale = PHERR_FLOOR_SCALE + (1.0 - PHERR_FLOOR_SCALE) * math.exp(
+                    -KAPPA_GOVERNOR * (max_phase_error_prev - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+                max_safe_hz *= ph_scale
+                # Stuck timeout: if at floor scale too long, escalate to stall recovery
+                if ph_scale <= PHERR_FLOOR_SCALE + 0.01:
+                    if pherr_low_scale_start == 0.0:
+                        pherr_low_scale_start = time.monotonic()
+                    elif (time.monotonic() - pherr_low_scale_start) > PHERR_STUCK_TIMEOUT:
+                        for sid in ALL_SERVOS:
+                            is_stalled[sid] = True  # triggers existing stall/wiggle recovery
+                        pherr_low_scale_start = 0.0
+                else:
+                    pherr_low_scale_start = 0.0
+            else:
+                ph_scale = 1.0  # governor inactive -- no throttle
+                pherr_low_scale_start = 0.0
+
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
@@ -1000,6 +1040,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # ----------------------------------------------------------
             # 4. KINEMATIC CONTROLLER (Pure Math Flow)
             # ----------------------------------------------------------
+            max_phase_error_frame = 0.0  # worst-case servo error this tick
             for sid in ALL_SERVOS:
                 leg_hz    = hz_L if sid in LEFT_SERVOS else hz_R
                 is_rev_leg = (leg_hz < 0)
@@ -1050,6 +1091,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
                     error       = target_phase - current_phase
                     short_error = (error + 180) % 360 - 180
+                    max_phase_error_frame = max(max_phase_error_frame, abs(short_error))
 
                     if t_leg > smooth_duty:
                         # Air phase: guard prevents backward-error signal during fast
@@ -1085,6 +1127,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             group_sync_write.txPacket()
             group_sync_write.clearParam()
+
+            max_phase_error_prev = max_phase_error_frame  # carry to next tick for governor
 
             # ----------------------------------------------------------
             # 5. RING BUFFER + ACCUMULATOR UPDATES (no disk I/O)
