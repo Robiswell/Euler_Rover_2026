@@ -1532,8 +1532,8 @@ if __name__ == "__main__":
     TRIPOD_CRUISE_SPEED = 450
     SLOW_SPEED = 200
     BACKWARD_SPEED = 200
-    MAX_TURN_BIAS = 0.25
-    PIVOT_TURN_BIAS = 0.35            # reduced from 0.5 — stays within clearance governor for all gaits
+    MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
+    PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — (default 330/30 = 60° too wide during zero-speed turns)
     HEADING_CORRECTION_BIAS = 0.1
