@@ -128,6 +128,7 @@ PHERR_STUCK_TIMEOUT = 5.0   # seconds at low scale before stall escalation
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
 OVERLOAD_MAX_CYCLES = 10  # max TE cycles per servo per session — limits EPROM wear
+VERBOSE_TELEMETRY = "--no-verbose-telemetry" not in sys.argv
 
 # --- KINEMATIC GAIT DICTIONARIES ---
 GAITS = {
@@ -415,6 +416,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
     # --- DIAGNOSTIC LOGGING INFRASTRUCTURE (Tier 1 + accumulators) ---
     heart_start_mono = time.monotonic()
+    heart_start_perf = time.perf_counter()
     ring_buffer = collections.deque(maxlen=100)
     raw_positions = {sid: HOME_POSITIONS[sid] for sid in ALL_SERVOS}
     pos_prev = {sid: 0 for sid in ALL_SERVOS}
@@ -431,6 +433,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     ref_phase_angle = 0.0
     ref_phase_error = 0.0
     gov_active = False
+    last_speeds = {sid: 0 for sid in ALL_SERVOS}  # final_speed per servo — used by H5 telemetry
+    h5_counter = 0  # counts 50Hz ticks; H5 fires every 10 (5Hz)
 
     # --- Tier 4: Session Header ---
     try:
@@ -832,6 +836,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
                     final_speed = max(-3000, min(3000, int(raw_speed)))
 
+                last_speeds[sid] = final_speed
                 abs_speed = int(abs(final_speed))
                 speed_val = (abs_speed | 0x8000) if final_speed < 0 else abs_speed
                 group_sync_write.addParam(sid, [speed_val & 0xff, (speed_val >> 8) & 0xff])
@@ -841,6 +846,22 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             max_phase_error_prev = max_phase_error_frame
             if shared_phase_error is not None:
                 shared_phase_error.value = max_phase_error_prev
+
+            if VERBOSE_TELEMETRY:
+                h5_counter += 1
+                if h5_counter % 10 == 0:  # 5Hz from 50Hz loop
+                    h5_elapsed = time.perf_counter() - heart_start_perf
+                    pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
+                    spd_str = ",".join(str(last_speeds.get(sid, 0)) for sid in ALL_SERVOS)
+                    ph_str = ",".join(f"{actual_phases.get(sid, 0.0):.1f}" for sid in ALL_SERVOS)
+                    h5_line = (f"[H5] T+{h5_elapsed:.3f} P:{pos_str} S:{spd_str} "
+                               f"Ph:{ph_str} FF:{ref_ff_speed:.1f} "
+                               f"G:{1 if gov_active else 0} D:{smooth_duty:.2f}\n")
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.write(h5_line)
+                    except:
+                        pass
 
             # ----------------------------------------------------------
             # 5. RING BUFFER + ACCUMULATOR UPDATES (no disk I/O)
@@ -1624,6 +1645,7 @@ if __name__ == "__main__":
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
+            self._pherr_guard_active = False
 
         def _dwell_active(self):
             """True if current dwell timer hasn't expired."""
@@ -1759,8 +1781,12 @@ if __name__ == "__main__":
             # Non-emergency transitions (P9-P14) are blocked until phase error drops below
             # PHERR_RELEASE_DEG, so the robot holds its current direction while re-syncing.
             # Emergency transitions (P1-P8) above always fire regardless.
-            if (shared_phase_error.value > PHERR_ENGAGE_DEG
-                    and self.state not in (NAV_STOP_SAFE, NAV_WIGGLE)):
+            # PhErr settling guard with hysteresis (engage 30, release 20)
+            if shared_phase_error.value > PHERR_ENGAGE_DEG:
+                self._pherr_guard_active = True
+            elif shared_phase_error.value < PHERR_RELEASE_DEG:
+                self._pherr_guard_active = False
+            if self._pherr_guard_active and self.state not in (NAV_STOP_SAFE, NAV_WIGGLE):
                 if self.state == NAV_ARC_LEFT:
                     turn = -abs(turn_intensity) * MAX_TURN_BIAS
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
@@ -1787,7 +1813,7 @@ if __name__ == "__main__":
             # Emergency transitions (P1-P8) above always fire regardless.
             if self._dwell_active() and self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT,
                                                         NAV_BACKWARD, NAV_PIVOT_TURN,
-                                                        NAV_FORWARD, NAV_SLOW_FORWARD):
+                                                        NAV_SLOW_FORWARD):
                 if self.state == NAV_ARC_LEFT:
                     turn = -abs(turn_intensity) * MAX_TURN_BIAS
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
@@ -1802,10 +1828,6 @@ if __name__ == "__main__":
                     turn = self.pivot_direction * PIVOT_TURN_BIAS
                     step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
                     return (NAV_PIVOT_TURN, 0, turn, 1, step)
-                elif self.state == NAV_FORWARD:
-                    base_speed = TRIPOD_CRUISE_SPEED if self.terrain_is_tripod else CRUISE_SPEED
-                    speed = int(base_speed * self.terrain_mult * self.stall_speed_mult)
-                    return (NAV_FORWARD, speed, 0.0, 1, "nav_fwd")
                 elif self.state == NAV_SLOW_FORWARD:
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
@@ -1853,6 +1875,12 @@ if __name__ == "__main__":
                         turn = abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
+                else:
+                    # Both sides equally close -- slow down, go straight
+                    self._transition(NAV_SLOW_FORWARD)
+                    self._start_dwell(1.0)
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
 
             # P12: Narrow corridor (both sides DANGER, front OK)
             if left_class >= DIST_DANGER and right_class >= DIST_DANGER and front_class < DIST_DANGER:
@@ -1864,7 +1892,7 @@ if __name__ == "__main__":
             # P13: Front CAUTION or NEAR
             if front_class >= DIST_CAUTION:
                 self._transition(NAV_SLOW_FORWARD)
-                self._start_dwell(1.0)
+                self._start_dwell(0.5)
                 speed_s = speed_scale_from_front(front_class)
                 turn = -turn_intensity * MAX_TURN_BIAS * 0.5
                 speed = int(SLOW_SPEED * speed_s * self.terrain_mult * self.stall_speed_mult)
@@ -1872,16 +1900,6 @@ if __name__ == "__main__":
 
             # P14: All clear
             self._transition(NAV_FORWARD)
-            self._start_dwell(1.0)
-
-            # --- Dwell re-evaluation for active states ---
-            # (If we reach here, no higher-priority trigger fired)
-            if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
-                # Extend if arc-side still blocked
-                if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
-                    self._refresh_dwell(0.4)
-                elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
-                    self._refresh_dwell(0.4)
 
             # --- FORWARD with heading correction ---
             base_speed = CRUISE_SPEED
@@ -2321,6 +2339,11 @@ if __name__ == "__main__":
                         brain_log("[NAV] autonomous nav loop starting")
                         fallen_back = False
 
+                        # Verbose telemetry bookkeeping (2Hz [BS], 1Hz-floor [BN])
+                        bs_counter = 0
+                        last_bn_time = time.monotonic()
+                        prev_logged_state = nav.state
+
                         # === MAIN NAV LOOP (~10 Hz) ===
                         while is_running.value and not nav.finished:
                             loop_start = time.monotonic()
@@ -2360,6 +2383,17 @@ if __name__ == "__main__":
                             front_cliff, rear_cliff = cliff.update(frame["FCD"], frame["RCD"])
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
+                            bs_counter += 1
+
+                            # --- [BS] Sensor Snapshot (2Hz) ---
+                            if VERBOSE_TELEMETRY and bs_counter % 5 == 0:
+                                bs_elapsed = time.monotonic() - nav.mission_start
+                                brain_log(f"[BS] T+{bs_elapsed:.3f} "
+                                          f"F:{frame['FDL']:.1f},{frame['FCF']:.1f},{frame['FCD']:.1f},{frame['FDR']:.1f} "
+                                          f"R:{frame['RDL']:.1f},{frame['RCF']:.1f},{frame['RCD']:.1f},{frame['RDR']:.1f} "
+                                          f"P:{imu['pitch_deg']:.1f} Ro:{imu['roll_deg']:.1f} Y:{imu['yaw_deg']:.1f} "
+                                          f"Ac:{imu['accel_mag']:.2f} Gy:{imu['angular_rate']:.2f} "
+                                          f"U:{imu['upright_quality']:.2f}")
 
                             # Servo loads snapshot
                             loads = list(shared_servo_loads)
@@ -2434,6 +2468,24 @@ if __name__ == "__main__":
                                            impact_start=nav.terrain_impact_start,
                                            impact_end=nav.terrain_impact_end,
                                            step_name=step_name)
+
+                            # --- [BN] Nav Decision (on state change or 1Hz floor) ---
+                            if VERBOSE_TELEMETRY:
+                                state_changed = (state != prev_logged_state)
+                                bn_timer_expired = (time.monotonic() - last_bn_time > 1.0)
+                                if state_changed or bn_timer_expired:
+                                    bn_elapsed = time.monotonic() - nav.mission_start
+                                    state_name = NAV_STATE_NAMES.get(state, str(state))
+                                    brain_log(f"[BN] T+{bn_elapsed:.3f} St:{state_name} "
+                                              f"Sec:{front_class}/{left_class}/{right_class} "
+                                              f"Clf:{front_cliff}/{rear_cliff} "
+                                              f"Spd:{speed} Trn:{turn:.1f} TI:{turn_intensity:.2f} "
+                                              f"Gait:{nav.terrain_gait} TM:{nav.terrain_mult:.2f} "
+                                              f"SM:{nav.stall_speed_mult:.2f} "
+                                              f"Imp:{nav.terrain_impact_start}/{nav.terrain_impact_end} "
+                                              f"Flk:{flicker_count}")
+                                    prev_logged_state = state
+                                    last_bn_time = time.monotonic()
 
                             # --- Loop timing ---
                             elapsed = time.monotonic() - loop_start
