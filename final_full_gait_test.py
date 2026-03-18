@@ -449,6 +449,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     temp_per_servo     = {sid: 0 for sid in ALL_SERVOS}   # Last known temp per servo (°C)
     current_per_servo  = {sid: 0 for sid in ALL_SERVOS}   # Last known current per servo (raw mA units)
     parent_pid     = os.getppid()
+    # UDP telemetry broadcast (fire-and-forget, non-blocking)
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    udp_sock.setblocking(False)
+    # UDP command listener (receives STOP from laptop command sender)
+    cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    cmd_sock.bind(("0.0.0.0", 9877))
+    cmd_sock.setblocking(False)
     last_log_time  = 0
 
     # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 50Hz loop)
@@ -503,7 +512,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         sd = time.perf_counter() - stall_entry_time[s]
                         stall_dur_parts.append(f"s{s}={sd:.1f}s")
                 stall_dur_str = ",".join(stall_dur_parts) if stall_dur_parts else "none"
-                f.write(f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.2f} | "
+                _hb_line = (f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.2f} | "
                         f"V:{volt:.2f}V Vc:{volt_dip_ctr:03d} | "
                         f"T:{temps_str} Tc:{temp_spike_ctr:02d} | "
                         f"L:{loads_str} | Stall:{stall_ids} | "
@@ -512,6 +521,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
                         f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}°"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
+                f.write(_hb_line)
+                # UDP broadcast heartbeat (fire-and-forget for live analyst)
+                try:
+                    udp_sock.sendto(_hb_line.encode("utf-8"), ("255.255.255.255", 9876))
+                except Exception:
+                    pass
         except:
             pass
 
@@ -702,6 +717,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if loop_start - last_log_time > 1.0:
                 if os.getppid() != parent_pid:
                     break
+                # Check for remote STOP command (UDP from laptop)
+                try:
+                    cmd_data, _ = cmd_sock.recvfrom(64)
+                    if cmd_data.strip() == b"STOP":
+                        print("[HEART] Remote STOP received via UDP")
+                        is_running.value = False
+                        break
+                except BlockingIOError:
+                    pass
+                except Exception:
+                    pass
 
             # ----------------------------------------------------------
             # 1. READ PHYSICAL FEEDBACK via GroupSyncRead
@@ -926,9 +952,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     try:
                         with open(LOG_FILE, "a") as f:
                             f.write("".join(h5_buffer))
-                        h5_buffer.clear()
                     except:
                         pass
+                    # UDP broadcast [H5] lines (fire-and-forget for live analyst)
+                    try:
+                        for _udp_line in h5_buffer:
+                            udp_sock.sendto(_udp_line.encode("utf-8"), ("255.255.255.255", 9876))
+                    except Exception:
+                        pass
+                    h5_buffer.clear()
                 # Drain overrun buffer at 1 Hz
                 if overrun_buffer:
                     try:
@@ -2654,6 +2686,11 @@ if __name__ == "__main__":
                         last_bn_turn = -999.0
                         last_bn_time = 0.0
 
+                        # UDP socket for Brain telemetry broadcast (independent of Heart's socket)
+                        brain_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        brain_udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                        brain_udp_sock.setblocking(False)
+
                         def brain_flush_buffers():
                             """Drain [BS] and [BN] buffers to telemetry log."""
                             if not bs_buffer and not bn_buffer:
@@ -2661,10 +2698,16 @@ if __name__ == "__main__":
                             try:
                                 with open(LOG_FILE, "a") as f:
                                     f.write("".join(bs_buffer) + "".join(bn_buffer))
-                                bs_buffer.clear()
-                                bn_buffer.clear()
                             except:
                                 pass
+                            # UDP broadcast [BS]/[BN] lines (fire-and-forget for live analyst)
+                            try:
+                                for _udp_line in bs_buffer + bn_buffer:
+                                    brain_udp_sock.sendto(_udp_line.encode("utf-8"), ("255.255.255.255", 9876))
+                            except Exception:
+                                pass
+                            bs_buffer.clear()
+                            bn_buffer.clear()
 
                         # === MAIN NAV LOOP (~10 Hz) ===
                         while is_running.value and not nav.finished:
