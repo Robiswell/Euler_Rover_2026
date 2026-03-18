@@ -326,6 +326,40 @@ def compute_max_clearance_hz(impact_start, impact_end, duty,
     return max_hz
 
 
+def compute_roll_corner_drop(turn_bias, worst_angle, duty):
+    """
+    Extra clearance loss (mm) at the inside chassis corner from body roll
+    during a turn.
+
+    Physics:
+      Differential leg speeds (hz_L != hz_R) create asymmetric stance heights.
+      Inside legs run faster -> larger worst_angle -> lower h(theta).
+      The height difference across W_SHAFT tilts the chassis, and the corner
+      overhang amplifies the drop:
+        delta_h = r * |cos(theta_outside) - cos(theta_inside)|
+        corner_drop = CORNER_OVERHANG * delta_h / W_SHAFT * ROLL_SAFETY_FACTOR
+
+      The inside leg's worst angle is increased by the turn_bias fraction of
+      the air sweep, modeling faster rotation on the inside.
+    """
+    if abs(turn_bias) < 0.001:
+        return 0.0
+
+    # Inside leg sees a larger effective angle due to faster rotation.
+    # Turn bias shifts the inside leg's phase, widening its worst angle.
+    bias_angle_shift = abs(turn_bias) * worst_angle * 0.5  # proportional to turn effort
+    theta_inside = math.radians(worst_angle + bias_angle_shift)
+    theta_outside = math.radians(max(0.0, worst_angle - bias_angle_shift))
+
+    h_inside = LEG_EFFECTIVE_RADIUS * math.cos(theta_inside)
+    h_outside = LEG_EFFECTIVE_RADIUS * math.cos(theta_outside)
+    delta_h = abs(h_outside - h_inside)
+
+    # Corner overhang amplifies the tilt
+    corner_drop = CORNER_OVERHANG * delta_h / W_SHAFT * ROLL_SAFETY_FACTOR
+    return corner_drop
+
+
 def get_air_sweep(stance_sweep):
     """
     Authoritative air-phase sweep calculation.
