@@ -125,6 +125,7 @@ PHERR_RELEASE_DEG  = 20.0   # release below this (hysteresis)
 PHERR_FLOOR_SCALE  = 0.35   # minimum speed multiplier at max error
 PHERR_RAMP_WIDTH   = 120.0  # degrees from engage threshold to floor
 PHERR_STUCK_TIMEOUT = 5.0   # seconds at low scale before stall escalation
+KAPPA_TRANSITION    = 12.0  # exponential ramp decay rate for gait transitions (paper Eq. 20-21)
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
 OVERLOAD_MAX_CYCLES = 10  # max TE cycles per servo per session — limits EPROM wear
@@ -155,6 +156,18 @@ GAITS = {
 # -----------------------------------------------------------------
 # KINEMATIC CORE HELPERS
 # -----------------------------------------------------------------
+def cpg_exp_ramp(current, target, kappa, dt):
+    """Exponential ramp toward target (paper Eq. 20-21). Returns new value."""
+    return current + (target - current) * (1.0 - math.exp(-kappa * dt))
+
+def cpg_exp_ramp_circular(current, target, kappa, dt, period=1.0):
+    """Exponential ramp with circular wrapping. Returns new value."""
+    half = period / 2.0
+    diff = (target - current + half) % period - half
+    new_target = current + diff
+    result = cpg_exp_ramp(current, new_target, kappa, dt)
+    return result % period
+
 def get_air_sweep(stance_sweep):
     """
     Authoritative air-phase sweep calculation.
@@ -427,6 +440,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     te_during_stall = {sid: 0 for sid in ALL_SERVOS}
     stall_entry_time = {sid: 0.0 for sid in ALL_SERVOS}
     overrun_streak = 0
+    overrun_buffer = []          # buffered overrun log entries (drain at 1 Hz)
+    overrun_context_flushed = False  # one-shot: flush ring buffer once per burst
     servo_comm_fails = {sid: 0 for sid in ALL_SERVOS}
     servo_disabled = {sid: False for sid in ALL_SERVOS}
     ref_ff_speed = 0.0
@@ -469,6 +484,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
+    prev_gait_id     = 0  # track gait switches for phase snap (Fix 66)
 
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
@@ -690,6 +706,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                               volt_dip_counter, temp_spike_counter, prev_loop_ms, ghost_event_flag)
                 ghost_event_flag = False  # reset after logging — new ghost events latch fresh
                 last_log_time = loop_start
+                # Drain overrun buffer (1 Hz)
+                if overrun_buffer:
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.writelines(overrun_buffer)
+                    except:
+                        pass
+                    overrun_buffer.clear()
                 # Reset per-1Hz accumulators
                 pos_delta_accum = 0
                 gov_clamp_count = 0
@@ -713,15 +737,24 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             smooth_imp_end = (smooth_imp_end + d_e * lerp_rate) % 360
 
             gait_params = GAITS.get(shared_gait_id.value, GAITS[0])
+            current_gait_id = shared_gait_id.value
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
-
-            # Duty LERP rate matched to hz/turn (was 1.0x, now 4.0x)
-            smooth_duty += (t_duty - smooth_duty) * lerp_rate
-
             t_offsets = gait_params['offsets']
-            for sid in ALL_SERVOS:
-                o_diff = (t_offsets[sid] - smooth_offsets[sid] + 0.5) % 1.0 - 0.5
-                smooth_offsets[sid] = (smooth_offsets[sid] + o_diff * lerp_rate) % 1.0
+
+            # Snap on gait switch -- eliminate LERP convergence lag (Fix 66)
+            if current_gait_id != prev_gait_id:
+                smooth_duty = t_duty
+                smooth_imp_start = shared_impact_start.value
+                smooth_imp_end   = shared_impact_end.value
+                for sid in ALL_SERVOS:
+                    smooth_offsets[sid] = t_offsets[sid]
+                prev_gait_id = current_gait_id
+            else:
+                # Exponential ramp for smooth convergence (paper Eq. 20-21)
+                smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
+                for sid in ALL_SERVOS:
+                    smooth_offsets[sid] = cpg_exp_ramp_circular(
+                        smooth_offsets[sid], t_offsets[sid], KAPPA_TRANSITION, real_dt)
 
             # ----------------------------------------------------------
             # 3. DRIVE CALCULATIONS & SAFETY GOVERNOR
@@ -907,23 +940,30 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             while time.perf_counter() - loop_start < target_dt:
                 pass
 
-            # Loop overrun detection
+            # Loop overrun detection (buffered -- drain at 1 Hz to avoid I/O feedback loop)
             if prev_loop_ms > 18.0:
                 overrun_streak += 1
-                try:
-                    with open(LOG_FILE, "a") as f:
-                        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        f.write(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
-                except:
-                    pass
-                if overrun_streak >= 3:
+                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                if len(overrun_buffer) < 500:  # cap to prevent OOM on sustained overrun
+                    overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
+                if overrun_streak >= 3 and not overrun_context_flushed:
                     flush_ring_buffer("OVERRUN-CONTEXT", 50, f"{overrun_streak} consecutive overruns")
+                    overrun_context_flushed = True  # one-shot per burst
             else:
                 overrun_streak = 0
+                overrun_context_flushed = False  # reset when streak breaks
 
     except Exception as e:
         print(f"[heart] fatal error: {e}")
     finally:
+        # Drain remaining overrun entries
+        if overrun_buffer:
+            try:
+                with open(LOG_FILE, "a") as f:
+                    f.writelines(overrun_buffer)
+            except:
+                pass
+            overrun_buffer.clear()
         flush_stall_log()
         print("[heart] shutting down, returning legs to home...")
         port_handler.clearPort()
