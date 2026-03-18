@@ -215,6 +215,10 @@ def parse_h5_lines(filepath):
             if ph_match:
                 rec['phases'] = [float(x) for x in ph_match.group(1).split(',')]
 
+            pht_match = re.search(r'PhT:([\d.,]+)', line)
+            if pht_match:
+                rec['target_phases'] = [float(x) for x in pht_match.group(1).split(',')]
+
             ff_match = re.search(r'FF:([\d.]+)', line)
             if ff_match:
                 rec['ff_speed'] = float(ff_match.group(1))
@@ -299,7 +303,8 @@ def parse_bn_lines(filepath):
                 rec['front_cliff'] = int(clf_match.group(1))
                 rec['rear_cliff'] = int(clf_match.group(2))
 
-            for key, pat in [('speed', r'Spd:(-?\d+)'), ('turn', r'Trn:([-+\d.]+)'),
+            for key, pat in [('speed', r'Spd:(-?\d+)'), ('base_speed', r'BSpd:(-?\d+)'),
+                             ('turn', r'Trn:([-+\d.]+)'),
                              ('turn_intensity', r'TI:([\d.]+)'), ('gait', r'Gait:(\d)'),
                              ('terrain_mult', r'TM:([\d.]+)'), ('stall_mult', r'SM:([\d.]+)'),
                              ('flicker', r'Flk:(\d+)')]:
@@ -916,6 +921,54 @@ def plot_phase_timeline(h5_records, output_dir):
     print(f"  [+] phase_timeline.png")
 
 
+def plot_phase_error(h5_records, output_dir):
+    """Per-servo phase error (target - actual) over time. Requires PhT: field."""
+    recs = [r for r in h5_records
+            if 'phases' in r and 'target_phases' in r
+            and len(r['phases']) == 6 and len(r['target_phases']) == 6]
+    if not recs:
+        return
+    times = [r['time_s'] for r in recs]
+    errors_by_servo = [[] for _ in range(6)]
+    for r in recs:
+        for i in range(6):
+            err = r['target_phases'][i] - r['phases'][i]
+            # Wrap to [-180, 180]
+            err = (err + 180) % 360 - 180
+            errors_by_servo[i].append(err)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+
+    # Top: per-servo phase error
+    for i in range(6):
+        ax1.plot(times, errors_by_servo[i], color=SERVO_COLORS[i],
+                 linewidth=0.6, alpha=0.7, label=SERVO_NAMES[i])
+    ax1.axhline(y=0, color='black', linewidth=0.5, linestyle='--')
+    ax1.set_ylabel('Phase Error (degrees)')
+    ax1.set_title('Per-Servo Phase Error (target - actual)')
+    ax1.legend(ncol=6, fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    # Bottom: max absolute error across all servos (what governor sees)
+    max_errors = [max(abs(errors_by_servo[i][j]) for i in range(6))
+                  for j in range(len(times))]
+    ax2.plot(times, max_errors, color='#e41a1c', linewidth=0.8)
+    ax2.axhline(y=30, color='orange', linewidth=1, linestyle='--',
+                label='Governor engage (30 deg)')
+    ax2.axhline(y=20, color='green', linewidth=1, linestyle='--',
+                label='Governor release (20 deg)')
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Max |Phase Error| (degrees)')
+    ax2.set_title('Max Phase Error vs Governor Thresholds')
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, 'phase_error.png'), dpi=150)
+    plt.close(fig)
+    print(f"  [+] phase_error.png")
+
+
 def plot_gait_transitions(bn_records, output_dir):
     if not bn_records:
         return
@@ -1439,6 +1492,7 @@ def main():
         plot_servo_positions(h5_records, args.output_dir)
         plot_servo_cmd_vs_actual(h5_records, args.output_dir)
         plot_phase_timeline(h5_records, args.output_dir)
+        plot_phase_error(h5_records, args.output_dir)
     if bn_records:
         plot_gait_transitions(bn_records, args.output_dir)
     if bn_records or bs_records:
