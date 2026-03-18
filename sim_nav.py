@@ -30,8 +30,8 @@ CRUISE_SPEED = 400
 TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
-MAX_TURN_BIAS = 0.25
-PIVOT_TURN_BIAS = 0.5
+MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
+PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
