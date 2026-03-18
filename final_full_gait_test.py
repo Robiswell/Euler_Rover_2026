@@ -1201,6 +1201,8 @@ if __name__ == "__main__":
     def _parse_arduino_csv(line):
         """Parse a 20-column CSV line from Arduino sensor hub into a frame dict.
         Returns dict or None on parse failure."""
+        if not hasattr(_parse_arduino_csv, '_prev_dists'):
+            _parse_arduino_csv._prev_dists = None
         if not line:
             return None
         line = line.strip()
@@ -1215,6 +1217,15 @@ if __name__ == "__main__":
             for i in range(IDX_FDL, IDX_RDR + 1):
                 v = float(parts[i])
                 dists.append(v)
+
+            # Timeout hold: 300.0 = no echo (vibration dropout).
+            # Hold previous valid reading to prevent false CLEAR classification.
+            prev = _parse_arduino_csv._prev_dists
+            if prev is not None:
+                for i in range(len(dists)):
+                    if dists[i] >= 300.0 and prev[i] < 300.0:
+                        dists[i] = prev[i]
+            _parse_arduino_csv._prev_dists = dists[:]
             qw = float(parts[IDX_QW])
             qx = float(parts[IDX_QX])
             qy = float(parts[IDX_QY])
@@ -1634,7 +1645,8 @@ if __name__ == "__main__":
             self.initial_yaw = None
             self.finished = False
             self.finish_wall_start = 0.0
-            self.front_danger_frames = 0
+            self._front_danger_ring = [False, False, False]  # ring buffer for 2-of-3 majority vote
+            self._front_ring_idx = 0
             # Sustained condition trackers
             self._freefall_start = 0.0
             self._high_vibe_start = 0.0
@@ -1712,11 +1724,9 @@ if __name__ == "__main__":
             pitch_deg = imu["pitch_deg"]
             roll_deg = imu["roll_deg"]
 
-            # --- Track front danger frames for P10 (2+ consecutive) ---
-            if front_class >= DIST_DANGER:
-                self.front_danger_frames += 1
-            else:
-                self.front_danger_frames = 0
+            # --- Track front danger frames for P10 (2-of-last-3 majority vote) ---
+            self._front_danger_ring[self._front_ring_idx] = (front_class >= DIST_DANGER)
+            self._front_ring_idx = (self._front_ring_idx + 1) % 3
 
             # === LAYER 1: State transitions (priority order) ===
 
@@ -1856,8 +1866,8 @@ if __name__ == "__main__":
                 step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
                 return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-            # P10: Front DANGER (2+ frames, not dead-end)
-            if self.front_danger_frames >= 2:
+            # P10: Front DANGER (2-of-last-3 frames, tolerates 1 flicker)
+            if sum(self._front_danger_ring) >= 2:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                 self._transition(NAV_BACKWARD)
@@ -2182,12 +2192,12 @@ if __name__ == "__main__":
         # Tier 3g: log orientation check
         current_voltage = shared_voltage.value
         brain_log(f"[ROLL-CHECK] loads:{','.join(roll_loads)} above{UPRIGHT_LOAD_THRESHOLD}="
-                  f"{upright_count}/4needed volt={current_voltage:.1f}V")
+                  f"{upright_count}/2needed volt={current_voltage:.1f}V")
 
-        if upright_count >= 4:
+        if upright_count >= 2:
             brain_log(f"[ROLL-CHECK] → SKIP_UPRIGHT")
             print(f"[recovery] roll skipped — robot appears upright "
-                  f"({upright_count}/6 legs loaded > {UPRIGHT_LOAD_THRESHOLD})")
+                  f"({upright_count}/6 legs loaded > {UPRIGHT_LOAD_THRESHOLD}, threshold=2)")
             shared_gait_id.value = saved_gait_for_check  # restore gait
             return
 
