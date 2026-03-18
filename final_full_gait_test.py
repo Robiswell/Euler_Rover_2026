@@ -1225,7 +1225,15 @@ if __name__ == "__main__":
             gx = float(parts[IDX_GX])
             gy = float(parts[IDX_GY])
             gz = float(parts[IDX_GZ])
-            upside = int(float(parts[IDX_UPSIDE]))
+
+            # Correct for upside-down IMU mount (180 deg rotation around X axis):
+            # Y and Z axes are inverted in sensor body frame.
+            qy, qz = -qy, -qz      # Quaternion correction
+            ay, az = -ay, -az        # Accelerometer correction
+            gy, gz = -gy, -gz        # Gyroscope correction
+            # IMU is physically mounted upside-down: Arduino reports
+            # UpsideDown=1 when robot is actually right-side up. Invert.
+            upside = 1 - int(float(parts[IDX_UPSIDE]))
         except (ValueError, IndexError):
             return None
 
