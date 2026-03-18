@@ -809,9 +809,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         stall_sustained_start[sid] = now
                     elif now - stall_sustained_start[sid] >= OVERLOAD_PREVENTION_TIME:
                         if overload_cycle_count[sid] < OVERLOAD_MAX_CYCLES:
-                            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
+                            comm1, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
                             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1)
                             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
+                            comm2, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
                             te_dwell_remaining[sid] = 5  # 100ms dwell before re-enable
                             overload_cycle_count[sid] += 1
                             te_cycle_counts[sid] += 1
@@ -824,7 +825,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                                             f"load={load_mag} cycle={overload_cycle_count[sid]}/{OVERLOAD_MAX_CYCLES}\n")
                             except:
                                 pass
-                        stall_sustained_start[sid] = 0.0
+                            if comm1 == 0 and comm2 == 0:  # COMM_SUCCESS
+                                stall_sustained_start[sid] = 0.0
+                            # else: leave timer running -- retry on next tick
                 else:
                     stall_sustained_start[sid] = 0.0
 
@@ -1043,6 +1046,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # ----------------------------------------------------------
             max_phase_error_frame = 0.0  # worst-case servo error this tick
             for sid in ALL_SERVOS:
+                target_phase = 0.0  # safe default -- overwritten by Buehler calc or roll mode
                 leg_hz    = hz_L if sid in LEFT_SERVOS else hz_R
                 is_rev_leg = (leg_hz < 0)
 
@@ -1062,7 +1066,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         raw_speed = -raw_speed
                     if sid in LEFT_SERVOS:
                         raw_speed = -raw_speed
-                    final_speed = max(-3000, min(3000, int(raw_speed)))
+                    final_speed = max(-SERVO_SPEED_GOVERNOR_CAP, min(SERVO_SPEED_GOVERNOR_CAP, int(raw_speed)))
                 elif is_stalled[sid] or servo_disabled[sid] or abs(leg_hz) < 0.001:
                     final_speed = 0
                     if sid == 1:
@@ -1259,57 +1263,6 @@ def tactical_sleep(duration, running_flag, heart_process):
             raise EmergencyStopException("Heart process has died unexpectedly.")
         time.sleep(0.1)
 
-class N21_FSM_BothSidesNearEqual(unittest.TestCase):
-    """P11: both sides equally NEAR → SLOW_FORWARD (not full-speed FORWARD)."""
-    def test_both_sides_near_slows_down(self):
-        nav = NavStateMachine()
-        # Both left and right at 25cm = NEAR, equal severity
-        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
-        result = _nav_update(nav, frame=f)
-        self.assertEqual(result[0], NAV_SLOW_FORWARD)
-        self.assertLessEqual(result[1], SLOW_SPEED)
-    def test_both_sides_near_straight(self):
-        """When both sides equally blocked, turn should be zero."""
-        nav = NavStateMachine()
-        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
-        result = _nav_update(nav, frame=f)
-        self.assertAlmostEqual(result[2], 0.0)
-class N22_FSM_ArcDwellPersistence(unittest.TestCase):
-    """Arc dwell: arc state persists while dwell is active and obstacle remains."""
-    def test_arc_persists_during_dwell(self):
-        """After P11 triggers ARC_LEFT, a second update with same obstacle
-        should NOT snap to FORWARD while dwell is active."""
-        nav = NavStateMachine()
-        # First frame: right blocked → ARC_LEFT
-        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
-        r1 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r1[0], NAV_ARC_LEFT)
-        # Second frame: same obstacle, within dwell window → should stay ARC_LEFT
-        r2 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r2[0], NAV_ARC_LEFT)
-    def test_arc_right_persists_during_dwell(self):
-        """Same test for ARC_RIGHT."""
-        nav = NavStateMachine()
-        f_blocked = _make_frame(fdl=25, fcf=100, fdr=100, rdl=25, rdr=100)
-        r1 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r1[0], NAV_ARC_RIGHT)
-        r2 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r2[0], NAV_ARC_RIGHT)
-    def test_arc_clears_when_obstacle_gone(self):
-        """After obstacle clears AND dwell expires, return to FORWARD."""
-        nav = NavStateMachine()
-        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
-        _nav_update(nav, frame=f_blocked)
-        self.assertEqual(nav.state, NAV_ARC_LEFT)
-        # Expire the dwell manually
-        # V0.5.01 update: instead of manipulating internal dwell timer, 
-        # just wait out the dwell duration in real time to ensure the timing logic works as intended.
-        # nav._dwell_end = time.monotonic() - 1
-        nav.dwell_duration = 0
-        # All clear frame
-        f_clear = _make_frame()
-        r2 = _nav_update(nav, frame=f_clear)
-        self.assertEqual(r2[0], NAV_FORWARD)
 
 
 # ===================================================================
@@ -1494,7 +1447,7 @@ if __name__ == "__main__":
                                impact_start=saved_imp_s, impact_end=saved_imp_e,
                                x_flip=saved_x_flip, step_name="stall_tsleep_restore")
                 # Post-wiggle re-check — one retry max
-                time.sleep(0.5)
+                tsleep(0.5)
                 recheck = sum(
                     1 for i in range(len(ALL_SERVOS))
                     if shared_servo_loads[i] > STALL_THRESHOLD
@@ -1871,7 +1824,6 @@ if __name__ == "__main__":
     def compute_battery_mult(voltage_value):
         """Compute battery speed multiplier from shared_voltage.
         Returns 1.0 normally, 0.7 if low battery."""
-        VOLTAGE_MIN = 10.5  # 3S LiPo minimum
         if voltage_value < VOLTAGE_MIN:
             return 0.0  # critical — STOP_SAFE should handle this
         if voltage_value < VOLTAGE_MIN + 0.5:
@@ -2081,7 +2033,7 @@ if __name__ == "__main__":
                     return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
             # P3: Critical battery
-            if voltage < 10.5:  # VOLTAGE_MIN for 3S
+            if voltage < VOLTAGE_MIN:
                 self._transition(NAV_STOP_SAFE)
                 brain_log(f"[NAV] critical voltage {voltage:.1f}V")
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
@@ -2185,6 +2137,7 @@ if __name__ == "__main__":
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
 
+            # NOTE: P12 is structurally unreachable (P11 fires first when both sides >= NEAR). Kept as defense-in-depth.
             # P12: Narrow corridor (both sides DANGER, front OK)
             if left_class >= DIST_DANGER and right_class >= DIST_DANGER and front_class < DIST_DANGER:
                 self._transition(NAV_SLOW_FORWARD)

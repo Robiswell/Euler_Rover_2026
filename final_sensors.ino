@@ -13,6 +13,7 @@
     Index 7  RearDiagonalRight   (RDR)
 
   Per-sensor classification (output values):
+    -2.0   FAULT      — no rising edge / sensor disconnected or wiring fault
     -1.0   VERY NEAR  — echo too short / in blind zone / sensor saturated
     300.0  VERY FAR   — echo timeout or distance > 300 cm
     2–300  valid distance in cm (clamped)
@@ -157,6 +158,7 @@ float last_gravity_z = 9.81f;   // gravity Z for upside-down detection (FIX 6)
 unsigned long last_imu_update_ms = 0;
 unsigned int imu_fail_count = 0;
 const unsigned int IMU_FAIL_RESET = 50;  // reinit IMU after 50 consecutive misses
+static uint8_t upside_down_consec = 0;
 
 // -----------------------------------------------------------------------
 // Utility: drain ECHO pin to LOW before triggering
@@ -198,9 +200,9 @@ float measureClassified(uint8_t idx) {
   unsigned long t0 = micros();
   while (digitalRead(echo) == LOW) {
     if (micros() - t0 > TIMEOUT_TOTAL) {
-      // No rising edge at all → sensor disconnected or fault → VERY FAR (FIX 2)
+      // Sensor fault/disconnected -- distinct from -1.0 (blind zone) and 300.0 (out of range)
       durations_us[idx] = 0;
-      return 300.0f;
+      return -2.0f;
     }
   }
   unsigned long rise_time = micros();
@@ -222,7 +224,10 @@ float measureClassified(uint8_t idx) {
       //   short window (NEAR_RECHECK_US).  Some HC-SR04 variants need a
       //   second trigger to respond after a blind-zone event, and some produce
       //   a brief echo that was missed on the first attempt.
-      drainEchoLow(echo, 40000UL);
+      drainEchoLow(echo, NEAR_RECHECK_US);
+      if (digitalRead(echo) == HIGH) {
+        return -1.0f;  // Echo still active after drain -- confirmed blind-zone, skip retrigger
+      }
       digitalWrite(trig, LOW);
       delayMicroseconds(4);
       digitalWrite(trig, HIGH);
@@ -289,12 +294,13 @@ void setup() {
   //  I2C transfer can legitimately take more than 3 ms. If Wire resets the bus that early,
   //   imu.begin() can fail and you'll see "BNO085 not detected" even though the wiring is
   Wire.setWireTimeout(25000, true);  // FIX 5: 25 ms I2C timeout, reset bus on timeout
+  Wire.clearWireTimeoutFlag();
 
   // IMU initialisation (BNO085 at address 0x4A)
   if (!imu.begin(0x4A, Wire)) {
     Serial.println("# ERROR: BNO085 not detected — check wiring!");
-    //  FIX 0.5.01 
-    while (1) { delay(25000); } 
+    //  FIX 0.5.01
+    Serial.println("# HALTED: BNO085 init failed"); while (1) {}
   }
   
   imu.enableGameRotationVector(50);  // 50 Hz quaternion — Game RV (no mag, boot-relative)
@@ -352,8 +358,10 @@ void loop() {
   // --- Read IMU: update last-known values if fresh data available (FIX 4) ---
   // Drain all pending IMU reports so getters return the most recent values
   bool got_imu = false;
-  while (imu.dataAvailable()) {
+  int drain_count = 0;
+  while (imu.dataAvailable() && drain_count < 10) {
     got_imu = true;
+    drain_count++;
   }
   if (got_imu) {
     last_qx = imu.getQuatI();
@@ -373,6 +381,7 @@ void loop() {
     imu_fail_count++;
     if (imu_fail_count >= IMU_FAIL_RESET) {
       // FIX 5: IMU likely locked up — attempt reinit
+      Wire.clearWireTimeoutFlag();
       if (imu.begin(0x4A, Wire)) {
         imu.enableGameRotationVector(50);
         imu.enableAccelerometer(50);
@@ -389,7 +398,14 @@ void loop() {
   //   Inverted:      gravity_z ≤ +5
   // NOTE: verify polarity on hardware — if IMU Z-axis points down in chassis,
   //       flip comparison to (last_gravity_z < -5.0f)
-  upside_down_flag = (last_gravity_z > 5.0f) ? 0 : 1;
+  // Hysteresis: require 2 consecutive readings to change state
+  if (last_gravity_z <= 0.0f) {  // Clearly inverted (gravity pointing up)
+    if (upside_down_consec < 2) upside_down_consec++;
+  } else if (last_gravity_z > 5.0f) {  // Clearly upright
+    upside_down_consec = 0;
+  }
+  // Only flip when we hit 2 consecutive inverted readings
+  upside_down_flag = (upside_down_consec >= 2) ? 1 : 0;
 
   // --- Emit CSV row with accurate timestamp (FIX 9) ---
   unsigned long now = millis();   // timestamp reflects when data is ready
