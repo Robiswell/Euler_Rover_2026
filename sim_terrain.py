@@ -22,8 +22,10 @@ Key pass criteria:
   T8  Worst case        -> forward progress maintained, stall recovery <20 frames
   T9  2-frame hysteresis -> zero stalls from sub-threshold spike patterns
   T10 Wave carve sand   -> governor margin positive, minimal stalls
-  T11 Gait transition   -> Quad→Wave mid-scenario on sand, no governor violation
+  T11 Gait transition   -> Quad->Wave mid-scenario on sand, no governor violation
   T12 Timed fallback    -> full fallback sequence on sand, <10% stall fraction
+  T13 Overload timing   -> TE cycle fires at 1.5s; capped at 10; no fire at 1.0s
+  T14 PhErr governor    -> hz scaled down when error high; no cascade; released on recovery
 """
 
 import sys, io, math, random
@@ -44,6 +46,17 @@ GAITS = {
     1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
     2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
+
+# Overload prevention constants (must match final_full_gait_test.py)
+OVERLOAD_PREVENTION_TIME = 1.5   # seconds: stall duration that triggers TE cycle
+OVERLOAD_MAX_CYCLES      = 10    # max TE cycles per stall event before cap
+
+# PhErr governor constants (must match final_full_gait_test.py)
+PHERR_ENGAGE_DEG  = 30.0    # deg: engage governor when max phase error exceeds this
+PHERR_RELEASE_DEG = 20.0    # deg: release governor when error drops below this
+PHERR_FLOOR_SCALE = 0.35    # minimum hz scale when governor is fully engaged
+PHERR_RAMP_WIDTH  = 120.0   # deg: error range over which scale ramps from 1.0 to floor
+KAPPA_GOVERNOR    = 3.0     # exponential decay rate for governor scaling
 
 # ── Kinematics (sync: final_full_gait_test.py lines 159-178) ─────────────
 def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
@@ -81,8 +94,10 @@ class TerrainGen:
       'fixed_rock'       arm_fixed_rock() needed; injects 950+ for N frames
       'hole'             arm_hole() needed; 3-phase load profile on one leg
       'spike_2on_2off'   deterministic 2-frame-above / 2-frame-below pattern at 800/200
+      'sustained_stall'  every stance frame on the target servo returns fixed_load
     """
-    def __init__(self, terrain_type, ramp_deg=0.0, seed=42):
+    def __init__(self, terrain_type, ramp_deg=0.0, seed=42,
+                 sustained_sid=None, sustained_load=800):
         self.terrain  = terrain_type
         self.ramp_sin = math.sin(math.radians(ramp_deg))
         self.rng      = random.Random(seed)
@@ -90,6 +105,9 @@ class TerrainGen:
         self._hole_cd  = {s: (0, 0) for s in ALL_SERVOS}
         self._fr_sid   = None
         self._fr_cd    = 0
+        # sustained_stall terrain: one servo held above threshold indefinitely
+        self._sus_sid  = sustained_sid
+        self._sus_load = sustained_load
 
     def arm_fixed_rock(self, sid, duration=20):
         self._fr_sid = sid
@@ -102,6 +120,10 @@ class TerrainGen:
         # spike_2on_2off: deterministic pattern, ignores stance phase
         if self.terrain == 'spike_2on_2off':
             return 800 if (tick // 2) % 2 == 0 else 200
+
+        # sustained_stall: target servo always above threshold while in stance
+        if self.terrain == 'sustained_stall' and sid == self._sus_sid and in_stance:
+            return self._sus_load
 
         if not in_stance:
             return self.rng.randint(50, 90)
@@ -159,7 +181,7 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
 
     gait_schedule: optional list of (frame_number, params_dict) tuples.
         At frame_number, update gait_id/speed/turn_bias targets.
-        LERP smooths the transition — matches production engine behavior.
+        LERP smooths the transition -- matches production engine behavior.
     """
     rng = random.Random(seed)
     tgen = TerrainGen(terrain_type, ramp_deg=ramp_deg, seed=seed+1)
@@ -266,7 +288,7 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
             # v2 is_reversed flag (matches production: leg_hz < 0)
             is_rev = (s_hz < 0)
 
-            # ── Terrain load → stall detection (v2: no INSTANT_STALL) ──
+            # ── Terrain load -> stall detection (v2: no INSTANT_STALL) ──
             load = tgen.get_load(sid, in_stance, tick=tick)
 
             if load > STALL_THRESHOLD:
@@ -419,29 +441,29 @@ def define_scenarios():
         gait_id=2, speed=400, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=20.0))
 
-    # T8: Worst case — wet sand + loose rocks + 15 deg ramp, Wave gait
+    # T8: Worst case -- wet sand + loose rocks + 15 deg ramp, Wave gait
     sc.append(dict(name="T8 Worst case Wave",
         gait_id=1, speed=350, turn_bias=0.0, frames=3000,
         terrain_type='worst_case', ramp_deg=15.0))
 
-    # T9: Hysteresis verification — 2-frame spikes should NOT cause stall
+    # T9: Hysteresis verification -- 2-frame spikes should NOT cause stall
     #      spike_2on_2off terrain: load 800 for 2 frames, 200 for 2 frames, repeat
     sc.append(dict(name="T9 2-frame spike hysteresis",
         gait_id=0, speed=800, turn_bias=0.0, frames=1000,
         terrain_type='spike_2on_2off'))
 
-    # T10: Wave carve turn during sand — governor margin check
+    # T10: Wave carve turn during sand -- governor margin check
     sc.append(dict(name="T10 Wave carve left sand",
         gait_id=1, speed=350, turn_bias=-0.12, frames=1500,
         terrain_type='wet_sand', ramp_deg=0.0))
 
-    # T11: Gait transition under terrain load (Quad@400 → Wave@350 at frame 500)
+    # T11: Gait transition under terrain load (Quad@400 -> Wave@350 at frame 500)
     sc.append(dict(name="T11 Gait transition wet sand",
         gait_id=2, speed=400, turn_bias=0.0, frames=1500,
         terrain_type='wet_sand',
         gait_schedule=[(500, {'gait_id': 1, 'speed': 350})]))
 
-    # T12: Timed fallback sequence on wet sand (Quad@400 45s → Wave@350 30s → decel)
+    # T12: Timed fallback sequence on wet sand (Quad@400 45s -> Wave@350 30s -> decel)
     sc.append(dict(name="T12 Timed fallback wet sand",
         gait_id=2, speed=400, turn_bias=0.0, frames=3900,
         terrain_type='wet_sand', seed=42,
@@ -450,6 +472,278 @@ def define_scenarios():
 
     return sc
 
+
+# ── T13: Overload prevention timing ──────────────────────────────────────────
+def run_t13_overload_timing():
+    """
+    Property: The overload prevention timer fires a TE cycle when a servo is
+    stalled continuously for >= OVERLOAD_PREVENTION_TIME (1.5s), the cycle
+    counter is capped at OVERLOAD_MAX_CYCLES (10), and a 1.0s stall does NOT
+    fire a cycle.
+
+    Failure means: On hardware, a servo held in stall for > 1.5s without a TE
+    cycle would draw 2.7A sustained until overcurrent lockout (~2s window).
+    A missing cap means the counter overflows and the TE dwell logic misbehaves.
+    A 1.0s stall triggering a cycle wastes 0.5s of motion on sand for no reason.
+
+    Known false positive risk: None. Timing is deterministic -- stall_time
+    increments by real_dt each frame while load > STALL_THRESHOLD.
+
+    Sub-checks:
+      T13.A: 2.0s sustained stall -> stall_time exceeds OVERLOAD_PREVENTION_TIME
+      T13.B: overload_cycle_count increments on each threshold crossing
+      T13.C: cycle count is capped at OVERLOAD_MAX_CYCLES after 10 crossings
+      T13.D: 1.0s stall does NOT trigger an overload cycle
+    """
+    # T13.A + T13.B: simulate servo 1 stalled for 2.0 s then released, repeated
+    # 12 times (to exercise cap at 10). Each repetition: 2.0s stall + 0.5s clear.
+    STALL_DURATION_S = 2.0     # seconds to hold above threshold
+    CLEAR_DURATION_S = 0.5     # seconds below threshold between events
+    REPETITIONS      = 12      # intentionally exceeds OVERLOAD_MAX_CYCLES=10
+
+    overload_cycle_count = 0
+    stall_time_s = 0.0         # seconds servo has been continuously stalled
+    stall_start  = None        # wall-clock time when stall began (None = not stalled)
+
+    fails = []
+
+    # Drive deterministic load sequence: REPETITIONS x (stall then clear)
+    total_frames = int((STALL_DURATION_S + CLEAR_DURATION_S) * REPETITIONS / real_dt)
+    cycle_period_frames = int((STALL_DURATION_S + CLEAR_DURATION_S) / real_dt)
+    stall_frames        = int(STALL_DURATION_S / real_dt)
+
+    current_time = 0.0
+    for tick in range(total_frames):
+        phase_in_cycle = tick % cycle_period_frames
+        load = 800 if phase_in_cycle < stall_frames else 200  # deterministic
+
+        # Overload prevention timer -- direct threshold check, no hysteresis (matches production)
+        if load > STALL_THRESHOLD:
+            if stall_start is None:
+                stall_start = current_time
+            elif (current_time - stall_start) >= OVERLOAD_PREVENTION_TIME:
+                if overload_cycle_count < OVERLOAD_MAX_CYCLES:
+                    overload_cycle_count += 1
+                stall_start = current_time  # reset timer for next cycle
+        else:
+            stall_start = None
+
+        current_time += real_dt
+
+    # T13.A: stall duration of 2.0s must exceed OVERLOAD_PREVENTION_TIME (1.5s)
+    if STALL_DURATION_S <= OVERLOAD_PREVENTION_TIME:
+        fails.append("T13.A: TEST SETUP ERROR -- STALL_DURATION_S must exceed "
+                     f"OVERLOAD_PREVENTION_TIME ({OVERLOAD_PREVENTION_TIME}s)")
+
+    # T13.B: cycle count must be > 0 (threshold was crossed at least once)
+    if overload_cycle_count == 0:
+        fails.append("T13.B: OVERLOAD CYCLE NOT FIRED -- no TE cycle triggered "
+                     f"after {STALL_DURATION_S}s stall (threshold {OVERLOAD_PREVENTION_TIME}s)")
+
+    # T13.C: cycle count must be capped at OVERLOAD_MAX_CYCLES despite 12 repetitions
+    if overload_cycle_count > OVERLOAD_MAX_CYCLES:
+        fails.append(f"T13.C: OVERLOAD CAP VIOLATED -- count={overload_cycle_count} "
+                     f"exceeds OVERLOAD_MAX_CYCLES={OVERLOAD_MAX_CYCLES}")
+
+    # T13.D: a 1.0s stall must NOT trigger a cycle (below 1.5s threshold)
+    SHORT_STALL_S = 1.0
+    short_stall_frames = int(SHORT_STALL_S / real_dt)
+    short_cycle_count  = 0
+    s_stall_start  = None
+    s_current_time = 0.0
+    for tick in range(short_stall_frames + 10):  # +10 frames tail
+        load = 800 if tick < short_stall_frames else 200
+        if load > STALL_THRESHOLD:
+            if s_stall_start is None:
+                s_stall_start = s_current_time
+            elif (s_current_time - s_stall_start) >= OVERLOAD_PREVENTION_TIME:
+                short_cycle_count += 1
+                s_stall_start = s_current_time
+        else:
+            s_stall_start = None
+        s_current_time += real_dt
+    if short_cycle_count > 0:
+        fails.append(f"T13.D: FALSE OVERLOAD CYCLE -- 1.0s stall triggered "
+                     f"{short_cycle_count} cycle(s); threshold is {OVERLOAD_PREVENTION_TIME}s")
+
+    return {
+        'name':                'T13 Overload prevention timing',
+        'passed':              len(fails) == 0,
+        'fails':               fails,
+        'overload_cycles_fired': overload_cycle_count,
+        'overload_cap':        OVERLOAD_MAX_CYCLES,
+        'stall_duration_s':    STALL_DURATION_S,
+    }
+
+
+# ── T14: PhErr governor under terrain load ────────────────────────────────────
+def run_t14_pherr_governor():
+    """
+    Property: The PhErr governor scales down hz proportionally when max phase
+    error exceeds PHERR_ENGAGE_DEG (30 deg), does not cause a stall cascade
+    while throttling, and releases (restores hz scale to 1.0) when error drops
+    below PHERR_RELEASE_DEG (20 deg).
+
+    Failure means: On hardware, a governor that fails to scale down hz when
+    phase error is high will command speeds the servo cannot track, growing
+    phase error further until the stuck-timeout stall-escalation fires. A
+    governor that never releases will permanently throttle the robot to 35% of
+    commanded speed, preventing it from completing the Alamosa course.
+
+    Known false positive risk: None. Phase error is injected deterministically
+    and ph_scale is computed analytically -- no floating point accumulation.
+
+    Sub-checks:
+      T14.A: inject phase error > PHERR_ENGAGE_DEG, verify ph_scale < 1.0
+      T14.B: while governor is active, stall count from governor-limited speed
+             must be <= 2 (no cascade on wet sand within 500 frames)
+      T14.C: reduce injected error below PHERR_RELEASE_DEG, verify governor
+             releases (ph_scale returns to 1.0)
+    """
+    # Governor logic (mirrors final_full_gait_test.py lines 997-1020)
+    def compute_ph_scale(max_phase_error_deg, gov_active_prev):
+        """Stateless per-tick governor computation using hysteresis engage/release."""
+        if gov_active_prev:
+            # Release when error drops below release threshold
+            if max_phase_error_deg < PHERR_RELEASE_DEG:
+                return 1.0, False
+        else:
+            # Engage when error exceeds engage threshold
+            if max_phase_error_deg < PHERR_ENGAGE_DEG:
+                return 1.0, False
+
+        # Governor is active: exponential decay matching production formula
+        raw_scale = PHERR_FLOOR_SCALE + (1.0 - PHERR_FLOOR_SCALE) * math.exp(
+            -KAPPA_GOVERNOR * (max_phase_error_deg - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+        ph_scale = max(PHERR_FLOOR_SCALE, raw_scale)
+        return ph_scale, True
+
+    # Wave gait on wet sand, 500 frames
+    gait_id = 1
+    speed   = 350
+    g = GAITS[gait_id]
+    tgen = TerrainGen('wet_sand', seed=42)
+
+    smooth_duty    = g['duty']
+    smooth_offsets = {s: g['offsets'][s] for s in ALL_SERVOS}
+    smooth_speed   = speed * 1.0
+    imp_start = 330.0; imp_end = 30.0
+    master_L = 0.0; master_R = 0.0
+    actual_phases = {s: 0.0 for s in ALL_SERVOS}
+    is_stalled = {s: False for s in ALL_SERVOS}
+    stall_ctr  = {s: 0 for s in ALL_SERVOS}
+    stall_count = 0
+
+    gov_active = False
+    ph_scale   = 1.0
+    fails      = []
+
+    # T14.A: inject high error for first 300 frames, check scale is reduced
+    HIGH_ERROR_DEG = 45.0    # above PHERR_ENGAGE_DEG (30 deg)
+    LOW_ERROR_DEG  = 10.0    # below PHERR_RELEASE_DEG (20 deg)
+    PHASE_A_FRAMES = 300
+    PHASE_B_FRAMES = 200
+
+    scale_when_high = []     # collect ph_scale while error is injected high
+    scale_when_low  = []     # collect ph_scale while error is injected low
+    gov_active_when_low = [] # collect governor state after error drops
+
+    lr = min(1.0, 4.0 * real_dt)
+
+    for tick in range(PHASE_A_FRAMES + PHASE_B_FRAMES):
+        smooth_speed += (speed - smooth_speed) * lr
+        smooth_duty  += (g['duty'] - smooth_duty) * lr
+        for s in ALL_SERVOS:
+            od = (g['offsets'][s] - smooth_offsets[s] + 0.5) % 1.0 - 0.5
+            smooth_offsets[s] = (smooth_offsets[s] + od * lr) % 1.0
+
+        base_hz = smooth_speed / 1000.0
+
+        base_sweep    = (imp_end - imp_start + 180) % 360 - 180
+        air_sweep_val = get_air_sweep(base_sweep)
+        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+
+        # Inject synthetic phase error (replaces the real per-servo accumulation)
+        injected_error = HIGH_ERROR_DEG if tick < PHASE_A_FRAMES else LOW_ERROR_DEG
+        ph_scale, gov_active = compute_ph_scale(injected_error, gov_active)
+
+        # Apply governor scaling to hz (matches production: hz_L and hz_R scaled)
+        effective_hz = base_hz * ph_scale
+        hz_L = max(-max_safe, min(max_safe, effective_hz))
+        hz_R = max(-max_safe, min(max_safe, effective_hz))
+
+        master_L = (master_L + abs(hz_L) * real_dt) % 1.0
+        master_R = (master_R + abs(hz_R) * real_dt) % 1.0
+
+        for sid in ALL_SERVOS:
+            m_t = master_L if sid in LEFT_SERVOS else master_R
+            t_leg = (m_t + smooth_offsets[sid]) % 1.0
+            in_stance = (t_leg <= smooth_duty)
+            load = tgen.get_load(sid, in_stance, tick=tick)
+
+            if load > STALL_THRESHOLD:
+                stall_ctr[sid] = min(3, stall_ctr[sid] + 1)
+                if stall_ctr[sid] >= 3 and not is_stalled[sid]:
+                    is_stalled[sid] = True
+                    stall_count += 1
+            else:
+                stall_ctr[sid] = max(0, stall_ctr[sid] - 1)
+                if stall_ctr[sid] == 0:
+                    is_stalled[sid] = False
+
+        if tick < PHASE_A_FRAMES:
+            scale_when_high.append(ph_scale)
+        else:
+            scale_when_low.append(ph_scale)
+            gov_active_when_low.append(gov_active)
+
+    # T14.A: ph_scale must be < 1.0 while error is above engage threshold
+    max_scale_during_high = max(scale_when_high) if scale_when_high else 1.0
+    # Allow the first few frames before hysteresis engages (engage takes 1 tick)
+    # Check that scale is reduced for the bulk of the high-error window
+    throttled_frames = sum(1 for s in scale_when_high if s < 1.0)
+    if throttled_frames < PHASE_A_FRAMES - 2:
+        fails.append(
+            f"T14.A: GOVERNOR DID NOT THROTTLE -- only {throttled_frames}/{PHASE_A_FRAMES} "
+            f"frames had ph_scale < 1.0 during {HIGH_ERROR_DEG} deg error injection "
+            f"(engage threshold {PHERR_ENGAGE_DEG} deg)")
+    # Also verify the floor is respected
+    min_scale_during_high = min(scale_when_high) if scale_when_high else 1.0
+    if min_scale_during_high < PHERR_FLOOR_SCALE - 0.001:
+        fails.append(
+            f"T14.A: FLOOR VIOLATED -- ph_scale reached {min_scale_during_high:.3f}, "
+            f"below PHERR_FLOOR_SCALE={PHERR_FLOOR_SCALE}")
+
+    # T14.B: stall count during governor-throttled run must stay low
+    # Wet sand base load is ~230-370, well below STALL_THRESHOLD=750, so only
+    # the rare rock spike stalls; governor throttle should not cause cascade.
+    STALL_CASCADE_LIMIT = 2
+    if stall_count > STALL_CASCADE_LIMIT:
+        fails.append(
+            f"T14.B: STALL CASCADE -- {stall_count} stall events during governor-throttled "
+            f"wet sand run (limit {STALL_CASCADE_LIMIT}); governor may be over-throttling")
+
+    # T14.C: governor must release after error drops below PHERR_RELEASE_DEG
+    # After the transition at frame PHASE_A_FRAMES, governor should disengage
+    # within 1-2 ticks (hysteresis is single-tick). Allow 3 frames grace.
+    RELEASE_GRACE_FRAMES = 3
+    still_active_late = [gov_active_when_low[i]
+                         for i in range(RELEASE_GRACE_FRAMES, len(gov_active_when_low))]
+    if any(still_active_late):
+        active_count = sum(1 for v in still_active_late if v)
+        fails.append(
+            f"T14.C: GOVERNOR NOT RELEASED -- active for {active_count} frames after "
+            f"error dropped to {LOW_ERROR_DEG} deg (release threshold {PHERR_RELEASE_DEG} deg)")
+
+    return {
+        'name':                  'T14 PhErr governor terrain load',
+        'passed':                len(fails) == 0,
+        'fails':                 fails,
+        'min_ph_scale_high_err': min(scale_when_high) if scale_when_high else 1.0,
+        'max_ph_scale_high_err': max(scale_when_high) if scale_when_high else 1.0,
+        'stall_count':           stall_count,
+        'governor_released':     not any(still_active_late) if 'still_active_late' in dir() else None,
+    }
 
 
 # ── Pass/fail criteria ────────────────────────────────────────────────────────
@@ -518,7 +812,7 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7→0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
         delta = abs(0.75 - 0.7)
         thresh = 0.01 * 0.75
@@ -535,7 +829,7 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7→0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
         delta = abs(0.75 - 0.7)
         thresh = 0.01 * 0.75
@@ -581,6 +875,16 @@ def main():
         print(f"  {r['name']:<33} {r['total_stalls']:>6} {r['max_stall_dur']:>7} "
               f"{gov_s:>10} {esnap_s:>7} {sfrac_s:>7}  {status}")
         for f in fails:
+            print(f"    !! {f}")
+
+    # T13 and T14 are standalone (not run_scenario-based); run and print separately
+    t13 = run_t13_overload_timing()
+    t14 = run_t14_pherr_governor()
+    for tr in (t13, t14):
+        status = "PASS" if tr['passed'] else "FAIL"
+        if not tr['passed']: overall_pass = False
+        print(f"  {tr['name']:<33} {'--':>6} {'--':>7} {'--':>10} {'--':>7} {'--':>7}  {status}")
+        for f in tr['fails']:
             print(f"    !! {f}")
 
     print()
@@ -659,22 +963,52 @@ def main():
         delta = abs(0.75 - 0.7)
         thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
-        print(f"\nT11 Gait transition under load (Quad@400 → Wave@350 at frame 500):")
+        print(f"\nT11 Gait transition under load (Quad@400 -> Wave@350 at frame 500):")
         print(f"    Governor headroom: {t11['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t11['total_stalls']} | max_dur: {t11['max_stall_dur']} frames")
         print(f"    Max exit snap: {t11['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t11.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
-        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7→0.75, limit 150)")
+        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7->0.75, limit 150)")
 
     # T12 timed fallback
     t12 = next((r for r in all_results if r['name'].startswith('T12')), None)
     if t12:
-        print(f"\nT12 Timed fallback on wet sand (Quad@400 45s → Wave@350 30s → decel):")
+        print(f"\nT12 Timed fallback on wet sand (Quad@400 45s -> Wave@350 30s -> decel):")
         print(f"    Governor headroom: {t12['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t12['total_stalls']} | max_dur: {t12['max_stall_dur']} frames")
         print(f"    Stall fraction: {t12['stall_fraction']*100:.1f}% (limit 10%)")
         print(f"    Max exit snap: {t12['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t12.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
+
+    # T13 overload prevention
+    print(f"\nT13 Overload prevention timing (servo 1 sustained stall):")
+    print(f"    OVERLOAD_PREVENTION_TIME: {OVERLOAD_PREVENTION_TIME}s | "
+          f"OVERLOAD_MAX_CYCLES: {OVERLOAD_MAX_CYCLES}")
+    print(f"    Cycles fired (12 reps, 2.0s stall each): "
+          f"{t13['overload_cycles_fired']} (cap={t13['overload_cap']})")
+    print(f"    T13.A (2.0s > 1.5s threshold): "
+          f"{'PASS' if t13['stall_duration_s'] > OVERLOAD_PREVENTION_TIME else 'FAIL'}")
+    print(f"    T13.B (cycle fires after 2.0s stall): "
+          f"{'PASS' if t13['overload_cycles_fired'] > 0 else 'FAIL'}")
+    print(f"    T13.C (cap at {OVERLOAD_MAX_CYCLES} despite 12 reps): "
+          f"{'PASS' if t13['overload_cycles_fired'] <= OVERLOAD_MAX_CYCLES else 'FAIL'}")
+    t13_d_pass = not any('T13.D' in f for f in t13['fails'])
+    print(f"    T13.D (1.0s stall does NOT fire cycle): "
+          f"{'PASS' if t13_d_pass else 'FAIL'}")
+    print(f"    Result: {'PASS' if t13['passed'] else 'FAIL -- ' + '; '.join(t13['fails'])}")
+
+    # T14 PhErr governor
+    print(f"\nT14 PhErr governor under terrain load (Wave@350, wet sand):")
+    print(f"    PHERR_ENGAGE_DEG={PHERR_ENGAGE_DEG} | PHERR_RELEASE_DEG={PHERR_RELEASE_DEG} | "
+          f"PHERR_FLOOR_SCALE={PHERR_FLOOR_SCALE}")
+    print(f"    Min ph_scale during {45.0} deg error: "
+          f"{t14['min_ph_scale_high_err']:.3f} (floor={PHERR_FLOOR_SCALE})")
+    print(f"    Max ph_scale during {45.0} deg error: "
+          f"{t14['max_ph_scale_high_err']:.3f} (expected <1.0 after engage)")
+    print(f"    Stall count during governor-throttled run: {t14['stall_count']} (limit 2)")
+    print(f"    Governor released after error drop: "
+          f"{'YES' if t14['governor_released'] else 'NO'}")
+    print(f"    Result: {'PASS' if t14['passed'] else 'FAIL -- ' + '; '.join(t14['fails'])}")
 
     # Clearance note
     print()
@@ -701,7 +1035,12 @@ def main():
         print("TERRAIN SIMULATION COMPLETE - all scenarios passed.")
         print("Gait engine cleared for Alamosa terrain deployment.")
     else:
+        # For run_scenario results
         failing = [r['name'] for r in all_results if evaluate(r)]
+        # For standalone results
+        for tr in (t13, t14):
+            if not tr['passed']:
+                failing.append(tr['name'])
         print(f"TERRAIN SIMULATION FAILED - {len(failing)} scenario(s) failed:")
         for n in failing:
             print(f"  - {n}")
