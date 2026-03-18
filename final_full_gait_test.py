@@ -1035,10 +1035,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # When air-phase feedforward exceeds FEEDFORWARD_CAP, phase lag widens the
             # stance entry angle, reducing ground clearance.  This governor dynamically
             # caps Hz for the current duty/impact angles so the worst-case clearance
-            # remains safe — applies to all gaits, all states, including turns.
-            # (Sensors-19-03705 Section 3 — bounded swing velocity for stability)
+            # remains safe -- applies to all gaits, all states, including turns.
+            # Roll-aware: during turns, body tilt drops inside chassis corner closer
+            # to ground. We add roll_drop to the clearance requirement so the governor
+            # tightens the Hz limit proportionally to turn_bias.
+            # (Sensors-19-03705 Section 3 -- bounded swing velocity for stability)
+            worst_angle = _max_angle_from_vertical(smooth_imp_start, smooth_imp_end)
+            roll_drop = compute_roll_corner_drop(smooth_turn, worst_angle, smooth_duty)
+            effective_min_clearance = MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN + roll_drop
             max_clr_hz = compute_max_clearance_hz(smooth_imp_start, smooth_imp_end, smooth_duty,
-                                                  min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
+                                                  min_clearance=effective_min_clearance)
             max_safe_hz = min(max_safe_hz, max_clr_hz)
 
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
