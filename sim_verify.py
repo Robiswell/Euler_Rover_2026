@@ -19,6 +19,63 @@ GAITS = {
 }
 real_dt           = 0.02
 
+# sync: final_full_gait_test.py lines 99-124 (body geometry + roll constants)
+LEG_EFFECTIVE_RADIUS      = 62.5
+SHAFT_TO_CHASSIS_BOTTOM   = 47.0
+MIN_GROUND_CLEARANCE      = 5.0
+GOVERNOR_CLEARANCE_MARGIN = 3.0
+FEEDFORWARD_CAP           = 499.0
+W_SHAFT                   = 160.0
+CORNER_OVERHANG           = 30.0
+ROLL_SAFETY_FACTOR        = 2.0
+
+# sync: final_full_gait_test.py lines 246-362 (clearance functions)
+def _max_angle_from_vertical(impact_start, impact_end):
+    s = impact_start % 360
+    e = impact_end % 360
+    dev_s = min(s, 360.0 - s)
+    dev_e = min(e, 360.0 - e)
+    return max(dev_s, dev_e)
+
+def compute_roll_corner_drop(turn_bias, worst_angle, duty):
+    if abs(turn_bias) < 0.001:
+        return 0.0
+    bias_angle_shift = abs(turn_bias) * worst_angle * 0.5
+    theta_inside = math.radians(worst_angle + bias_angle_shift)
+    theta_outside = math.radians(max(0.0, worst_angle - bias_angle_shift))
+    h_inside = LEG_EFFECTIVE_RADIUS * math.cos(theta_inside)
+    h_outside = LEG_EFFECTIVE_RADIUS * math.cos(theta_outside)
+    delta_h = abs(h_outside - h_inside)
+    return CORNER_OVERHANG * delta_h / W_SHAFT * ROLL_SAFETY_FACTOR
+
+def compute_min_clearance(impact_start, impact_end, phase_lag_deg=0.0):
+    worst_angle = _max_angle_from_vertical(impact_start, impact_end) + phase_lag_deg
+    h = LEG_EFFECTIVE_RADIUS * math.cos(math.radians(worst_angle))
+    return h - SHAFT_TO_CHASSIS_BOTTOM
+
+def compute_max_clearance_hz(impact_start, impact_end, duty,
+                             min_clearance=MIN_GROUND_CLEARANCE,
+                             ff_cap=FEEDFORWARD_CAP, kp=KP_PHASE,
+                             turn_bias=0.0):
+    stance_sweep = (impact_end - impact_start + 180) % 360 - 180
+    worst_static = _max_angle_from_vertical(impact_start, impact_end)
+    air_sweep = 360.0 - abs(stance_sweep)
+    if air_sweep < 1.0 or duty >= 0.99:
+        return 10.0
+    roll_drop = compute_roll_corner_drop(turn_bias, worst_static, duty)
+    effective_clearance = min_clearance + roll_drop
+    ratio = (SHAFT_TO_CHASSIS_BOTTOM + effective_clearance) / LEG_EFFECTIVE_RADIUS
+    if ratio >= 1.0:
+        return 0.0
+    max_total_angle = math.degrees(math.acos(ratio))
+    max_lag = max(0.0, max_total_angle - worst_static)
+    if max_lag <= 0.0:
+        return 0.0
+    max_ff = ff_cap + max_lag * kp
+    max_deg_per_sec = max_ff / VELOCITY_SCALAR
+    max_hz = max_deg_per_sec * (1.0 - duty) / air_sweep
+    return max_hz
+
 # sync: final_full_gait_test.py lines 159-178
 def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
     stance_sweep = (end_ang - start_ang + 180) % 360 - 180
@@ -543,9 +600,91 @@ def check_V17_overrun_drain():
     return {'passed': passed, 'failures': failures, 'sub_checks': 5}
 
 
+def check_V18_turn_clearance():
+    """
+    Property: The roll-aware clearance governor must remain viable (max_hz > 0)
+    for all gaits at the nav turn bias constants, across standard impact angles.
+
+    Tests:
+      (a) Governor viability: compute_max_clearance_hz(turn_bias) must return
+          a positive Hz for MAX_TURN_BIAS=0.20 and PIVOT_TURN_BIAS=0.28 at
+          their respective impact angles. If 0, the robot cannot move while turning.
+      (b) At-rest positive clearance: with no phase lag (hz=0) and no roll
+          (turn_bias=0), clearance must be > 0mm for all impact configs.
+          (The governor handles the dynamic case; this checks static geometry.)
+      (c) Roll drop bounds: roll_drop must stay below base clearance for the
+          nav turn bias values -- ensures the governor has headroom to work.
+
+    Failure means: The governor cannot protect chassis corners during turns,
+    or the geometry is fundamentally unworkable at these impact angles.
+    """
+    failures = []
+    gait_names = {0: 'Tripod', 1: 'Wave', 2: 'Quad'}
+    # Impact angles used in production: narrow (default cruise) and pivot (turns)
+    # 320/40 (80-deg sweep) is intentionally excluded -- it pushes legs to 40deg
+    # from vertical where r=62.5mm only gives 0.9mm clearance. The governor
+    # handles this dynamically by limiting Hz; the V2 governor check covers it.
+    impact_configs = [
+        (340, 20, 'narrow'),      # 40-deg stance sweep (standard cruise)
+        (345, 15, 'pivot'),       # 30-deg stance sweep (pivot turns)
+    ]
+    # Nav turn bias constants to validate (from final_full_gait_test.py)
+    nav_biases = [
+        ('MAX_TURN', 0.20, [(340, 20), (345, 15)]),   # arc/carve turns
+        ('PIVOT_TURN', 0.28, [(345, 15)]),             # pivot turns only use pivot angles
+    ]
+
+    worst_max_hz = float('inf')
+    worst_info = None
+
+    # (a) Governor viability: nav turn biases must produce positive max_hz
+    for gid, gparams in GAITS.items():
+        duty = gparams['duty']
+        for tb_name, tb_val, valid_impacts in nav_biases:
+            for imp_s, imp_e in valid_impacts:
+                imp_name = f"{imp_s}/{imp_e}"
+                max_hz = compute_max_clearance_hz(
+                    imp_s, imp_e, duty,
+                    min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN,
+                    turn_bias=tb_val)
+                if max_hz <= 0.0:
+                    failures.append(
+                        f"{gait_names[gid]} {imp_name} {tb_name}={tb_val}: "
+                        f"governor max_hz=0 -- no safe speed exists")
+                if max_hz < worst_max_hz:
+                    worst_max_hz = max_hz
+                    worst_info = (gait_names[gid], imp_name, tb_name, tb_val, max_hz)
+
+    # (b) At-rest positive clearance (no roll, no speed)
+    for imp_s, imp_e, imp_name in impact_configs:
+        base_clr = compute_min_clearance(imp_s, imp_e)
+        if base_clr <= 0.0:
+            failures.append(
+                f"At-rest {imp_name}: clearance={base_clr:.1f}mm <= 0 -- "
+                f"geometry cannot support these impact angles at r={LEG_EFFECTIVE_RADIUS}")
+
+    # (c) Roll drop stays within base clearance for nav turn biases
+    for imp_s, imp_e, imp_name in impact_configs:
+        base_clr = compute_min_clearance(imp_s, imp_e)
+        worst_angle = _max_angle_from_vertical(imp_s, imp_e)
+        for gid, gparams in GAITS.items():
+            duty = gparams['duty']
+            for tb_name, tb_val, _ in nav_biases:
+                roll_drop = compute_roll_corner_drop(tb_val, worst_angle, duty)
+                if roll_drop >= base_clr and base_clr > 0:
+                    failures.append(
+                        f"{gait_names[gid]} {imp_name} {tb_name}={tb_val}: "
+                        f"roll_drop={roll_drop:.1f}mm >= base_clr={base_clr:.1f}mm")
+
+    passed = len(failures) == 0
+    return {'passed': passed, 'failures': failures,
+            'worst_max_hz': worst_max_hz, 'worst_info': worst_info}
+
+
 sim = SimState()
 res = sim.run()
 v17 = check_V17_overrun_drain()
+v18 = check_V18_turn_clearance()
 
 def pf(f): return "FAIL" if f else "PASS"
 
@@ -597,6 +736,15 @@ print(f"  V17 Overrun drain:       {pf(v17_fail)}  ({v17['sub_checks']} sub-chec
 if v17['failures']:
     for f_msg in v17['failures']:
         print(f"       {f_msg}")
+v18_fail = not v18['passed']
+wi = v18['worst_info']
+if wi:
+    print(f"  V18 Turn clearance:      {pf(v18_fail)}  (worst max_hz={wi[4]:.3f} @ {wi[0]} {wi[1]} {wi[2]}={wi[3]:.2f})")
+else:
+    print(f"  V18 Turn clearance:      {pf(v18_fail)}")
+if v18['failures']:
+    for f_msg in v18['failures'][:5]:
+        print(f"       {f_msg}")
 
 print()
 print("="*60)
@@ -630,7 +778,7 @@ if sim.v7_fail and wt and wt[3] > 150:
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
           sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,
-          v17_fail]
+          v17_fail,v18_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
@@ -640,6 +788,6 @@ else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V17",v17_fail)] if f]
-    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 3 INFO — failed: {', '.join(fails)}")
+             ("V17",v17_fail),("V18",v18_fail)] if f]
+    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 3 INFO -- failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")

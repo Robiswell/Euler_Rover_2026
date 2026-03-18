@@ -100,8 +100,8 @@ LEG_EFFECTIVE_RADIUS    = 62.5     # mm — shaft center to ground contact (LEG_
 LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_OUTER_REACH ≈ LEG_DIAMETER/2
 LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg (190° measured, constrains max stance sweep)
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
-MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance on flat surfaces
-GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (absorbs servo delay, sand, body tilt when legs lift)
+MIN_GROUND_CLEARANCE    = 5.0      # mm — minimum safe clearance (chassis must not contact ground; reduced from 15 for r=62.5mm where max clearance=15.5mm)
+GOVERNOR_CLEARANCE_MARGIN = 3.0    # mm — extra safety buffer in clearance governor (reduced from 5 for r=62.5mm geometry budget)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
