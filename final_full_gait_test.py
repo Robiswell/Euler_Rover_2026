@@ -91,6 +91,9 @@ VELOCITY_SCALAR    = 1.85
 LEFT_SERVOS        = [2, 3, 4]
 RIGHT_SERVOS       = [1, 6, 5]
 ALL_SERVOS         = LEFT_SERVOS + RIGHT_SERVOS
+ROLL_FRONT_SERVOS        = {1, 2}   # Fix 76: counter-rotating front pair for self-right
+ROLL_REAR_SERVOS         = {4, 5}   # Fix 76: counter-rotating rear pair for self-right
+SERVO_SPEED_GOVERNOR_CAP = 499     # Absolute speed ceiling (matches FEEDFORWARD_CAP)
 
 # Body Geometry (measured from physical robot — verified from physical robot measurements)
 # These values are the foundation for all ground-clearance calculations.
@@ -1622,6 +1625,9 @@ if __name__ == "__main__":
     MISSION_TIMEOUT_S = 90
     FINISH_WALL_DIST_CM = 10
     FINISH_WALL_SUSTAIN_S = 2.0
+    RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
+    NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
+    CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -1838,13 +1844,15 @@ if __name__ == "__main__":
 
         def __init__(self, alpha=0.2):
             self._alpha = alpha
-            self._ground_ema = 15.0  # initial guess: ground ~15cm from sensor
+            self._ground_ema = 25.0       # Fix 74: raised from 15.0 to prevent false cliff on startup
             self._consecutive_front = 0
             self._consecutive_rear = 0
+            self._warmup_frames = 0       # Fix 72: skip detection during sensor settle
 
         def update(self, fcd, rcd):
             """Update cliff detection with new FCD and RCD readings.
             Returns (front_cliff, rear_cliff) booleans."""
+            self._warmup_frames += 1
             front_cliff = self._check_cliff(fcd, is_front=True)
             rear_cliff = self._check_cliff(rcd, is_front=False)
             return front_cliff, rear_cliff
@@ -1859,14 +1867,23 @@ if __name__ == "__main__":
                 setattr(self, counter_attr, 0)
                 return False
 
+            # Fix 74: acoustic scatter at max range reads 300cm — not a cliff
+            if reading >= 300.0:
+                setattr(self, counter_attr, 0)
+                return False
+
             if reading is None:
                 # Defensive: possible cliff, increment
                 setattr(self, counter_attr, count + 1)
                 return count + 1 >= 2
 
-            # Update ground EMA with valid low readings
+            # Update ground EMA with valid low readings (runs during warmup so baseline converges)
             if 0 < reading <= 40:
                 self._ground_ema = self._alpha * reading + (1 - self._alpha) * self._ground_ema
+
+            # Fix 72: suppress detection during sensor settle
+            if self._warmup_frames <= CLIFF_WARMUP:
+                return False
 
             # Cliff candidate: absolute > 30 OR delta > EMA + 10
             is_candidate = (reading > 30) or (reading > self._ground_ema + 10)
@@ -2091,6 +2108,7 @@ if __name__ == "__main__":
             if new_state != self.state:
                 self.prev_state = self.state
                 self.state = new_state
+                self.dwell_duration = 0  # Fix 68 (A4): reset stale dwell on state change
                 brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
 
         def smooth_sensor(self, idx, raw_cm):
@@ -2162,7 +2180,7 @@ if __name__ == "__main__":
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
             # P2: Unexpected rapid rotation (not during pivot; skip during IMU grace)
-            if imu_ready and angular_rate > 1.5 and self.state != NAV_PIVOT_TURN:
+            if imu_ready and angular_rate > RAPID_ROTATION_THRESHOLD and self.state not in (NAV_PIVOT_TURN, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD, NAV_WIGGLE):
                 self._transition(NAV_STOP_SAFE)
                 brain_log(f"[NAV] rapid rotation {angular_rate:.2f} rad/s")
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
@@ -2191,8 +2209,8 @@ if __name__ == "__main__":
             if front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
-                    self._start_dwell(0.8)      # only on first entry
                 self._transition(NAV_BACKWARD)
+                self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
                 return self._backward_action(frame)
 
             # P7: Rear cliff
@@ -2243,8 +2261,8 @@ if __name__ == "__main__":
             if self.front_danger_frames >= 2:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
-                    self._start_dwell(0.8)      # only on first entry
                 self._transition(NAV_BACKWARD)
+                self._start_dwell(0.8)  # Fix A5b: refreshes every frame; dwell counts from last danger
                 return self._backward_action(frame)
 
             # Reset pivot count when front clears
@@ -2255,16 +2273,14 @@ if __name__ == "__main__":
             if (left_class >= DIST_NEAR or right_class >= DIST_NEAR):
                 if left_class != right_class:
                     if left_class < right_class:
-                        if self.state != NAV_ARC_LEFT:
-                            self._start_dwell(0.6)      # only on first entry
                         self._transition(NAV_ARC_LEFT)
+                        self._start_dwell(0.6)  # Fix A5c: reordered; dwell set after transition
                         turn = -abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_LEFT, speed, turn, 1, "nav_arc_L")
                     else:
-                        if self.state != NAV_ARC_RIGHT:
-                            self._start_dwell(0.6)      # only on first entry
                         self._transition(NAV_ARC_RIGHT)
+                        self._start_dwell(0.6)  # Fix A5d: reordered; dwell set after transition
                         turn = abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
@@ -2852,7 +2868,7 @@ if __name__ == "__main__":
                             raw_rcd = frame.get("RCD")
                             # EMA smooth all 8 ultrasonic readings before classification
                             # (-1 and None pass through unmodified; alpha=0.3)
-                            _sensor_keys = ["FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR"]
+                            _sensor_keys = NAV_SENSOR_KEYS
                             frame = dict(frame)  # shallow copy — do not mutate shared reader state
                             for _si, _sk in enumerate(_sensor_keys):
                                 frame[_sk] = nav.smooth_sensor(_si, frame[_sk])

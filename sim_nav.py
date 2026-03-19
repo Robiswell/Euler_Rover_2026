@@ -393,12 +393,13 @@ class NavStateMachine:
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
         self.terrain_gait = 2
-        self.terrain_impact_start = 330
-        self.terrain_impact_end = 30
+        self.terrain_impact_start = 340     # Fix 75: matches production default (belly clearance)
+        self.terrain_impact_end = 20
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0
         self._tick_count = 0
+        self.sensor_ema = {}
 
     def _dwell_active(self):
         return (time.monotonic() - self.dwell_start) < self.dwell_duration
@@ -410,6 +411,17 @@ class NavStateMachine:
     def _refresh_dwell(self, duration):
         self.dwell_start = time.monotonic()
         self.dwell_duration = duration
+
+    def smooth_sensor(self, idx, raw_cm):
+        """EMA smoothing for ultrasonic sensors. alpha=0.3, passthrough for -1/None."""
+        if raw_cm is None or raw_cm == -1:
+            return raw_cm
+        if idx not in self.sensor_ema:
+            self.sensor_ema[idx] = raw_cm
+            return raw_cm
+        alpha = 0.3
+        self.sensor_ema[idx] = alpha * raw_cm + (1.0 - alpha) * self.sensor_ema[idx]
+        return self.sensor_ema[idx]
 
     def _transition(self, new_state):
         if new_state != self.state:
@@ -586,7 +598,7 @@ class NavStateMachine:
                 self._refresh_dwell(0.4)
             arc_turn = -abs(turn_intensity) * MAX_TURN_BIAS if self.state == NAV_ARC_LEFT else abs(turn_intensity) * MAX_TURN_BIAS
             arc_speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-            arc_step = "nav_arc_L" if self.state == NAV_ARC_LEFT else "nav_arc_R"
+            arc_step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
             return (self.state, arc_speed, arc_turn, 1, arc_step)
 
         self._transition(NAV_FORWARD)
@@ -661,8 +673,8 @@ class NavStateMachine:
                 self._steep_up_start = now
             if (now - self._steep_up_start) >= 1.0:
                 self.terrain_gait = 1
-                self.terrain_impact_start = 315
-                self.terrain_impact_end = 15
+                self.terrain_impact_start = 325
+                self.terrain_impact_end = 20
                 self.terrain_mult = 0.7
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
@@ -750,8 +762,8 @@ class NavStateMachine:
                 self._light_load_start = now
             if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
                 self.terrain_gait = 0
-                self.terrain_impact_start = 330
-                self.terrain_impact_end = 30
+                self.terrain_impact_start = 340
+                self.terrain_impact_end = 20
                 self.terrain_mult = 1.0
                 self.terrain_is_tripod = True
                 self._apply_gait_transition(prev_gait)
@@ -765,8 +777,8 @@ class NavStateMachine:
 
         # T9: Default quad
         self.terrain_gait = 2
-        self.terrain_impact_start = 330
-        self.terrain_impact_end = 30
+        self.terrain_impact_start = 340
+        self.terrain_impact_end = 20
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._apply_gait_transition(prev_gait)
@@ -1544,8 +1556,8 @@ def run_n7():
     imu_steep = make_imu(pitch_deg=20)
     nav.update_terrain(imu_steep, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_gait == 1, f"T1: gait={nav.terrain_gait} expected 1 (wave)")
-    check(cid, nav.terrain_impact_start == 315, f"T1: impact_start={nav.terrain_impact_start} expected 315")
-    check(cid, nav.terrain_impact_end == 15, f"T1: impact_end={nav.terrain_impact_end} expected 15")
+    check(cid, nav.terrain_impact_start == 325, f"T1: impact_start={nav.terrain_impact_start} expected 325")
+    check(cid, nav.terrain_impact_end == 20, f"T1: impact_end={nav.terrain_impact_end} expected 20")
     check(cid, abs(nav.terrain_mult - 0.7) < 0.01, f"T1: terrain_mult={nav.terrain_mult} expected 0.7")
 
     # T2: Steep descent (pitch < -15, sustained 1s)
