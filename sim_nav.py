@@ -26,14 +26,14 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 # =========================================================================
 
 # --- Nav tunable constants ---
-CRUISE_SPEED = 400
-TRIPOD_CRUISE_SPEED = 450
+CRUISE_SPEED = 450
+TRIPOD_CRUISE_SPEED = 600
 SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
-PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
+MAX_TURN_BIAS = 0.25              # restored -- safe with r=125mm clearance headroom
+PIVOT_TURN_BIAS = 0.35            # restored -- safe with r=125mm roll-aware clearance governor
 HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
