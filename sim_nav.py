@@ -30,6 +30,7 @@ CRUISE_SPEED = 400
 TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
+BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
 PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 HEADING_CORRECTION_BIAS = 0.1
@@ -371,6 +372,7 @@ class NavStateMachine:
         self.dwell_start = 0.0
         self.dwell_duration = 0.0
         self.hold_position_count = 0
+        self.backward_entry_time = 0.0
         self.consecutive_pivot_count = 0
         self.pivot_direction = -1
         self.stall_start_time = 0.0
@@ -502,6 +504,7 @@ class NavStateMachine:
         if front_cliff:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
+                self.backward_entry_time = time.monotonic()
                 self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
             return self._backward_action(frame)
@@ -569,6 +572,7 @@ class NavStateMachine:
             else:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self.backward_entry_time = time.monotonic()
                     self._start_dwell(0.8)
                 self._transition(NAV_BACKWARD)
                 return self._backward_action(frame)
@@ -643,14 +647,15 @@ class NavStateMachine:
         return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
     def _backward_action(self, frame):
-        """Compute backward recovery action with rear safety check."""
+        """Compute backward recovery action with rear safety check and dwell guard."""
         if is_rear_safe(frame):
             self.hold_position_count = 0
             return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
         else:
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
-            if self.hold_position_count >= 2:
+            backward_elapsed = time.monotonic() - self.backward_entry_time
+            if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
                 self._start_dwell(1.5)
@@ -1369,16 +1374,24 @@ def run_n4():
     # Dwell should be active
     check(cid, nav._dwell_active(), "dwell should be active after ARC transition")
 
-    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot
+    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot (after dwell expires)
     nav = fresh_nav()
-    frame_rear_blocked = make_frame(fcf=10, rdl=10, rcf=10, rdr=10)
+    frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=10, rdr=10)
     nav.front_danger_frames = 2  # force P10
     # First update: BACKWARD with rear unsafe -> hold (count=1)
     state1, speed1, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state1 == NAV_BACKWARD, f"backward first: state={state1}")
     check(cid, speed1 == 0, f"rear unsafe hold: speed={speed1} expected 0")
-    # Second update: hold_position_count reaches 2 -> escalate to pivot
-    nav.front_danger_frames = 2  # re-set
+
+    # Dwell guard: premature escalation should be blocked
+    nav.front_danger_frames = 2
+    state_early, _, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
+    check(cid, state_early == NAV_BACKWARD,
+          f"dwell guard: premature escalation blocked: state={NAV_STATE_NAMES.get(state_early)}")
+
+    # Simulate dwell elapsed, then escalate
+    nav.backward_entry_time = time.monotonic() - 1.0  # 1s ago > BACKWARD_MIN_DWELL
+    nav.front_danger_frames = 2
     state2, _, _, _, step2 = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state2 == NAV_PIVOT_TURN,
           f"backward escalation to pivot: state={state2} expected {NAV_PIVOT_TURN}")

@@ -1595,6 +1595,7 @@ if __name__ == "__main__":
     TRIPOD_CRUISE_SPEED = 450
     SLOW_SPEED = 200
     BACKWARD_SPEED = 200
+    BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -2045,6 +2046,7 @@ if __name__ == "__main__":
             self.dwell_start = 0.0
             self.dwell_duration = 0.0
             self.hold_position_count = 0
+            self.backward_entry_time = 0.0  # monotonic time when BACKWARD was entered
             self.consecutive_pivot_count = 0
             self.pivot_direction = -1  # -1=left, +1=right
             self.stall_start_time = 0.0
@@ -2196,6 +2198,7 @@ if __name__ == "__main__":
             if front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self.backward_entry_time = time.monotonic()
                 self._transition(NAV_BACKWARD)
                 self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
                 return self._backward_action(frame)
@@ -2269,6 +2272,7 @@ if __name__ == "__main__":
                     # Both sides blocked -- BACKWARD is last resort
                     if self.state != NAV_BACKWARD:
                         self.hold_position_count = 0
+                        self.backward_entry_time = time.monotonic()
                     self._transition(NAV_BACKWARD)
                     self._start_dwell(0.8)
                     return self._backward_action(frame)
@@ -2357,15 +2361,16 @@ if __name__ == "__main__":
             return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
         def _backward_action(self, frame):
-            """Compute backward recovery action with rear safety check."""
+            """Compute backward recovery action with rear safety check and dwell guard."""
             if is_rear_safe(frame):
                 self.hold_position_count = 0
                 return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
             else:
                 self.hold_position_count += 1
                 brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
-                if self.hold_position_count >= 2:
-                    # Stuck — try pivot
+                backward_elapsed = time.monotonic() - self.backward_entry_time
+                if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
+                    # Stuck long enough — try pivot
                     self._pick_pivot_direction(frame)
                     self._transition(NAV_PIVOT_TURN)
                     self._start_dwell(1.5)
