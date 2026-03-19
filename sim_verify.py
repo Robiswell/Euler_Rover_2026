@@ -20,10 +20,10 @@ GAITS = {
 real_dt           = 0.02
 
 # sync: final_full_gait_test.py lines 99-124 (body geometry + roll constants)
-LEG_EFFECTIVE_RADIUS      = 62.5
+LEG_EFFECTIVE_RADIUS      = 125.0
 SHAFT_TO_CHASSIS_BOTTOM   = 47.0
-MIN_GROUND_CLEARANCE      = 5.0
-GOVERNOR_CLEARANCE_MARGIN = 3.0
+MIN_GROUND_CLEARANCE      = 15.0
+GOVERNOR_CLEARANCE_MARGIN = 5.0
 FEEDFORWARD_CAP           = 499.0
 W_SHAFT                   = 160.0
 CORNER_OVERHANG           = 30.0

@@ -99,12 +99,12 @@ SERVO_SPEED_GOVERNOR_CAP = 499     # Absolute speed ceiling (matches FEEDFORWARD
 # These values are the foundation for all ground-clearance calculations.
 #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  — chassis height above ground at leg angle θ
 #   clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM  — must stay > MIN_GROUND_CLEARANCE
-LEG_EFFECTIVE_RADIUS    = 62.5     # mm — shaft center to ground contact (LEG_DIAMETER/2 = 125/2, physically measured 2026-03-18)
-LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_OUTER_REACH ≈ LEG_DIAMETER/2
+LEG_EFFECTIVE_RADIUS    = 125.0    # mm — shaft center to ground contact (C-leg: shaft at arc end, full reach = LEG_DIAMETER, measured 2026-03-19)
+LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_EFFECTIVE_RADIUS = LEG_DIAMETER for C-legs (shaft at arc end, not center)
 LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg (190° measured, constrains max stance sweep)
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
-MIN_GROUND_CLEARANCE    = 5.0      # mm — minimum safe clearance (chassis must not contact ground; reduced from 15 for r=62.5mm where max clearance=15.5mm)
-GOVERNOR_CLEARANCE_MARGIN = 3.0    # mm — extra safety buffer in clearance governor (reduced from 5 for r=62.5mm geometry budget)
+MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (chassis must not contact ground; r=125mm gives 78mm at rest)
+GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
@@ -1591,14 +1591,14 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 400
-    TRIPOD_CRUISE_SPEED = 450
+    CRUISE_SPEED = 450
+    TRIPOD_CRUISE_SPEED = 600
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
-    PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
+    MAX_TURN_BIAS = 0.25              # restored -- safe with r=125mm clearance headroom (78mm)
+    PIVOT_TURN_BIAS = 0.35            # restored -- safe with r=125mm roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — (default 330/30 = 60° too wide during zero-speed turns)
     HEADING_CORRECTION_BIAS = 0.1
