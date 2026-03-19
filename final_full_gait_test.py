@@ -3382,17 +3382,17 @@ if __name__ == "__main__":
             print("\n-- phase 1: tripod --")
             set_gait_state(gait=0, impact_start=345, impact_end=15, step_name="phase1_init")
 
-            set_gait_state(speed=600, step_name="forward");                                    stall_tsleep(12)
+            set_gait_state(speed=900, step_name="forward");                                    stall_tsleep(12)
             set_gait_state(turn=-0.2, step_name="carve_left");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.2, step_name="carve_right");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.35, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=600, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.35, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=600, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p1"); tsleep(0.5)
-            set_gait_state(speed=-600, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel pause - smooth_hz bleeds ~720ms from -1.2Hz without this,
             # meaning the robot reverses briefly after Phase 2 starts.
@@ -3404,17 +3404,17 @@ if __name__ == "__main__":
             print("\n-- phase 2: quadruped --")
             set_gait_state(gait=2, impact_start=345, impact_end=15, step_name="phase2_init")
 
-            set_gait_state(speed=300, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=900, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.15, step_name="carve_left");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.15, step_name="carve_right");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.35, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=300, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.35, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=300, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p2"); tsleep(0.5)
-            set_gait_state(speed=-300, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel before walking tall - avoids ~720ms of backward motion bleed into forward mode
             set_gait_state(speed=0, step_name="decel_p2"); tsleep(2)
@@ -3428,17 +3428,17 @@ if __name__ == "__main__":
             print("\n-- phase 3: wave --")
             set_gait_state(gait=1, impact_start=345, impact_end=15, step_name="phase3_init")
 
-            set_gait_state(speed=180, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=900, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.1, step_name="carve_left");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.1, step_name="carve_right");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.25, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=180, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.25, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=180, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=345, impact_end=15, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p3"); tsleep(0.5)
-            set_gait_state(speed=-180, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel pause - matches Phase 1/2 pattern, bleeds ~720ms of reverse motion before COG shift
             set_gait_state(speed=0, step_name="decel_p3"); tsleep(2)
