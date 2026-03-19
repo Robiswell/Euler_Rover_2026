@@ -2071,6 +2071,7 @@ if __name__ == "__main__":
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
+            self.sensor_ema = {}  # per-sensor EMA state, keyed by sensor index 0-7
 
         def _dwell_active(self):
             """True if current dwell timer hasn't expired."""
@@ -2091,6 +2092,17 @@ if __name__ == "__main__":
                 self.prev_state = self.state
                 self.state = new_state
                 brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
+
+        def smooth_sensor(self, idx, raw_cm):
+            """EMA smoothing for ultrasonic sensors. alpha=0.3, passthrough for -1/None."""
+            if raw_cm is None or raw_cm == -1:
+                return raw_cm
+            if idx not in self.sensor_ema:
+                self.sensor_ema[idx] = raw_cm
+                return raw_cm
+            alpha = 0.3
+            self.sensor_ema[idx] = alpha * raw_cm + (1.0 - alpha) * self.sensor_ema[idx]
+            return self.sensor_ema[idx]
 
         def update(self, frame, imu, front_class, left_class, right_class,
                    front_cliff, rear_cliff, turn_intensity, avg_load,
@@ -2828,6 +2840,12 @@ if __name__ == "__main__":
 
                             # --- Sensor processing ---
                             imu = compute_imu(frame)
+                            # EMA smooth all 8 ultrasonic readings before classification
+                            # (-1 and None pass through unmodified; alpha=0.3)
+                            _sensor_keys = ["FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR"]
+                            frame = dict(frame)  # shallow copy — do not mutate shared reader state
+                            for _si, _sk in enumerate(_sensor_keys):
+                                frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
                             front_class, left_class, right_class = classify_sectors(frame)
                             front_cliff, rear_cliff = cliff.update(frame["FCD"], frame["RCD"])
                             turn_intensity = compute_turn_intensity(frame)
