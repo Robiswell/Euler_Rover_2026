@@ -1341,7 +1341,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f.write(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
                 except:
                     pass
-                if overrun_streak >= 3:
+                if overrun_streak >= 3 and (overrun_streak == 3 or overrun_streak % 50 == 0):
                     flush_ring_buffer("OVERRUN-CONTEXT", 50, f"{overrun_streak} consecutive overruns")
             else:
                 overrun_streak = 0
