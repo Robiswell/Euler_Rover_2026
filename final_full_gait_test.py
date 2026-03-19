@@ -100,7 +100,7 @@ SERVO_SPEED_GOVERNOR_CAP = 499     # Absolute speed ceiling (matches FEEDFORWARD
 #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  — chassis height above ground at leg angle θ
 #   clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM  — must stay > MIN_GROUND_CLEARANCE
 LEG_EFFECTIVE_RADIUS    = 125.0    # mm — C-leg geometry: servo shaft at arc endpoint, not center (full diameter = radius, corrected 2026-03-19)
-LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_OUTER_REACH ≈ LEG_DIAMETER/2
+LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip across leg arc (12.5 cm measured); for C-legs, effective radius = diameter (shaft at endpoint)
 LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg (190° measured, constrains max stance sweep)
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
@@ -2486,8 +2486,8 @@ if __name__ == "__main__":
 
             # T1: Steep climb — symmetric narrow sweep (345°/15°)
             # 30° total sweep, centered on vertical.
-            # Worst angle from vertical = 15° → clearance ~24.5mm (safe).
-            # Old 330°/15° had worst angle 30° → clearance 17.1mm (< 20mm effective with margin).
+            # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
+            # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
             if pitch_deg > 15:
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
@@ -3151,11 +3151,11 @@ if __name__ == "__main__":
         elif "--test-tripod" in sys.argv:
             # === TEST: Tripod phase only ===
             # Ground clearance derivation (measured dimensions):
-            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 74.0 × cos(θ) mm
+            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 330/30 (±30° sweep): clearance = 17.1mm, governor allows ~0.1° lag only
-            #   Fix: 340/20 (±20° sweep), speed=450 → clearance ~22.5mm with lag margin ✓
-            tripod_impact_start = 345  # narrowed from 340 — increases static clearance to 24.5mm, tilt budget to 9.2°
+            #   At 330/30 (±30° sweep): clearance = 61.2mm, governor allows ~0.1° lag only
+            #   Fix: 340/20 (±20° sweep), speed=450 → clearance ~70.5mm with lag margin ✓
+            tripod_impact_start = 345  # narrowed from 340 — increases static clearance to 73.7mm, tilt budget to 9.2°
             tripod_impact_end   = 15   # symmetric ±15° about vertical
             tripod_duty = GAITS[0]['duty']  # 0.5
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
@@ -3188,9 +3188,9 @@ if __name__ == "__main__":
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
             #   Quad duty=0.7 → air phase is only 30% of cycle → higher ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=19.1mm.
+            #   330/30 sweep: half=30°, static clearance=61.2mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            quad_impact_start = 345  # narrowed from 330 — increases static clearance to 24.5mm, tilt budget to 9.2°
+            quad_impact_start = 345  # narrowed from 330 — increases static clearance to 73.7mm, tilt budget to 9.2°
             quad_impact_end   = 15   # symmetric ±15° about vertical
             quad_duty = GAITS[2]['duty']  # 0.7
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
@@ -3234,9 +3234,9 @@ if __name__ == "__main__":
             # === TEST: Wave phase only ===
             # Clearance analysis:
             #   Wave duty=0.75 → air phase is only 25% of cycle → highest ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=17.1mm (with measured SHAFT_TO_CHASSIS_BOTTOM=47mm).
+            #   330/30 sweep: half=30°, static clearance=61.2mm (with measured SHAFT_TO_CHASSIS_BOTTOM=47mm).
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            wave_impact_start = 345  # narrowed from 330 — increases static clearance to 24.5mm, tilt budget to 9.2°
+            wave_impact_start = 345  # narrowed from 330 — increases static clearance to 73.7mm, tilt budget to 9.2°
             wave_impact_end   = 15   # symmetric ±15° about vertical
             wave_duty = GAITS[1]['duty']  # 0.75
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
