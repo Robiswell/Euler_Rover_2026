@@ -753,6 +753,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     te_during_stall = {sid: 0 for sid in ALL_SERVOS}
     stall_entry_time = {sid: 0.0 for sid in ALL_SERVOS}
     overrun_streak = 0
+    overrun_buffer = []   # buffered overrun lines, drained at 1 Hz
     servo_comm_fails = {sid: 0 for sid in ALL_SERVOS}
     servo_disabled = {sid: False for sid in ALL_SERVOS}
     ref_ff_speed = 0.0
@@ -1187,6 +1188,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # 4. KINEMATIC CONTROLLER (Pure Math Flow)
             # ----------------------------------------------------------
             max_phase_error_frame = 0.0  # worst-case servo error this tick
+            tick_max_pherr = 0.0        # redundant tracker (used in feedback block)
             for sid in ALL_SERVOS:
                 target_phase = 0.0  # safe default -- overwritten by Buehler calc or roll mode
                 leg_hz    = hz_L if sid in LEFT_SERVOS else hz_R
