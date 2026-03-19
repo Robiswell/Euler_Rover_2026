@@ -99,12 +99,12 @@ SERVO_SPEED_GOVERNOR_CAP = 499     # Absolute speed ceiling (matches FEEDFORWARD
 # These values are the foundation for all ground-clearance calculations.
 #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  — chassis height above ground at leg angle θ
 #   clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM  — must stay > MIN_GROUND_CLEARANCE
-LEG_EFFECTIVE_RADIUS    = 62.5     # mm — shaft center to ground contact (LEG_DIAMETER/2 = 125/2, physically measured 2026-03-18)
+LEG_EFFECTIVE_RADIUS    = 125.0    # mm — C-leg geometry: servo shaft at arc endpoint, not center (full diameter = radius, corrected 2026-03-19)
 LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_OUTER_REACH ≈ LEG_DIAMETER/2
 LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg (190° measured, constrains max stance sweep)
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
-MIN_GROUND_CLEARANCE    = 5.0      # mm — minimum safe clearance (chassis must not contact ground; reduced from 15 for r=62.5mm where max clearance=15.5mm)
-GOVERNOR_CLEARANCE_MARGIN = 3.0    # mm — extra safety buffer in clearance governor (reduced from 5 for r=62.5mm geometry budget)
+MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
+GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
@@ -1816,6 +1816,40 @@ if __name__ == "__main__":
                     classify_distance(frame["RDR"]))
         return front, left, right
 
+    def classify_sectors_voted(frame):
+        """Classify sectors with majority voting to reject outlier sensors.
+        Front (3 sensors): median severity rejects one outlier.
+        Left/Right (2 sensors): if readings disagree by 2+ levels,
+        downgrade to (max - 1) instead of trusting the worst reading.
+        Blind-zone (-1.0) is hard DANGER -- not outvotable (confirmed by
+        double-ping in firmware, so physically real)."""
+        front_blind = any(frame[k] == -1 for k in ("FDL", "FCF", "FDR"))
+        left_blind = any(frame[k] == -1 for k in ("FDL", "RDL"))
+        right_blind = any(frame[k] == -1 for k in ("FDR", "RDR"))
+        fdl = classify_distance(frame["FDL"])
+        fcf = classify_distance(frame["FCF"])
+        fdr = classify_distance(frame["FDR"])
+        rdl = classify_distance(frame["RDL"])
+        rdr = classify_distance(frame["RDR"])
+        front = sorted([fdl, fcf, fdr])[1]
+        if front_blind:
+            front = DIST_DANGER
+        left_max = max(fdl, rdl)
+        if left_blind:
+            left = DIST_DANGER
+        elif left_max - min(fdl, rdl) >= 2:
+            left = left_max - 1
+        else:
+            left = left_max
+        right_max = max(fdr, rdr)
+        if right_blind:
+            right = DIST_DANGER
+        elif right_max - min(fdr, rdr) >= 2:
+            right = right_max - 1
+        else:
+            right = right_max
+        return front, left, right
+
     def speed_scale_from_front(front_class):
         """Map front sector classification to speed multiplier."""
         if front_class == DIST_CLEAR:
@@ -2925,7 +2959,7 @@ if __name__ == "__main__":
                             frame = dict(frame)  # shallow copy — do not mutate shared reader state
                             for _si, _sk in enumerate(_sensor_keys):
                                 frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
-                            front_class, left_class, right_class = classify_sectors(frame)
+                            front_class, left_class, right_class = classify_sectors_voted(frame)
                             front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd)
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
@@ -3306,7 +3340,7 @@ if __name__ == "__main__":
                         print(f"  {'UpsideDown':>12s}: {frame['upside_down']}")
 
                         # ── Processed sensor pipeline ────────────────────────
-                        front_cls, left_cls, right_cls = classify_sectors(frame)
+                        front_cls, left_cls, right_cls = classify_sectors_voted(frame)
                         front_cliff, rear_cliff = cliff.update(
                             frame["FCD"], frame["RCD"])
                         imu = compute_imu(frame)
@@ -3398,7 +3432,7 @@ if __name__ == "__main__":
                             continue
                         # --- Sensor processing (identical to competition loop) ---
                         imu = compute_imu(frame)
-                        front_cls, left_cls, right_cls = classify_sectors(frame)
+                        front_cls, left_cls, right_cls = classify_sectors_voted(frame)
                         front_cliff, rear_cliff = cliff_det.update(
                             frame["FCD"], frame["RCD"])
                         turn_intensity = compute_turn_intensity(frame)

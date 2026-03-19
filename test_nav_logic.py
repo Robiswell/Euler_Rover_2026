@@ -109,14 +109,35 @@ def classify_distance(cm):
 
 
 def classify_sectors(frame):
-    """Mirror of classify_sectors (gait file line 1307)."""
-    front = max(classify_distance(frame["FDL"]),
-                classify_distance(frame["FCF"]),
-                classify_distance(frame["FDR"]))
-    left  = max(classify_distance(frame["FDL"]),
-                classify_distance(frame["RDL"]))
-    right = max(classify_distance(frame["FDR"]),
-                classify_distance(frame["RDR"]))
+    """Mirror of classify_sectors_voted (gait file line 1818).
+    Uses majority voting: median for 3-sensor front, (max-1) downgrade
+    for 2-sensor sides when readings disagree by 2+ levels.
+    Blind-zone (-1.0) is hard DANGER -- not outvotable."""
+    front_blind = any(frame[k] == -1 for k in ("FDL", "FCF", "FDR"))
+    left_blind = any(frame[k] == -1 for k in ("FDL", "RDL"))
+    right_blind = any(frame[k] == -1 for k in ("FDR", "RDR"))
+    fdl = classify_distance(frame["FDL"])
+    fcf = classify_distance(frame["FCF"])
+    fdr = classify_distance(frame["FDR"])
+    rdl = classify_distance(frame["RDL"])
+    rdr = classify_distance(frame["RDR"])
+    front = sorted([fdl, fcf, fdr])[1]
+    if front_blind:
+        front = DIST_DANGER
+    left_max = max(fdl, rdl)
+    if left_blind:
+        left = DIST_DANGER
+    elif left_max - min(fdl, rdl) >= 2:
+        left = left_max - 1
+    else:
+        left = left_max
+    right_max = max(fdr, rdr)
+    if right_blind:
+        right = DIST_DANGER
+    elif right_max - min(fdr, rdr) >= 2:
+        right = right_max - 1
+    else:
+        right = right_max
     return front, left, right
 
 
@@ -721,21 +742,21 @@ def test_classify_sectors_all_clear_returns_zeros():
 
 
 def test_classify_sectors_front_uses_worst_of_fdl_fcf_fdr():
-    """Front sector = worst of FDL, FCF, FDR. FCF=15 (DANGER) dominates."""
+    """Front sector uses median voting. FCF=15 (DANGER) alone is outvoted by 2 CLEAR."""
     f, l, r = classify_sectors(make_frame(fcf=15))
-    assert f == DIST_DANGER
+    assert f == DIST_CLEAR  # 1-of-3 outlier rejected by median
 
 
 def test_classify_sectors_front_fdl_danger_dominates():
-    """FDL=15 (DANGER), FCF+FDR clear → front=DANGER."""
+    """FDL=15 (DANGER), FCF+FDR clear → front=CLEAR (1-of-3 outlier rejected)."""
     f, _, _ = classify_sectors(make_frame(fdl=15, fcf=100, fdr=100))
-    assert f == DIST_DANGER
+    assert f == DIST_CLEAR
 
 
 def test_classify_sectors_front_fdr_danger_dominates():
-    """FDR=15 (DANGER), FCF+FDL clear → front=DANGER."""
+    """FDR=15 (DANGER), FCF+FDL clear → front=CLEAR (1-of-3 outlier rejected)."""
     f, _, _ = classify_sectors(make_frame(fdl=100, fcf=100, fdr=15))
-    assert f == DIST_DANGER
+    assert f == DIST_CLEAR
 
 
 def test_classify_sectors_left_uses_fdl_and_rdl_only():
@@ -756,26 +777,119 @@ def test_classify_sectors_right_uses_fdr_and_rdr_only():
 
 
 def test_classify_sectors_left_danger_from_rdl():
-    """RDL=15 → left=DANGER even if FDL is clear."""
+    """RDL=15 (DANGER), FDL=100 (CLEAR) → left=NEAR (disagreement downgrade, diff=3 >= 2)."""
     _, l, _ = classify_sectors(make_frame(fdl=100, rdl=15))
-    assert l == DIST_DANGER
+    assert l == DIST_NEAR  # max(3,0)-1 = 2 = NEAR
 
 
 def test_classify_sectors_mixed_front_caution_left_danger_right_clear():
-    """Composite case: front=CAUTION (35cm), left=DANGER (RDL=10), right=CLEAR."""
+    """Composite: front=CLEAR (median of [CLEAR,CAUTION,CLEAR]), left=NEAR (downgrade), right=CLEAR."""
     f, l, r = classify_sectors(make_frame(
-        fdl=100, fcf=35, fdr=100,   # front driven by FCF=35 → CAUTION
-        rdl=10,  rcf=100, rdr=100   # left driven by RDL=10 → DANGER
+        fdl=100, fcf=35, fdr=100,   # front median: sorted([0,1,0])[1] = 0 = CLEAR
+        rdl=10,  rcf=100, rdr=100   # left: FDL=CLEAR(0), RDL=DANGER(3), diff=3 → max-1=2=NEAR
     ))
-    assert f == DIST_CAUTION
-    assert l == DIST_DANGER
+    assert f == DIST_CLEAR  # median rejects single CAUTION
+    assert l == DIST_NEAR   # disagreement downgrade
     assert r == DIST_CLEAR
 
 
 def test_classify_sectors_sentinel_minus1_in_fdl_makes_front_danger():
-    """FDL==-1 (blind zone) → front=DANGER via worst-case rule."""
+    """FDL==-1 (blind zone) → front=DANGER via blind-zone override (not outvotable)."""
     f, _, _ = classify_sectors(make_frame(fdl=-1, fcf=100, fdr=100))
     assert f == DIST_DANGER
+
+
+# --- Voting-specific tests (added with sector voting implementation) ---
+
+def test_voting_front_2of3_danger_stays_danger():
+    """2 of 3 front sensors at DANGER → median = DANGER."""
+    f, _, _ = classify_sectors(make_frame(fdl=10, fcf=10, fdr=100))
+    assert f == DIST_DANGER
+
+
+def test_voting_front_1of3_danger_rejected():
+    """1 of 3 front sensors at DANGER → median rejects it."""
+    f, _, _ = classify_sectors(make_frame(fdl=10, fcf=100, fdr=100))
+    assert f == DIST_CLEAR
+
+
+def test_voting_front_multipath_bounce_rejected():
+    """Exact scenario from telemetry: FCF=5.83cm multipath bounce, others clear."""
+    f, _, _ = classify_sectors(make_frame(fdl=100, fcf=5.83, fdr=100))
+    assert f == DIST_CLEAR  # single bad reading rejected
+
+
+def test_voting_front_2of3_near_stays_near():
+    """2 of 3 front sensors at NEAR → median = NEAR."""
+    f, _, _ = classify_sectors(make_frame(fdl=25, fcf=25, fdr=100))
+    assert f == DIST_NEAR
+
+
+def test_voting_front_all_3_agree_danger():
+    """All 3 front sensors at DANGER → unanimous DANGER."""
+    f, _, _ = classify_sectors(make_frame(fdl=10, fcf=10, fdr=10))
+    assert f == DIST_DANGER
+
+
+def test_voting_blind_zone_not_outvotable():
+    """Blind zone (-1) in front cannot be outvoted even with 2 CLEAR sensors."""
+    f, _, _ = classify_sectors(make_frame(fdl=-1, fcf=100, fdr=100))
+    assert f == DIST_DANGER
+
+
+def test_voting_blind_zone_in_left_sector():
+    """Blind zone in left sector (FDL=-1) → left=DANGER."""
+    _, l, _ = classify_sectors(make_frame(fdl=-1, rdl=100))
+    assert l == DIST_DANGER
+
+
+def test_voting_blind_zone_in_right_sector():
+    """Blind zone in right sector (FDR=-1) → right=DANGER."""
+    _, _, r = classify_sectors(make_frame(fdr=-1, rdr=100))
+    assert r == DIST_DANGER
+
+
+def test_voting_left_2sensor_agree_danger():
+    """Both left sensors at DANGER → left=DANGER (no disagreement)."""
+    _, l, _ = classify_sectors(make_frame(fdl=10, rdl=10))
+    assert l == DIST_DANGER
+
+
+def test_voting_left_2sensor_disagree_downgrade():
+    """Left sensors disagree by 3 levels (DANGER vs CLEAR) → downgrade to NEAR."""
+    _, l, _ = classify_sectors(make_frame(fdl=100, rdl=10))
+    assert l == DIST_NEAR  # max(3,0)-1 = 2 = NEAR
+
+
+def test_voting_right_2sensor_disagree_downgrade():
+    """Right sensors disagree by 3 levels → downgrade to NEAR."""
+    _, _, r = classify_sectors(make_frame(fdr=100, rdr=10))
+    assert r == DIST_NEAR
+
+
+def test_voting_left_small_disagreement_no_downgrade():
+    """Left sensors disagree by 1 level (NEAR vs CAUTION) → no downgrade, use max."""
+    _, l, _ = classify_sectors(make_frame(fdl=25, rdl=35))
+    assert l == DIST_NEAR  # diff=1 < 2, so max(2,1)=2=NEAR
+
+
+def test_voting_fault_sensor_treated_as_caution_not_danger():
+    """FAULT (-2) → classify_distance returns DIST_UNKNOWN=1 (CAUTION).
+    Median of [1,0,0] = 0 = CLEAR. Fault doesn't trigger emergency."""
+    f, _, _ = classify_sectors(make_frame(fdl=-2, fcf=100, fdr=100))
+    assert f == DIST_CLEAR  # fault treated as CAUTION, outvoted by 2 CLEAR
+
+
+def test_voting_fault_not_blind_zone():
+    """FAULT (-2) is NOT blind zone (-1). No blind-zone override triggers."""
+    f, _, _ = classify_sectors(make_frame(fdl=-2, fcf=100, fdr=100))
+    assert f != DIST_DANGER  # would be DANGER if mistaken for blind zone
+
+
+def test_voting_left_near_vs_clear_downgrade():
+    """Left: FDL=NEAR(25cm), RDL=CLEAR(100cm) → diff=2, downgrade to CAUTION."""
+    _, l, _ = classify_sectors(make_frame(fdl=25, rdl=100))
+    assert l == DIST_CAUTION  # max(2,0)-1 = 1 = CAUTION
 
 
 # ============================================================================
