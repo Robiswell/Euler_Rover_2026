@@ -796,6 +796,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
     comm_fail_streak = 0     # consecutive ticks with zero position reads — bus disconnect detection
     max_phase_err   = 0.0    # degrees — max |PhErr| across all servos from previous tick (PhErr governor)
+    prev_gait_id    = shared_gait_id.value  # Fix 65: track gait ID to detect switches for CPG snap
 
     try:
         init_and_align_servos()
@@ -1084,11 +1085,24 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             gait_params = GAITS.get(shared_gait_id.value, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
 
+            # Phase offsets target (needed by both snap block and CPG ramp below)
+            t_offsets = gait_params['offsets']
+
+            # Fix 65: Snap phase offsets on gait switch to avoid CPG ramp lag
+            # KAPPA=8 takes ~0.6s to converge; during nav tripod→quad the phase
+            # error hits 100-170°. Snap eliminates this instantly. Servos don't
+            # see the offset snap because feedforward+KP_PHASE smooth it mechanically.
+            current_gait_id = shared_gait_id.value
+            if current_gait_id != prev_gait_id:
+                smooth_duty = t_duty
+                for sid in ALL_SERVOS:
+                    smooth_offsets[sid] = t_offsets[sid]
+                prev_gait_id = current_gait_id
+
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
             smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
 
             # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
-            t_offsets = gait_params['offsets']
             for sid in ALL_SERVOS:
                 smooth_offsets[sid] = cpg_exp_ramp_circular(
                     smooth_offsets[sid], t_offsets[sid], KAPPA_TRANSITION, real_dt)
