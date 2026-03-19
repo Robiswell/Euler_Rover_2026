@@ -2179,8 +2179,8 @@ if __name__ == "__main__":
             if front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self._start_dwell(0.8)      # only on first entry
                 self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)
                 return self._backward_action(frame)
 
             # P7: Rear cliff
@@ -2231,8 +2231,8 @@ if __name__ == "__main__":
             if self.front_danger_frames >= 2:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self._start_dwell(0.8)      # only on first entry
                 self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)
                 return self._backward_action(frame)
 
             # Reset pivot count when front clears
@@ -2243,14 +2243,16 @@ if __name__ == "__main__":
             if (left_class >= DIST_NEAR or right_class >= DIST_NEAR):
                 if left_class != right_class:
                     if left_class < right_class:
+                        if self.state != NAV_ARC_LEFT:
+                            self._start_dwell(0.6)      # only on first entry
                         self._transition(NAV_ARC_LEFT)
-                        self._start_dwell(0.6)
                         turn = -abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_LEFT, speed, turn, 1, "nav_arc_L")
                     else:
+                        if self.state != NAV_ARC_RIGHT:
+                            self._start_dwell(0.6)      # only on first entry
                         self._transition(NAV_ARC_RIGHT)
-                        self._start_dwell(0.6)
                         turn = abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
