@@ -1250,7 +1250,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-3000, min(3000, int(raw_speed)))
+                    final_speed = max(-1023, min(1023, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
@@ -2324,6 +2324,20 @@ if __name__ == "__main__":
                 self.consecutive_pivot_count = 0
 
             # P11: Lateral obstacle, one side freer
+            # Arc dwell hold: if already arcing with active dwell, hold the arc.
+            # If obstacle persists, refresh the dwell. If obstacle cleared, let dwell
+            # expire naturally but don't snap to FORWARD mid-dwell.
+            if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
+                if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
+                    self._refresh_dwell(0.4)
+                elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
+                    self._refresh_dwell(0.4)
+                # Hold arc during dwell regardless of obstacle state
+                turn = (-1 if self.state == NAV_ARC_LEFT else 1) * abs(turn_intensity) * MAX_TURN_BIAS
+                speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
+                return (self.state, speed, turn, 1, step)
+
             if (left_class >= DIST_NEAR or right_class >= DIST_NEAR):
                 if left_class != right_class:
                     if left_class < right_class:
@@ -2338,8 +2352,8 @@ if __name__ == "__main__":
                         turn = abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         return (NAV_ARC_RIGHT, speed, turn, 1, "nav_arc_R")
-            
-                # V0.5.01 update — if both sides equally blocked, don't prefer one arc over the other, 
+
+                # V0.5.01 update — if both sides equally blocked, don't prefer one arc over the other,
                 # just slow down and go straight to reassess.  This mitigates oscillation when both sides are borderline.
                 else:
                     # Both sides equally blocked — slow down, drive straight
@@ -2362,24 +2376,6 @@ if __name__ == "__main__":
                 turn = -turn_intensity * MAX_TURN_BIAS * 0.5
                 speed = int(SLOW_SPEED * speed_s * self.terrain_mult * self.stall_speed_mult)
                 return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
-
-            # Delete - P14: All clear
-            # Delete - self._transition(NAV_FORWARD)
-            # V0.5.01 update — add heading correction during FORWARD to mitigate drift over time
-            # --- Dwell re-evaluation for active arc states ---
-            # If an arc dwell is still active (lateral obstacle persists), hold the
-            # arc instead of snapping to FORWARD.  Only transition to FORWARD when
-            # the dwell has expired or the obstacle has cleared.
-            if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
-                if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
-                    self._refresh_dwell(0.4)
-                elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
-                    self._refresh_dwell(0.4)
-                # Hold current arc during dwell
-                turn = (-1 if self.state == NAV_ARC_LEFT else 1) * abs(turn_intensity) * MAX_TURN_BIAS
-                speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-                step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
-                return (self.state, speed, turn, 1, step)
 
             # --- FORWARD with heading correction ---
             base_speed = CRUISE_SPEED
@@ -2654,7 +2650,7 @@ if __name__ == "__main__":
         # V0.5.01
         shared_gait_id.value = 1   # WAVE — duty 0.75, max legs in stance for load detection
         shared_speed.value = 0
-        time.sleep(1.5)             # Wait for LERP convergence to wave offsets
+        tsleep(1.5)                 # Wait for LERP convergence to wave offsets (tsleep detects Heart crash)
 
         UPRIGHT_LOAD_THRESHOLD = 200
         roll_loads = [str(shared_servo_loads[i]) for i in range(len(ALL_SERVOS))]
@@ -2682,13 +2678,14 @@ if __name__ == "__main__":
             brain_log(f"[ROLL-CHECK] → SKIP_LOW_VOLTAGE ({current_voltage:.1f}V < {ROLL_MIN_VOLTAGE}V)")
             print(f"[recovery] roll skipped — battery too low "
                   f"({current_voltage:.1f}V < {ROLL_MIN_VOLTAGE}V)")
+            shared_gait_id.value = saved_gait_for_check  # restore gait before early return
             return
 
         brain_log("[ROLL-CHECK] → ATTEMPT")
         print("[recovery] attempting momentum roll to self-right")
 
         ROLL_LOAD_SPEED   =  400   # step 1 - direction unverified inverted
-        ROLL_SNAP_SPEED   = -600   # step 2 - direction unverified inverted
+        ROLL_SNAP_SPEED   = -499   # step 2 - capped to SERVO_SPEED_GOVERNOR_CAP (was -600, silently clamped)
         ROLL_SETTLE_SPEED =  400   # step 3 - timing unverified
 
         # Corrected window centered on 180° (floor-facing when inverted).

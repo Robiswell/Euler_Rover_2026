@@ -622,6 +622,18 @@ class NavStateMachine:
             self.consecutive_pivot_count = 0
 
         # P11: Lateral obstacle
+        # Arc dwell hold: if already arcing with active dwell, hold the arc.
+        # If obstacle persists, refresh the dwell. If cleared, let dwell expire naturally.
+        if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
+            if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
+                self._refresh_dwell(0.4)
+            elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
+                self._refresh_dwell(0.4)
+            turn = (-1 if self.state == NAV_ARC_LEFT else 1) * abs(turn_intensity) * MAX_TURN_BIAS
+            speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+            step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
+            return (self.state, speed, turn, 1, step)
+
         if (left_class >= DIST_NEAR or right_class >= DIST_NEAR):
             if left_class != right_class:
                 if left_class < right_class:
@@ -653,17 +665,6 @@ class NavStateMachine:
             return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
 
         # P14: All clear
-        # Fix 67: If ARC dwell is still active, hold arc — prevents fall-through to FORWARD
-        if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
-            if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
-                self._refresh_dwell(0.4)
-            elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
-                self._refresh_dwell(0.4)
-            arc_turn = -abs(turn_intensity) * MAX_TURN_BIAS if self.state == NAV_ARC_LEFT else abs(turn_intensity) * MAX_TURN_BIAS
-            arc_speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-            arc_step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
-            return (self.state, arc_speed, arc_turn, 1, arc_step)
-
         self._transition(NAV_FORWARD)
 
         # FORWARD with heading correction
