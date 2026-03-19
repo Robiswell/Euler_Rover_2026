@@ -1596,6 +1596,7 @@ if __name__ == "__main__":
     SLOW_SPEED = 200
     BACKWARD_SPEED = 200
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
+    CLIFF_BACKUP_DURATION = 1.5       # seconds of forced backward on front cliff before escape
     MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -2047,6 +2048,7 @@ if __name__ == "__main__":
             self.dwell_duration = 0.0
             self.hold_position_count = 0
             self.backward_entry_time = 0.0  # monotonic time when BACKWARD was entered
+            self.cliff_backup_until = 0.0   # monotonic deadline for cliff backup lockout
             self.consecutive_pivot_count = 0
             self.pivot_direction = -1  # -1=left, +1=right
             self.stall_start_time = 0.0
@@ -2199,15 +2201,55 @@ if __name__ == "__main__":
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                     self.backward_entry_time = time.monotonic()
+                    self.cliff_backup_until = now + CLIFF_BACKUP_DURATION
                 self._transition(NAV_BACKWARD)
                 self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
                 return self._backward_action(frame)
 
-            # P7: Rear cliff
+            # P7: Rear cliff (overrides cliff lockout -- don't back into a drop-off)
             if rear_cliff:
+                self.cliff_backup_until = 0.0  # clear lockout on rear cliff
                 self._transition(NAV_SLOW_FORWARD)
                 speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                 return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
+
+            # P6b: Cliff backup lockout -- forced BACKWARD until duration expires, then escape
+            if self.cliff_backup_until > 0.0:
+                if now < self.cliff_backup_until:
+                    # Lockout active -- stay BACKWARD regardless of other sensors
+                    self._transition(NAV_BACKWARD)
+                    return self._backward_action(frame)
+                else:
+                    # Lockout expired -- clear and escape toward free side
+                    self.cliff_backup_until = 0.0
+                    if left_class < DIST_DANGER or right_class < DIST_DANGER:
+                        if left_class != right_class:
+                            escape_dir = -1 if left_class < right_class else 1
+                        else:
+                            l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                            r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                            escape_dir = -1 if l_cm >= r_cm else 1
+                        if escape_dir < 0:
+                            self._transition(NAV_ARC_LEFT)
+                        else:
+                            self._transition(NAV_ARC_RIGHT)
+                        self._start_dwell(0.8)
+                        turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
+                        speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                        step = "nav_cliff_escape_L" if escape_dir < 0 else "nav_cliff_escape_R"
+                        state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
+                        return (state, speed, turn, 1, step)
+                    else:
+                        # Both sides blocked -- pivot away from cliff
+                        self._pick_pivot_direction(frame)
+                        self._transition(NAV_PIVOT_TURN)
+                        self._start_dwell(1.5)
+                        self.consecutive_pivot_count += 1
+                        self.terrain_impact_start = PIVOT_IMPACT_START
+                        self.terrain_impact_end = PIVOT_IMPACT_END
+                        turn = self.pivot_direction * PIVOT_TURN_BIAS
+                        step = "nav_cliff_pivot_L" if self.pivot_direction < 0 else "nav_cliff_pivot_R"
+                        return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
             # P8: Stall detection
             if avg_load > STALL_LOAD_THRESHOLD_NAV:
@@ -2373,6 +2415,7 @@ if __name__ == "__main__":
                     # Stuck long enough — try pivot
                     self._pick_pivot_direction(frame)
                     self._transition(NAV_PIVOT_TURN)
+                    self.cliff_backup_until = 0.0  # clear lockout so pivot can complete
                     self._start_dwell(1.5)
                     self.consecutive_pivot_count += 1
                     # Narrow stance sweep for safe clearance during zero-speed turns

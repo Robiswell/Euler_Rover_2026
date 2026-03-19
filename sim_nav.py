@@ -31,6 +31,7 @@ TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
+CLIFF_BACKUP_DURATION = 1.5       # seconds of forced backward on front cliff before escape
 MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
 PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 HEADING_CORRECTION_BIAS = 0.1
@@ -373,6 +374,7 @@ class NavStateMachine:
         self.dwell_duration = 0.0
         self.hold_position_count = 0
         self.backward_entry_time = 0.0
+        self.cliff_backup_until = 0.0   # monotonic deadline for cliff backup lockout
         self.consecutive_pivot_count = 0
         self.pivot_direction = -1
         self.stall_start_time = 0.0
@@ -505,15 +507,53 @@ class NavStateMachine:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
                 self.backward_entry_time = time.monotonic()
+                self.cliff_backup_until = now + CLIFF_BACKUP_DURATION
                 self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
             return self._backward_action(frame)
 
-        # P7: Rear cliff
+        # P7: Rear cliff (overrides cliff lockout -- don't back into a drop-off)
         if rear_cliff:
+            self.cliff_backup_until = 0.0  # clear lockout on rear cliff
             self._transition(NAV_SLOW_FORWARD)
             speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
             return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
+
+        # P6b: Cliff backup lockout -- forced BACKWARD until duration expires, then escape
+        if self.cliff_backup_until > 0.0:
+            if now < self.cliff_backup_until:
+                # Lockout active -- stay BACKWARD regardless of other sensors
+                self._transition(NAV_BACKWARD)
+                return self._backward_action(frame)
+            else:
+                # Lockout expired -- clear and escape toward free side
+                self.cliff_backup_until = 0.0
+                if left_class < DIST_DANGER or right_class < DIST_DANGER:
+                    if left_class != right_class:
+                        escape_dir = -1 if left_class < right_class else 1
+                    else:
+                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                        escape_dir = -1 if l_cm >= r_cm else 1
+                    if escape_dir < 0:
+                        self._transition(NAV_ARC_LEFT)
+                    else:
+                        self._transition(NAV_ARC_RIGHT)
+                    self._start_dwell(0.8)
+                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    step = "nav_cliff_escape_L" if escape_dir < 0 else "nav_cliff_escape_R"
+                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
+                    return (state, speed, turn, 1, step)
+                else:
+                    # Both sides blocked -- pivot away from cliff
+                    self._pick_pivot_direction(frame)
+                    self._transition(NAV_PIVOT_TURN)
+                    self._start_dwell(1.5)
+                    self.consecutive_pivot_count += 1
+                    turn = self.pivot_direction * PIVOT_TURN_BIAS
+                    step = "nav_cliff_pivot_L" if self.pivot_direction < 0 else "nav_cliff_pivot_R"
+                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
         # P8: Stall detection
         if avg_load > STALL_LOAD_THRESHOLD_NAV:
@@ -658,6 +698,7 @@ class NavStateMachine:
             if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
+                self.cliff_backup_until = 0.0  # clear lockout so pivot can complete
                 self._start_dwell(1.5)
                 self.consecutive_pivot_count += 1
                 turn = self.pivot_direction * PIVOT_TURN_BIAS
@@ -1197,6 +1238,59 @@ def run_n3():
     state, speed, turn, x_flip, step = fsm_update_simple(nav, rear_cliff=True)
     check(cid, state == NAV_SLOW_FORWARD, f"P7 rear cliff: state={state} expected {NAV_SLOW_FORWARD}")
     check(cid, x_flip == 1, f"P7 rear cliff: x_flip={x_flip} expected 1 (forward)")
+
+    # --- N3.P6b_lockout: Cliff lockout keeps BACKWARD after cliff clears ---
+    nav_p6b = fresh_nav()
+    frame_rear_safe = make_frame(rdl=100, rcf=100, rdr=100)
+    # Trigger cliff to set lockout
+    fsm_update_simple(nav_p6b, frame=frame_rear_safe, front_cliff=True)
+    check(cid, nav_p6b.cliff_backup_until > 0.0,
+          f"N3.P6b_lockout: cliff_backup_until should be set: got {nav_p6b.cliff_backup_until}")
+    # Cliff clears -- lockout should keep BACKWARD (cliff_backup_until still in future)
+    state_p6b, _, _, x_flip_p6b, _ = fsm_update_simple(nav_p6b, frame=frame_rear_safe, front_cliff=False)
+    check(cid, state_p6b == NAV_BACKWARD,
+          f"N3.P6b_lockout: should stay BACKWARD during lockout: got {NAV_STATE_NAMES.get(state_p6b)}")
+    check(cid, x_flip_p6b == -1,
+          f"N3.P6b_lockout: x_flip should be -1 during lockout: got {x_flip_p6b}")
+
+    # --- N3.P6b_escape: After lockout expires, robot escapes (arc toward free side) ---
+    nav_esc = fresh_nav()
+    frame_left_clear = make_frame(fdl=100, fcf=10, fdr=10, rdl=100, rcf=100, rdr=100)
+    # Trigger cliff
+    fsm_update_simple(nav_esc, frame=frame_left_clear, front_cliff=True)
+    # Expire the lockout manually
+    nav_esc.cliff_backup_until = time.monotonic() - 0.1
+    # Update with cliff cleared and left side clear
+    state_esc, _, turn_esc, x_flip_esc, step_esc = fsm_update_simple(
+        nav_esc, frame=frame_left_clear, front_cliff=False)
+    check(cid, state_esc == NAV_ARC_LEFT,
+          f"N3.P6b_escape: should escape left (clear side): got {NAV_STATE_NAMES.get(state_esc)}")
+    check(cid, "cliff_escape" in step_esc,
+          f"N3.P6b_escape: step should be nav_cliff_escape_*: got {step_esc}")
+    check(cid, x_flip_esc == 1,
+          f"N3.P6b_escape: x_flip should be 1 (forward escape): got {x_flip_esc}")
+
+    # --- N3.P6b_override: P7 rear cliff overrides lockout ---
+    nav_ovr = fresh_nav()
+    fsm_update_simple(nav_ovr, frame=frame_rear_safe, front_cliff=True)
+    check(cid, nav_ovr.cliff_backup_until > 0.0, "N3.P6b_override: lockout should be set")
+    # Rear cliff while lockout active -- P7 should win
+    state_ovr, _, _, x_flip_ovr, _ = fsm_update_simple(nav_ovr, rear_cliff=True)
+    check(cid, state_ovr == NAV_SLOW_FORWARD,
+          f"N3.P6b_override: P7 should override lockout: got {NAV_STATE_NAMES.get(state_ovr)}")
+    check(cid, nav_ovr.cliff_backup_until == 0.0,
+          f"N3.P6b_override: lockout should be cleared by P7: got {nav_ovr.cliff_backup_until}")
+
+    # --- N3.P6b_escape_blocked: Both sides blocked -> pivot after lockout ---
+    nav_blk = fresh_nav()
+    frame_boxed = make_frame(fdl=10, fcf=10, fdr=10, rdl=10, rdr=10, rcf=100)
+    fsm_update_simple(nav_blk, frame=frame_boxed, front_cliff=True)
+    nav_blk.cliff_backup_until = time.monotonic() - 0.1  # expire lockout
+    state_blk, _, _, _, step_blk = fsm_update_simple(nav_blk, frame=frame_boxed, front_cliff=False)
+    check(cid, state_blk == NAV_PIVOT_TURN,
+          f"N3.P6b_escape_blocked: both sides blocked should pivot: got {NAV_STATE_NAMES.get(state_blk)}")
+    check(cid, "cliff_pivot" in step_blk,
+          f"N3.P6b_escape_blocked: step should be nav_cliff_pivot_*: got {step_blk}")
 
     # --- P8: Stall detection (sustained load > 500 for STALL_SUSTAIN_S) ---
     nav = fresh_nav()
@@ -1857,10 +1951,17 @@ def run_n9():
     state, _, _, x_flip, _ = fsm_update_simple(nav, frame=frame_cliff, front_cliff=True)
     check(cid, state == NAV_BACKWARD, f"cliff scenario: state={NAV_STATE_NAMES.get(state)} expected BACKWARD")
     check(cid, x_flip == -1, f"cliff scenario: x_flip={x_flip} expected -1")
-    # Cliff clears
+    # Cliff clears -- lockout keeps BACKWARD
     state2, _, _, _, _ = fsm_update_simple(nav, front_cliff=False)
-    check(cid, state2 == NAV_FORWARD,
-          f"cliff clears: state={NAV_STATE_NAMES.get(state2)} expected FORWARD")
+    check(cid, state2 == NAV_BACKWARD,
+          f"cliff clears (lockout active): state={NAV_STATE_NAMES.get(state2)} expected BACKWARD")
+    # After lockout expires -- escape arc away from cliff (not back toward it)
+    nav.cliff_backup_until = time.monotonic() - 0.1  # expire lockout
+    state3, _, _, _, step3 = fsm_update_simple(nav, front_cliff=False)
+    check(cid, state3 in (NAV_ARC_LEFT, NAV_ARC_RIGHT),
+          f"cliff lockout expired: should escape arc, got {NAV_STATE_NAMES.get(state3)}")
+    check(cid, "cliff_escape" in step3,
+          f"cliff lockout expired: step should contain cliff_escape, got {step3}")
 
     # Scenario 5: Rear cliff during BACKWARD -> FORWARD @ SLOW_SPEED (P7)
     nav = fresh_nav()
