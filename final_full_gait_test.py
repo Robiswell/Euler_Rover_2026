@@ -1243,10 +1243,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             blend = min(1.0, depth / transition_deg)
                             short_error -= 360 * blend
 
-                    raw_speed = ff_speed + (short_error * KP_PHASE if abs(short_error) >= PHERR_DEADBAND else 0.0)
+                    correction = short_error * KP_PHASE if abs(short_error) >= PHERR_DEADBAND else 0.0
+                    directed_ff = -ff_speed if is_rev_leg else ff_speed  # only flip feedforward, not correction
+                    raw_speed = directed_ff + correction
                     tick_max_pherr = max(tick_max_pherr, abs(short_error))
-
-                    if is_rev_leg:            raw_speed = -raw_speed
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
