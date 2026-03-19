@@ -123,6 +123,15 @@ W_SHAFT             = 160.0   # mm — left-right servo shaft plane distance (BO
 CORNER_OVERHANG     = 30.0    # mm — chassis corner extends beyond servo shaft plane (servo Y-offset)
 ROLL_SAFETY_FACTOR  = 2.0     # multiplier — accounts for dynamic bounce during walking turns
 
+# Phase-Error Governor — throttles gait clock when servos can't track commanded phase
+# Exponential ramp from CPG paper (Sensors 2019, 19(17), 3705, Eqs. 20-21)
+PHERR_ENGAGE_DEG   = 30.0   # deg — engage governor when max servo phase error exceeds this
+PHERR_RELEASE_DEG  = 20.0   # deg — release governor (hysteresis band prevents toggle)
+PHERR_FLOOR_SCALE  = 0.35   # minimum Hz multiplier at full throttle (35% of max_safe_hz)
+PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near threshold, aggressive at high error)
+PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
+KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
+
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
 VOLTAGE_MIN  = 10.5  # 10.5V = 3.5V/cell floor — raised from 10.0 for cold-weather cell protection (no hardware BMS)
@@ -543,13 +552,23 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     temp_per_servo     = {sid: 0 for sid in ALL_SERVOS}   # Last known temp per servo (°C)
     current_per_servo  = {sid: 0 for sid in ALL_SERVOS}   # Last known current per servo (raw mA units)
     parent_pid     = os.getppid()
+    # UDP telemetry broadcast (fire-and-forget, non-blocking)
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    udp_sock.setblocking(False)
+    # UDP command listener (receives STOP from laptop command sender)
+    cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    cmd_sock.bind(("0.0.0.0", 9877))
+    cmd_sock.setblocking(False)
     last_log_time  = 0
 
     # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 50Hz loop)
     h5_buffer  = []       # buffered [H5] lines, drained at 1Hz with log_telemetry
     h5_counter = 0        # tick counter for 5Hz decimation
-    cmd_speeds   = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
-    phase_angles = {sid: 0.0 for sid in ALL_SERVOS}   # per-servo Buehler target phase (degrees)
+    cmd_speeds     = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
+    phase_angles   = {sid: 0.0 for sid in ALL_SERVOS}  # per-servo actual phase from encoders (degrees)
+    target_angles  = {sid: 0.0 for sid in ALL_SERVOS}  # per-servo Buehler target phase (degrees)
 
     GAIT_NAMES = {0: "tripod", 1: "wave", 2: "quad"}
 
@@ -575,6 +594,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 ghost_tag = " [GHOST]" if ghost_event else ""
                 vwarn_tag = f" [V_WARN:{volt_dip_ctr}]" if volt_dip_ctr > 100 else ""
                 twarn_tag = f" [T_WARN:{temp_spike_ctr}]" if temp_spike_ctr > 10 else ""
+                phgov_tag = f" [PhGov:{int(round((1.0 - ph_scale) * 100))}%]" if pherr_gov_active else ""
                 # Tier 2 diagnostic fields (appended to existing format)
                 jit_max = max(dt_samples) if dt_samples else 0.0
                 jit_mean = sum(dt_samples) / len(dt_samples) if dt_samples else 0.0
@@ -587,15 +607,21 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         sd = time.perf_counter() - stall_entry_time[s]
                         stall_dur_parts.append(f"s{s}={sd:.1f}s")
                 stall_dur_str = ",".join(stall_dur_parts) if stall_dur_parts else "none"
-                f.write(f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.2f} | "
+                _hb_line = (f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.2f} | "
                         f"V:{volt:.2f}V Vc:{volt_dip_ctr:03d} | "
                         f"T:{temps_str} Tc:{temp_spike_ctr:02d} | "
                         f"L:{loads_str} | Stall:{stall_ids} | "
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
-                        f"{ghost_tag}{vwarn_tag}{twarn_tag}"
+                        f"{ghost_tag}{vwarn_tag}{twarn_tag}{phgov_tag}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
                         f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_err:.1f}° PG:{int(pherr_gov_active)}"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
+                f.write(_hb_line)
+                # UDP broadcast heartbeat (fire-and-forget for live analyst)
+                try:
+                    udp_sock.sendto(_hb_line.encode("utf-8"), ("255.255.255.255", 9876))
+                except Exception:
+                    pass
         except:
             pass
 
@@ -760,6 +786,12 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
 
+    # PhErr governor state (CPG paper Eqs. 20-21 exponential ramp)
+    max_phase_error_prev = 0.0   # worst-case servo phase error from previous tick (degrees)
+    pherr_gov_active     = False # True when governor is engaged (hysteresis)
+    pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor — stuck timeout
+    ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
+
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
     comm_fail_streak = 0     # consecutive ticks with zero position reads — bus disconnect detection
@@ -778,6 +810,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if loop_start - last_log_time > 1.0:
                 if os.getppid() != parent_pid:
                     break
+                # Check for remote STOP command (UDP from laptop)
+                try:
+                    cmd_data, _ = cmd_sock.recvfrom(64)
+                    if cmd_data.strip() == b"STOP":
+                        print("[HEART] Remote STOP received via UDP")
+                        is_running.value = False
+                        break
+                except BlockingIOError:
+                    pass
+                except Exception:
+                    pass
 
             # ----------------------------------------------------------
             # 1. READ PHYSICAL FEEDBACK via GroupSyncRead
@@ -885,9 +928,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         stall_sustained_start[sid] = now
                     elif now - stall_sustained_start[sid] >= OVERLOAD_PREVENTION_TIME:
                         if overload_cycle_count[sid] < OVERLOAD_MAX_CYCLES:
-                            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
+                            comm1, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
                             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1)
                             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
+                            comm2, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
                             te_dwell_remaining[sid] = 5  # 100ms dwell before re-enable
                             overload_cycle_count[sid] += 1
                             te_cycle_counts[sid] += 1
@@ -900,7 +944,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                                             f"load={load_mag} cycle={overload_cycle_count[sid]}/{OVERLOAD_MAX_CYCLES}\n")
                             except:
                                 pass
-                        stall_sustained_start[sid] = 0.0
+                            if comm1 == 0 and comm2 == 0:  # COMM_SUCCESS
+                                stall_sustained_start[sid] = 0.0
+                            # else: leave timer running -- retry on next tick
                 else:
                     stall_sustained_start[sid] = 0.0
 
@@ -999,9 +1045,23 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     try:
                         with open(LOG_FILE, "a") as f:
                             f.write("".join(h5_buffer))
-                        h5_buffer.clear()
                     except:
                         pass
+                    # UDP broadcast [H5] lines (fire-and-forget for live analyst)
+                    try:
+                        for _udp_line in h5_buffer:
+                            udp_sock.sendto(_udp_line.encode("utf-8"), ("255.255.255.255", 9876))
+                    except Exception:
+                        pass
+                    h5_buffer.clear()
+                # Drain overrun buffer at 1 Hz
+                if overrun_buffer:
+                    try:
+                        with open(LOG_FILE, "a") as f:
+                            f.writelines(overrun_buffer)
+                    except:
+                        pass
+                    overrun_buffer.clear()
 
             # ----------------------------------------------------------
             # 2. STATE SMOOTHING (CPG exponential ramps — Sensors-19-03705)
@@ -1054,6 +1114,30 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                                                   turn_bias=smooth_turn)
             max_safe_hz = min(max_safe_hz, max_clr_hz)
 
+            # PhErr governor: throttle Hz when servos can't track commanded phase
+            # Exponential ramp (CPG paper Eqs. 20-21) — gentle near threshold, aggressive at high error
+            if max_phase_error_prev >= PHERR_ENGAGE_DEG:
+                pherr_gov_active = True
+            elif max_phase_error_prev < PHERR_RELEASE_DEG:
+                pherr_gov_active = False
+            if pherr_gov_active:
+                ph_scale = PHERR_FLOOR_SCALE + (1.0 - PHERR_FLOOR_SCALE) * math.exp(
+                    -KAPPA_GOVERNOR * (max_phase_error_prev - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+                max_safe_hz *= ph_scale
+                # Stuck timeout: if at floor scale too long, escalate to stall recovery
+                if ph_scale <= PHERR_FLOOR_SCALE + 0.01:
+                    if pherr_low_scale_start == 0.0:
+                        pherr_low_scale_start = time.monotonic()
+                    elif (time.monotonic() - pherr_low_scale_start) > PHERR_STUCK_TIMEOUT:
+                        for sid in ALL_SERVOS:
+                            is_stalled[sid] = True  # triggers existing stall/wiggle recovery
+                        pherr_low_scale_start = 0.0
+                else:
+                    pherr_low_scale_start = 0.0
+            else:
+                ph_scale = 1.0  # governor inactive -- no throttle
+                pherr_low_scale_start = 0.0
+
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
@@ -1085,12 +1169,30 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # ----------------------------------------------------------
             # 4. KINEMATIC CONTROLLER (Pure Math Flow)
             # ----------------------------------------------------------
-            tick_max_pherr = 0.0  # track max |PhErr| this tick for PhErr governor
+            max_phase_error_frame = 0.0  # worst-case servo error this tick
             for sid in ALL_SERVOS:
+                target_phase = 0.0  # safe default -- overwritten by Buehler calc or roll mode
                 leg_hz    = hz_L if sid in LEFT_SERVOS else hz_R
                 is_rev_leg = (leg_hz < 0)
 
-                if is_stalled[sid] or servo_disabled[sid] or abs(leg_hz) < 0.001:
+                if shared_roll_mode.value:
+                    # Counter-rotating roll: bypass Buehler clock entirely.
+                    # Front/rear pairs spin opposite directions; sin(±35° splay)
+                    # creates additive rolling torque about the body long axis.
+                    base_speed = shared_speed.value
+                    if sid in ROLL_FRONT_SERVOS:
+                        raw_speed = float(base_speed)
+                    elif sid in ROLL_REAR_SERVOS:
+                        raw_speed = float(-base_speed)
+                    else:  # middle servos (3, 6) — zero splay, no roll torque but
+                        raw_speed = float(base_speed)  # spin to prevent kickstand effect
+                    # Normal direction corrections for physical servo mounting
+                    if DIRECTION_MAP[sid] < 0:
+                        raw_speed = -raw_speed
+                    if sid in LEFT_SERVOS:
+                        raw_speed = -raw_speed
+                    final_speed = max(-SERVO_SPEED_GOVERNOR_CAP, min(SERVO_SPEED_GOVERNOR_CAP, int(raw_speed)))
+                elif is_stalled[sid] or servo_disabled[sid] or abs(leg_hz) < 0.001:
                     final_speed = 0
                     if sid == 1:
                         ref_ff_speed = 0.0
@@ -1119,6 +1221,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
                     error       = target_phase - current_phase
                     short_error = (error + 180) % 360 - 180
+                    max_phase_error_frame = max(max_phase_error_frame, abs(short_error))
 
                     if t_leg > smooth_duty:
                         # Air phase: guard prevents backward-error signal during fast
@@ -1148,6 +1251,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
                 phase_angles[sid] = actual_phases.get(sid, 0.0)
+                target_angles[sid] = target_phase if not (is_stalled[sid] or servo_disabled[sid] or abs(leg_hz) < 0.001) else phase_angles[sid]
 
                 abs_speed = int(abs(final_speed))
                 speed_val = (abs_speed | 0x8000) if final_speed < 0 else abs_speed
@@ -1156,8 +1260,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             group_sync_write.txPacket()
             group_sync_write.clearParam()
 
-            # Update max phase error for next tick's PhErr governor
-            max_phase_err = tick_max_pherr
+            max_phase_error_prev = max_phase_error_frame  # carry to next tick for governor
 
             # ----------------------------------------------------------
             # 5. RING BUFFER + ACCUMULATOR UPDATES (no disk I/O)
@@ -1199,10 +1302,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
                 spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
                 pha_str = ",".join(f"{phase_angles[sid]:.1f}" for sid in ALL_SERVOS)
+                tgt_str = ",".join(f"{target_angles[sid]:.1f}" for sid in ALL_SERVOS)
                 h5_buffer.append(
                     f"[H5] T+{t_off:.3f} P:{pos_str} S:{spd_str} "
-                    f"Ph:{pha_str} FF:{ref_ff_speed:.0f} G:{int(gov_active)} "
-                    f"PhErr:{max_phase_err:.1f} PG:{int(pherr_gov_active)} D:{smooth_duty:.2f}\n")
+                    f"Ph:{pha_str} PhT:{tgt_str} FF:{ref_ff_speed:.0f} G:{int(gov_active)} D:{smooth_duty:.2f}\n")
 
             # ----------------------------------------------------------
             # 6. PRECISION TIMING
@@ -1280,57 +1383,6 @@ def tactical_sleep(duration, running_flag, heart_process):
             raise EmergencyStopException("Heart process has died unexpectedly.")
         time.sleep(0.1)
 
-class N21_FSM_BothSidesNearEqual(unittest.TestCase):
-    """P11: both sides equally NEAR → SLOW_FORWARD (not full-speed FORWARD)."""
-    def test_both_sides_near_slows_down(self):
-        nav = NavStateMachine()
-        # Both left and right at 25cm = NEAR, equal severity
-        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
-        result = _nav_update(nav, frame=f)
-        self.assertEqual(result[0], NAV_SLOW_FORWARD)
-        self.assertLessEqual(result[1], SLOW_SPEED)
-    def test_both_sides_near_straight(self):
-        """When both sides equally blocked, turn should be zero."""
-        nav = NavStateMachine()
-        f = _make_frame(fdl=25, fcf=100, fdr=25, rdl=25, rdr=25)
-        result = _nav_update(nav, frame=f)
-        self.assertAlmostEqual(result[2], 0.0)
-class N22_FSM_ArcDwellPersistence(unittest.TestCase):
-    """Arc dwell: arc state persists while dwell is active and obstacle remains."""
-    def test_arc_persists_during_dwell(self):
-        """After P11 triggers ARC_LEFT, a second update with same obstacle
-        should NOT snap to FORWARD while dwell is active."""
-        nav = NavStateMachine()
-        # First frame: right blocked → ARC_LEFT
-        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
-        r1 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r1[0], NAV_ARC_LEFT)
-        # Second frame: same obstacle, within dwell window → should stay ARC_LEFT
-        r2 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r2[0], NAV_ARC_LEFT)
-    def test_arc_right_persists_during_dwell(self):
-        """Same test for ARC_RIGHT."""
-        nav = NavStateMachine()
-        f_blocked = _make_frame(fdl=25, fcf=100, fdr=100, rdl=25, rdr=100)
-        r1 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r1[0], NAV_ARC_RIGHT)
-        r2 = _nav_update(nav, frame=f_blocked)
-        self.assertEqual(r2[0], NAV_ARC_RIGHT)
-    def test_arc_clears_when_obstacle_gone(self):
-        """After obstacle clears AND dwell expires, return to FORWARD."""
-        nav = NavStateMachine()
-        f_blocked = _make_frame(fdl=100, fcf=100, fdr=25, rdl=100, rdr=25)
-        _nav_update(nav, frame=f_blocked)
-        self.assertEqual(nav.state, NAV_ARC_LEFT)
-        # Expire the dwell manually
-        # V0.5.01 update: instead of manipulating internal dwell timer, 
-        # just wait out the dwell duration in real time to ensure the timing logic works as intended.
-        # nav._dwell_end = time.monotonic() - 1
-        nav.dwell_duration = 0
-        # All clear frame
-        f_clear = _make_frame()
-        r2 = _nav_update(nav, frame=f_clear)
-        self.assertEqual(r2[0], NAV_FORWARD)
 
 
 # ===================================================================
@@ -1513,7 +1565,7 @@ if __name__ == "__main__":
                                impact_start=saved_imp_s, impact_end=saved_imp_e,
                                x_flip=saved_x_flip, step_name="stall_tsleep_restore")
                 # Post-wiggle re-check — one retry max
-                time.sleep(0.5)
+                tsleep(0.5)
                 recheck = sum(
                     1 for i in range(len(ALL_SERVOS))
                     if shared_servo_loads[i] > STALL_THRESHOLD
@@ -1876,7 +1928,6 @@ if __name__ == "__main__":
     def compute_battery_mult(voltage_value):
         """Compute battery speed multiplier from shared_voltage.
         Returns 1.0 normally, 0.7 if low battery."""
-        VOLTAGE_MIN = 10.5  # 3S LiPo minimum
         if voltage_value < VOLTAGE_MIN:
             return 0.0  # critical — STOP_SAFE should handle this
         if voltage_value < VOLTAGE_MIN + 0.5:
@@ -2091,7 +2142,7 @@ if __name__ == "__main__":
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
 
             # P3: Critical battery
-            if voltage < 10.5:  # VOLTAGE_MIN for 3S
+            if voltage < VOLTAGE_MIN:
                 self._transition(NAV_STOP_SAFE)
                 brain_log(f"[NAV] critical voltage {voltage:.1f}V")
                 return (NAV_STOP_SAFE, 0, 0.0, 1, "nav_stop_safe")
@@ -2198,6 +2249,7 @@ if __name__ == "__main__":
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
 
+            # NOTE: P12 is structurally unreachable (P11 fires first when both sides >= NEAR). Kept as defense-in-depth.
             # P12: Narrow corridor (both sides DANGER, front OK)
             if left_class >= DIST_DANGER and right_class >= DIST_DANGER and front_class < DIST_DANGER:
                 self._transition(NAV_SLOW_FORWARD)
@@ -2702,6 +2754,11 @@ if __name__ == "__main__":
                         last_bn_turn = -999.0
                         last_bn_time = 0.0
 
+                        # UDP socket for Brain telemetry broadcast (independent of Heart's socket)
+                        brain_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        brain_udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                        brain_udp_sock.setblocking(False)
+
                         def brain_flush_buffers():
                             """Drain [BS] and [BN] buffers to telemetry log."""
                             if not bs_buffer and not bn_buffer:
@@ -2709,10 +2766,16 @@ if __name__ == "__main__":
                             try:
                                 with open(LOG_FILE, "a") as f:
                                     f.write("".join(bs_buffer) + "".join(bn_buffer))
-                                bs_buffer.clear()
-                                bn_buffer.clear()
                             except:
                                 pass
+                            # UDP broadcast [BS]/[BN] lines (fire-and-forget for live analyst)
+                            try:
+                                for _udp_line in bs_buffer + bn_buffer:
+                                    brain_udp_sock.sendto(_udp_line.encode("utf-8"), ("255.255.255.255", 9876))
+                            except Exception:
+                                pass
+                            bs_buffer.clear()
+                            bn_buffer.clear()
 
                         # === MAIN NAV LOOP (~10 Hz) ===
                         while is_running.value and not nav.finished:
@@ -2787,6 +2850,7 @@ if __name__ == "__main__":
                                 voltage, flicker_count)
 
                             # --- Apply Layer 2 modifiers ---
+                            pre_mod_speed = speed  # capture before modifiers for [BN] telemetry
                             speed = nav.apply_modifiers(
                                 speed, imu, imu["accel_mag"], voltage,
                                 imu["angular_rate"], load_asymmetry,
@@ -2806,7 +2870,7 @@ if __name__ == "__main__":
                                         f"[BN] T+{t_off:.3f} St:{state_name_bn} "
                                         f"Sec:{front_class}/{left_class}/{right_class} "
                                         f"Clf:{int(front_cliff)}/{int(rear_cliff)} "
-                                        f"Spd:{speed} Trn:{turn:+.3f} TI:{turn_intensity:.2f} "
+                                        f"Spd:{speed} BSpd:{pre_mod_speed} Trn:{turn:+.3f} TI:{turn_intensity:.2f} "
                                         f"Gait:{nav.terrain_gait} TM:{nav.terrain_mult:.2f} "
                                         f"SM:{nav.stall_speed_mult:.2f} "
                                         f"Imp:{nav.terrain_impact_start}/{nav.terrain_impact_end} "

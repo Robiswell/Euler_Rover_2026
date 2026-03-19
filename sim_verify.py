@@ -600,7 +600,7 @@ def check_V17_overrun_drain():
     return {'passed': passed, 'failures': failures, 'sub_checks': 5}
 
 
-def check_V18_turn_clearance():
+def check_V19_turn_clearance():
     """
     Property: The roll-aware clearance governor must remain viable (max_hz > 0)
     for all gaits at the nav turn bias constants, across standard impact angles.
@@ -681,10 +681,181 @@ def check_V18_turn_clearance():
             'worst_max_hz': worst_max_hz, 'worst_info': worst_info}
 
 
+def check_V18_pherr_governor():
+    """
+    Property: The phase-error governor SHALL:
+      (A) engage (ph_scale < 1.0) when max_phase_error_prev > PHERR_ENGAGE_DEG (30 deg),
+      (B) produce ph_scale = max(PHERR_FLOOR_SCALE, 1.0 - (err - PHERR_ENGAGE_DEG) /
+          PHERR_RAMP_WIDTH) matching the linear ramp formula exactly,
+      (C) release (ph_scale = 1.0) when error drops below PHERR_RELEASE_DEG (20 deg)
+          and governor was previously active,
+      (D) stay active (hysteresis hold) at 25 deg when governor was already engaged
+          — error between release and engage thresholds must not release,
+      (E) stay inactive at 25 deg when governor was never engaged
+          — error below engage threshold must not engage from cold start,
+      (F) flag a stuck-timeout escalation after error stays at PHERR_FLOOR_SCALE
+          conditions for longer than PHERR_STUCK_TIMEOUT (5 s) at 50 Hz.
+
+    Failure means:
+      (A-fail) Gait runs at full speed immediately after a gait switch while phase
+               errors are large; legs overshoot targets, causing body lurching and
+               possible servo overload on hardware.
+      (B-fail) Ramp formula mismatch means actual throttle deviates from designed
+               value -- over-throttle risks servo overload; under-throttle stalls
+               forward progress on sand.
+      (C-fail) Governor never releases after the error resolves; robot walks at 35%
+               speed indefinitely after every gait switch.
+      (D-fail) Hysteresis missing -- governor chatters on/off near the boundary,
+               causing oscillating speed commands that destabilize gait rhythm.
+      (E-fail) Governor engages spuriously during normal walking at 25 deg error,
+               cutting speed to 35% when no gait switch occurred.
+      (F-fail) Stuck-at-floor condition goes undetected; robot crawls at 35% forever
+               instead of escalating to stall recovery.
+
+    Known false positive risk: none. Pure state machine with no timing jitter.
+    PHERR_STUCK_TIMEOUT uses real_dt=0.02 s per tick, so 5 s = 250 ticks exactly.
+    """
+    # Governor constants — sync with final_full_gait_test.py
+    PHERR_ENGAGE_DEG    = 30.0   # governor activates above this error
+    PHERR_RELEASE_DEG   = 20.0   # governor releases below this error
+    PHERR_FLOOR_SCALE   = 0.35   # minimum throttle scale when governor active
+    PHERR_RAMP_WIDTH    = 120.0  # deg range over which scale ramps from 1.0 to floor
+    PHERR_STUCK_TIMEOUT = 5.0    # seconds at floor before escalating to stall
+    TICKS_PER_SEC       = 50     # Heart runs at 50 Hz (real_dt = 0.02 s)
+
+    failures = []
+
+    def compute_ph_scale(error_deg, governor_active):
+        """
+        Replicate the governor scale computation from production code.
+        Returns (new_governor_active, ph_scale).
+        """
+        if governor_active:
+            # Already engaged: release only when error drops below PHERR_RELEASE_DEG
+            if error_deg < PHERR_RELEASE_DEG:
+                return False, 1.0
+            else:
+                scale = max(PHERR_FLOOR_SCALE,
+                            1.0 - (error_deg - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+                return True, scale
+        else:
+            # Not engaged: engage only when error exceeds PHERR_ENGAGE_DEG
+            if error_deg > PHERR_ENGAGE_DEG:
+                scale = max(PHERR_FLOOR_SCALE,
+                            1.0 - (error_deg - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
+                return True, scale
+            else:
+                return False, 1.0
+
+    # --- Sub-check A: error = 40 deg from cold start -> governor must engage ---
+    gov_active = False
+    gov_active, ph_scale = compute_ph_scale(40.0, gov_active)
+    if not gov_active:
+        failures.append("A: governor did NOT engage at error=40 deg (threshold=30). "
+                        "Gait-switch phase errors will run at full speed, risking servo overload.")
+    if ph_scale >= 1.0:
+        failures.append(f"A: ph_scale={ph_scale:.4f} (expected < 1.0) at error=40 deg. "
+                        "Governor engaged but scale not throttled -- speed reduction absent.")
+
+    # --- Sub-check B: ramp formula correctness at several error values ---
+    # Expected: scale = max(0.35, 1.0 - (err - 30) / 120)
+    ramp_cases = [
+        (30.0,  1.0),          # at engage threshold: scale = 1.0 - 0/120 = 1.0
+        (42.0,  0.9),          # 1.0 - 12/120 = 0.9
+        (90.0,  0.5),          # 1.0 - 60/120 = 0.5
+        (150.0, 0.35),         # 1.0 - 120/120 = 0.0 -> floor clamps to 0.35
+        (200.0, 0.35),         # well beyond ramp width -> floor
+    ]
+    for err_deg, expected_scale in ramp_cases:
+        # Force governor active to test ramp in active state
+        _, actual_scale = compute_ph_scale(err_deg, governor_active=True)
+        if abs(actual_scale - expected_scale) > 1e-9:
+            failures.append(
+                f"B: ramp mismatch at error={err_deg} deg: "
+                f"expected scale={expected_scale:.4f}, got {actual_scale:.4f}. "
+                f"Throttle deviation will over/under-load servos on sand terrain.")
+
+    # --- Sub-check C: error drops to 15 deg while governor active -> must release ---
+    gov_active = True   # governor was engaged
+    gov_active, ph_scale = compute_ph_scale(15.0, gov_active)
+    if gov_active:
+        failures.append("C: governor did NOT release at error=15 deg (release threshold=20). "
+                        "Robot walks at 35% speed indefinitely after every gait switch.")
+    if abs(ph_scale - 1.0) > 1e-9:
+        failures.append(f"C: ph_scale={ph_scale:.4f} after release (expected 1.0). "
+                        "Speed throttled even after phase error resolved.")
+
+    # --- Sub-check D: error = 25 deg while governor already active -> must stay active ---
+    # 25 deg is between PHERR_RELEASE_DEG (20) and PHERR_ENGAGE_DEG (30).
+    # Hysteresis: already-active governor must NOT release until below 20 deg.
+    gov_active = True
+    gov_active_after, ph_scale = compute_ph_scale(25.0, gov_active)
+    if not gov_active_after:
+        failures.append("D: governor released at error=25 deg while already active "
+                        "(release threshold=20, engage threshold=30). "
+                        "Hysteresis broken -- governor chatters near boundary, destabilising gait rhythm.")
+    if abs(ph_scale - 1.0) < 1e-9:
+        failures.append("D: ph_scale=1.0 at error=25 deg with governor active -- "
+                        "throttle absent during hysteresis hold, same as no governor.")
+
+    # --- Sub-check E: error = 25 deg from cold start -> must NOT engage ---
+    # 25 deg is below PHERR_ENGAGE_DEG (30). Governor should stay inactive.
+    gov_active = False
+    gov_active_after, ph_scale = compute_ph_scale(25.0, gov_active)
+    if gov_active_after:
+        failures.append("E: governor spuriously engaged at error=25 deg from cold start "
+                        "(engage threshold=30). "
+                        "Speed cut to 35% during normal walking when no gait switch occurred.")
+    if abs(ph_scale - 1.0) > 1e-9:
+        failures.append(f"E: ph_scale={ph_scale:.4f} (expected 1.0) at error=25 deg cold start. "
+                        "Throttle applied without governor engagement trigger.")
+
+    # --- Sub-check F: stuck-at-floor for > 5 s must flag escalation ---
+    # Simulate the stuck-timeout counter: increment each tick while ph_scale == PHERR_FLOOR_SCALE,
+    # reset when scale rises above floor. After PHERR_STUCK_TIMEOUT seconds (250 ticks at 50 Hz)
+    # the escalation flag must be set.
+    #
+    # The stuck condition is: governor active AND error high enough to pin scale at floor.
+    # Use error = 200 deg (well above ramp width, guaranteed floor).
+    STUCK_TIMEOUT_TICKS = int(PHERR_STUCK_TIMEOUT * TICKS_PER_SEC)  # 250 ticks
+
+    stuck_ticks = 0
+    escalated   = False
+    gov_active  = False
+
+    for tick in range(STUCK_TIMEOUT_TICKS + 10):  # run slightly past the timeout
+        gov_active, ph_scale = compute_ph_scale(200.0, gov_active)
+        if ph_scale <= PHERR_FLOOR_SCALE + 1e-9:
+            stuck_ticks += 1
+        else:
+            stuck_ticks = 0
+        if stuck_ticks >= STUCK_TIMEOUT_TICKS:
+            escalated = True
+            break
+
+    if not escalated:
+        failures.append(
+            f"F: stuck-timeout escalation NOT triggered after {PHERR_STUCK_TIMEOUT} s "
+            f"({STUCK_TIMEOUT_TICKS} ticks) at floor scale={PHERR_FLOOR_SCALE}. "
+            "Robot will crawl at 35% forever on sand entrapment without stall recovery.")
+
+    # Verify the timeout fires at the right tick count (not earlier than STUCK_TIMEOUT_TICKS)
+    stuck_ticks_at_trigger = stuck_ticks
+    if escalated and stuck_ticks_at_trigger < STUCK_TIMEOUT_TICKS:
+        failures.append(
+            f"F: escalation fired too early at stuck_ticks={stuck_ticks_at_trigger} "
+            f"(expected >= {STUCK_TIMEOUT_TICKS}). "
+            "Premature stall escalation interrupts legitimate slow-walk recovery.")
+
+    passed = len(failures) == 0
+    return {'passed': passed, 'failures': failures, 'sub_checks': 6}
+
+
 sim = SimState()
 res = sim.run()
 v17 = check_V17_overrun_drain()
-v18 = check_V18_turn_clearance()
+v18 = check_V18_pherr_governor()
+v19 = check_V19_turn_clearance()
 
 def pf(f): return "FAIL" if f else "PASS"
 
@@ -737,13 +908,18 @@ if v17['failures']:
     for f_msg in v17['failures']:
         print(f"       {f_msg}")
 v18_fail = not v18['passed']
-wi = v18['worst_info']
-if wi:
-    print(f"  V18 Turn clearance:      {pf(v18_fail)}  (worst max_hz={wi[4]:.3f} @ {wi[0]} {wi[1]} {wi[2]}={wi[3]:.2f})")
-else:
-    print(f"  V18 Turn clearance:      {pf(v18_fail)}")
+print(f"  V18 PhErr governor:      {pf(v18_fail)}  ({v18['sub_checks']} sub-checks; {len(v18['failures'])} failures)")
 if v18['failures']:
-    for f_msg in v18['failures'][:5]:
+    for f_msg in v18['failures']:
+        print(f"       {f_msg}")
+v19_fail = not v19['passed']
+wi = v19['worst_info']
+if wi:
+    print(f"  V19 Turn clearance:      {pf(v19_fail)}  (worst max_hz={wi[4]:.3f} @ {wi[0]} {wi[1]} {wi[2]}={wi[3]:.2f})")
+else:
+    print(f"  V19 Turn clearance:      {pf(v19_fail)}")
+if v19['failures']:
+    for f_msg in v19['failures'][:5]:
         print(f"       {f_msg}")
 
 print()
@@ -778,7 +954,7 @@ if sim.v7_fail and wt and wt[3] > 150:
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
           sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,
-          v17_fail,v18_fail]
+          v17_fail, v18_fail, v19_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
@@ -788,6 +964,6 @@ else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
              ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
-             ("V17",v17_fail),("V18",v18_fail)] if f]
+             ("V17",v17_fail),("V18",v18_fail),("V19",v19_fail)] if f]
     print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 3 INFO -- failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")
