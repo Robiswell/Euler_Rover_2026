@@ -1082,7 +1082,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             d_e = (shared_impact_end.value - smooth_imp_end + 180) % 360 - 180
             smooth_imp_end = (smooth_imp_end + d_e * lerp_rate) % 360
 
-            gait_params = GAITS.get(shared_gait_id.value, GAITS[0])
+            current_gait_id = shared_gait_id.value  # single read -- eliminates TOCTOU between gait_params fetch and snap block
+            gait_params = GAITS.get(current_gait_id, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
 
             # Phase offsets target (needed by both snap block and CPG ramp below)
@@ -1092,7 +1093,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # KAPPA=8 takes ~0.6s to converge; during nav tripod→quad the phase
             # error hits 100-170°. Snap eliminates this instantly. Servos don't
             # see the offset snap because feedforward+KP_PHASE smooth it mechanically.
-            current_gait_id = shared_gait_id.value
             if current_gait_id != prev_gait_id:
                 smooth_duty = t_duty
                 for sid in ALL_SERVOS:
@@ -2305,6 +2305,11 @@ if __name__ == "__main__":
                     self._refresh_dwell(0.4)
                 elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
                     self._refresh_dwell(0.4)
+                # Hold current arc during dwell
+                turn = (-1 if self.state == NAV_ARC_LEFT else 1) * abs(turn_intensity) * MAX_TURN_BIAS
+                speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
+                return (self.state, speed, turn, 1, step)
 
             # --- FORWARD with heading correction ---
             base_speed = CRUISE_SPEED
@@ -2840,6 +2845,11 @@ if __name__ == "__main__":
 
                             # --- Sensor processing ---
                             imu = compute_imu(frame)
+                            # Save raw cliff sensor readings BEFORE EMA -- cliff detector has
+                            # its own 2-frame confirmation and ground EMA; double-smoothing adds
+                            # 3-4 frames of latency to cliff detection (safety concern).
+                            raw_fcd = frame.get("FCD")
+                            raw_rcd = frame.get("RCD")
                             # EMA smooth all 8 ultrasonic readings before classification
                             # (-1 and None pass through unmodified; alpha=0.3)
                             _sensor_keys = ["FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR"]
@@ -2847,7 +2857,7 @@ if __name__ == "__main__":
                             for _si, _sk in enumerate(_sensor_keys):
                                 frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
                             front_class, left_class, right_class = classify_sectors(frame)
-                            front_cliff, rear_cliff = cliff.update(frame["FCD"], frame["RCD"])
+                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd)
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
 
