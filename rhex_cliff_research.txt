@@ -1,0 +1,135 @@
+RHex Hexapod Robots and Cliff Avoidance Strategies:
+Research Summary for the Euler Rover Team
+
+=========================================================
+
+1. EXECUTIVE SUMMARY
+
+RHex-family hexapod robots rely on open-loop, clock-driven locomotion controllers and do not employ reactive cliff avoidance. The broader hexapod literature converges on two cliff-response strategies: fixed-duration timed backup (dominant in small platforms) and planner-driven recovery using depth sensing. Our Euler rover's current reactive cliff response -- reversing only while the sensor fires -- creates an oscillation failure mode that a minimum timed backup of 1.5 seconds would resolve, consistent with the literature's recommended approach.
+
+
+2. RHEX PLATFORM OVERVIEW
+
+RHex is a hexapod robot originally developed at the University of Pennsylvania's Kod*lab (formerly at the University of Michigan), with subsequent licensing to Boston Dynamics for the ruggedized military variant. The platform uses six compliant C-shaped legs ("c-legs"), each driven by a single rotary actuator, arranged in an alternating tripod gait. This minimalist design -- one motor per leg, no multi-jointed limbs -- is central to RHex's philosophy.
+
+The core design principle is mechanical simplicity over sensor complexity. RHex's compliant legs absorb and conform to terrain irregularities passively, allowing the robot to power through obstacles rather than sense and avoid them. The original platform demonstrated reliable locomotion over rocks, grass, gravel, stairs, and other rough terrain using open-loop controllers that, once initiated, require "no further operator input nor task-level feedback" (Weingarten et al., 2004). This stands in contrast to sensor-rich platforms that attempt to perceive and plan around every obstacle.
+
+Saranli, Buehler, and Koditschek (2001) established the foundational design, demonstrating that a carefully tuned open-loop gait on compliant legs could achieve speeds exceeding one body length per second across diverse terrain without any environmental sensing during locomotion.
+
+
+3. RHEX LOCOMOTION AND NAVIGATION APPROACH
+
+RHex locomotion is fundamentally clock-driven. Each leg follows a Buehler clock cycle that defines stance and flight phases as fixed fractions of a period. The alternating tripod gait -- legs {1, 3, 5} and {2, 4, 6} cycling 180 degrees out of phase -- provides continuous three-point support during stance. Speed is controlled by adjusting the clock period and leg sweep amplitude, not by reacting to terrain feedback.
+
+Weingarten et al. (2004) formalized this as "automated gait adaptation," but the term is somewhat misleading by modern standards. Their adaptation refers to pre-computed parameter schedules selected before a run, not real-time reactive adjustments. The controller transitions between parameter sets (e.g., slow careful gait vs. fast traversal gait) based on operator commands or pre-programmed mission phases, not based on sensor readings during execution.
+
+Critically, RHex has no documented reactive cliff avoidance behavior. The platform does not detect drop-offs and does not autonomously reverse or redirect when approaching an edge. Its operational model assumes either operator oversight for hazard avoidance or mission planning that routes around known drop-offs. This is a deliberate design choice: the open-loop philosophy accepts that certain hazards (cliffs, deep water, entanglement) fall outside the robot's autonomous capability envelope.
+
+
+4. RHEX BACKWARD LOCOMOTION
+
+RHex's alternating tripod gait is mechanically symmetric in the forward-backward axis. Reversing the leg rotation direction produces backward locomotion with the same stability properties as forward walking. This is not trivial -- the c-leg geometry does create asymmetric ground interaction forces in forward vs. backward motion -- but in practice the platform achieves reliable reverse traversal.
+
+Moore and Buehler (2002) demonstrated this capability most notably in stair climbing and descent. Their work achieved 90% reliability on stair ascent and 100% reliability on stair descent, with the robot backing down stairs using a pre-programmed open-loop controller. The descent behavior is important context for our work: the robot reverses for a fixed duration calculated from the stair geometry (riser height, tread depth, number of steps), not in response to any sensor detecting the stair edge.
+
+The backward duration in Moore and Buehler's stair descent controller is set by open-loop timing tuned to known stair dimensions. There is no downward-facing sensor triggering the reversal, no sensor feedback modulating the backup duration, and no adaptive termination condition. The robot simply executes a fixed-time backward gait and the operator ensures alignment. This reinforces the broader RHex design philosophy: pre-compute the behavior parameters for the known environment rather than reactively sense and respond.
+
+
+5. RHEX SENSOR SUITE
+
+The base RHex platform carries a minimal sensor suite focused on proprioception rather than exteroception:
+
+- Motor encoders: One per leg (six total), providing rotor position, current draw, and in some variants motor temperature. These are the primary feedback sensors used by the gait controller for leg phase tracking.
+
+- Inertial Measurement Unit (IMU): A combined gyroscope and accelerometer package providing body orientation and angular rates. Used primarily for body attitude estimation and, in some controllers, for detecting flip-over conditions.
+
+Notably absent from the standard RHex sensor package are any downward-facing distance sensors (infrared, ultrasonic, or otherwise) that would serve as cliff or drop-off detectors. The platform does not carry proximity sensors aimed at the ground ahead of or beneath the robot.
+
+Later variants -- particularly X-RHex and XRL (X-RHex Lite), also developed at Kod*lab -- added a modular payload bay on the dorsal surface. This bay has been used to mount cameras, LIDAR units, and other exteroceptive sensors for research purposes. However, these additions serve mapping, SLAM, and visual navigation research, not reactive cliff avoidance. The base locomotion controller does not consume data from payload-bay sensors.
+
+
+6. TERRAIN CLASSIFICATION
+
+Kod*lab's terrain identification work (SPIE Defense, Security, and Sensing, 2013) represents the most sophisticated sensing application on the RHex platform relevant to surface awareness. This system classifies terrain type -- distinguishing vinyl flooring, asphalt, grass, and pebbles -- using proprioceptive signals from the leg motor encoders.
+
+The method works by analyzing the motor current and position waveforms during stance phase. Different surfaces produce characteristic load signatures: hard flat surfaces yield clean sinusoidal current profiles, while compliant or irregular surfaces introduce distinctive perturbations. A trained classifier maps these waveform features to terrain categories.
+
+This is explicitly a surface classification system, not an edge detection system. It answers the question "what am I walking on?" rather than "is there ground ahead of me?" The system cannot detect a cliff or drop-off because it only processes data from legs currently in contact with the ground. A cliff ahead of the robot produces no proprioceptive signal until a leg swings forward into empty air -- at which point the robot is likely already committed to the step.
+
+This distinction is important for our design context. Proprioceptive terrain classification is a complementary capability to cliff detection, not a substitute for it.
+
+
+7. WHAT THE BROADER HEXAPOD LITERATURE SAYS ABOUT CLIFF RESPONSE
+
+Outside the RHex family, the hexapod robotics literature documents two primary approaches to cliff detection and response.
+
+APPROACH 1: TIMED BACKUP WITH PROXIMITY SENSORS
+
+The dominant approach in small autonomous hexapods uses downward-facing infrared or ultrasonic sensors to detect sudden loss of ground return signal. When the measured distance exceeds a threshold (indicating a drop-off), the robot executes a fixed-duration backward movement followed by a turn to redirect away from the edge.
+
+Key characteristics of this approach:
+- Detection relies on a rapid increase in measured distance (or loss of return signal entirely) from downward-angled sensors.
+- The backup is a fixed time duration, not a fixed distance. The resulting clearance distance depends on the robot's reverse speed.
+- The backup duration is tuned empirically per-platform based on the robot's speed, sensor mounting geometry, and sensor latency. No paper in the surveyed literature specifies a universal backup distance or duration.
+- After the timed backup completes, the robot executes a turn (typically 30-90 degrees) and resumes forward navigation.
+
+The IEEE RCAR 2020 paper on cliff detection multi-sensor methods for mobile robots documents this approach with fused IR and ultrasonic sensing, noting that multi-sensor fusion reduces false positives from surface reflectivity variations but does not change the fundamental response pattern of timed backup plus turn.
+
+APPROACH 2: PLANNER-DRIVEN RECOVERY WITH DEPTH IMAGING
+
+More capable platforms use RGB-D cameras or LIDAR to construct point cloud representations of the terrain ahead. Ground plane segmentation identifies the walkable surface, and boundary points where the ground plane terminates are flagged as cliff edges. The robot's path planner then routes around the detected edge.
+
+The Frontiers in Neurorobotics (2014) work on biologically-inspired adaptive obstacle negotiation in hexapod robots explores this category, incorporating richer environmental models into the locomotion decision process.
+
+Key characteristics:
+- Detection is anticipatory -- the cliff edge is identified at range (typically 0.5-2 meters ahead) before the robot reaches it.
+- Recovery is path-planner driven, not a fixed behavior. The planner computes a new trajectory that avoids the detected edge.
+- Computationally heavyweight: requires real-time point cloud processing, ground plane fitting, and replanning.
+- Robust to sensor noise and terrain complexity but requires significant processing power and sensor cost.
+
+For small, resource-constrained hexapods like our Euler rover, the first approach (timed backup) is far more practical. The second approach is relevant for larger platforms with onboard computers capable of real-time 3D perception.
+
+
+8. IMPLICATIONS FOR OUR DESIGN
+
+Our Euler hexapod uses two downward-facing HC-SR04 ultrasonic sensors (front cliff detector, FCD, and rear cliff detector, RCD) for cliff detection. This places us squarely in the "Approach 1" category from the literature. However, our current implementation deviates from the literature's recommended response pattern in a critical way.
+
+THE CURRENT BEHAVIOR (PROBLEMATIC):
+
+Our cliff response is purely reactive: the robot reverses only while the cliff sensor actively reports a drop-off. The moment the robot backs up slightly -- roughly 200 milliseconds of reverse motion at typical speeds -- the downward-facing sensor is once again over solid ground. The cliff condition clears, the robot resumes forward navigation, and it walks back toward the same cliff edge. This creates an oscillation loop: detect cliff, reverse briefly, lose detection, advance, detect cliff again.
+
+This oscillation is not a subtle edge case. It is the expected behavior of any reactive-only cliff response where the detection sensor is mounted on the robot body (not on a forward-projecting boom). The sensor can only detect the cliff when the robot is at the edge, and backing up inherently moves the sensor away from the edge, clearing the detection.
+
+WHY THE LITERATURE USES TIMED BACKUP:
+
+The timed backup approach in the literature exists specifically to solve this oscillation problem. By enforcing a minimum backup duration regardless of sensor state, the robot achieves sufficient clearance from the edge that it can execute a meaningful turn and proceed in a new direction. The sensor state during the backup is intentionally ignored -- the robot commits to the full backup duration.
+
+THE RECOMMENDED FIX:
+
+Enforce a minimum timed backward movement of 1.5 seconds upon cliff detection, giving approximately 15-20 centimeters of clearance at speed=200 before the robot re-evaluates its situation. This should be followed by a turn to redirect away from the cliff edge.
+
+The 1.5-second duration is derived from our platform's specific parameters:
+- At speed=200, the Euler rover's reverse ground speed produces roughly 10-13 cm/s of travel.
+- 1.5 seconds yields 15-20 cm of clearance, sufficient to ensure the cliff edge is well behind the robot's sensor footprint.
+- This duration should be validated empirically and may need adjustment based on field testing on different surfaces (the HC-SR04's ~200ms ultrasonic cycle time and the robot's gait dynamics on sand vs. hard surfaces will affect actual clearance).
+
+This fix aligns our implementation with the standard approach documented in the hexapod cliff avoidance literature and eliminates the oscillation failure mode.
+
+
+9. REFERENCES
+
+[1] Saranli, U., Buehler, M., & Koditschek, D.E. (2001). "RHex: A Simple and Highly Mobile Hexapod Robot." International Journal of Robotics Research, 20(7), 616-631.
+
+[2] Moore, E.Z. & Buehler, M. (2002). "Reliable Stair Climbing in the Simple Hexapod RHex." IEEE International Conference on Robotics and Automation (ICRA).
+
+[3] Weingarten, J.D., Lopes, G.A.D., Buehler, M., Groff, R.E., & Koditschek, D.E. (2004). "Automated Gait Adaptation for Legged Robots." IEEE International Conference on Robotics and Automation (ICRA).
+
+[4] Kod*lab (2013). "Terrain Identification for RHex-type Robots Using Proprioceptive Sensing." SPIE Defense, Security, and Sensing.
+
+[5] IEEE RCAR (2020). "Cliff Detection Multi-Sensor Method for Mobile Robots." IEEE International Conference on Real-time Computing and Robotics.
+
+[6] Frontiers in Neurorobotics (2014). "Biologically-Inspired Adaptive Obstacle Negotiation Behavior of Hexapod Robots." Frontiers in Neurorobotics, Vol. 8.
+
+=========================================================
+
+Document prepared for the Euler Rover Team, March 2026.
