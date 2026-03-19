@@ -2244,13 +2244,34 @@ if __name__ == "__main__":
                 step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
                 return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-            # P10: Front DANGER (2+ frames, not dead-end)
+            # P10: Front DANGER (2+ frames, not dead-end) -- escape-route awareness
             if self.front_danger_frames >= 2:
-                if self.state != NAV_BACKWARD:
-                    self.hold_position_count = 0
-                self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)  # Fix A5b: refreshes every frame; dwell counts from last danger
-                return self._backward_action(frame)
+                # Prefer arc escape over backward when a side is clear
+                if left_class < DIST_DANGER or right_class < DIST_DANGER:
+                    # Pick the freer side; tie-break with raw cm (most clearance)
+                    if left_class != right_class:
+                        escape_dir = -1 if left_class < right_class else 1
+                    else:
+                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                        escape_dir = -1 if l_cm >= r_cm else 1
+                    if escape_dir < 0:
+                        self._transition(NAV_ARC_LEFT)
+                    else:
+                        self._transition(NAV_ARC_RIGHT)
+                    self._start_dwell(0.8)
+                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
+                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
+                    return (state, speed, turn, 1, step)
+                else:
+                    # Both sides blocked -- BACKWARD is last resort
+                    if self.state != NAV_BACKWARD:
+                        self.hold_position_count = 0
+                    self._transition(NAV_BACKWARD)
+                    self._start_dwell(0.8)
+                    return self._backward_action(frame)
 
             # Reset pivot count when front clears
             if front_class < DIST_DANGER:
