@@ -271,8 +271,8 @@ class SimState:
                 if t_leg > self.smooth_duty:
                     if not is_rev and error < -90: error += 360
                     elif is_rev and error > 90: error -= 360
-                raw_speed = ff_speed + (error * KP_PHASE)
-                if is_rev: raw_speed = -raw_speed
+                directed_ff = -ff_speed if is_rev else ff_speed  # only flip feedforward, not correction
+                raw_speed = directed_ff + (error * KP_PHASE)
                 if sid in LEFT_SERVOS: raw_speed = -raw_speed
 
                 final_speed = max(-3000, min(3000, int(raw_speed)))

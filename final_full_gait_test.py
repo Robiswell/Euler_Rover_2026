@@ -143,12 +143,8 @@ LOG_MAX_SIZE = 10 * 1024 * 1024
 
 # Phase Error Governor — breaks the PhErr positive feedback loop
 # (see Hexapod Phase Error Accumulation Root Cause Analysis, 2026-03-17)
-# When PhErr exceeds PHERR_GOV_THRESHOLD, Hz is scaled down to prevent runaway.
 # When PhErr is below PHERR_DEADBAND, no correction is applied (noise floor).
 PHERR_DEADBAND          = 6.0     # degrees — no phase correction below this (noise floor)
-PHERR_GOV_THRESHOLD     = 30.0    # degrees — above this, Hz is throttled
-PHERR_GOV_RANGE         = 120.0   # degrees — throttle linearly over this range (30°→150° maps to 1.0→0.3)
-PHERR_GOV_MIN_SCALE     = 0.3     # minimum Hz multiplier when phase error is severe
 
 # Mirrored Physical Mounting Map
 DIRECTION_MAP = {
@@ -617,7 +613,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
                         f"{ghost_tag}{vwarn_tag}{twarn_tag}{phgov_tag}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
-                        f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_err:.1f}° PG:{int(pherr_gov_active)}"
+                        f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_error_prev:.1f}° PG:{int(pherr_gov_active)}"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
                 f.write(_hb_line)
                 # UDP broadcast heartbeat (fire-and-forget for live analyst)
@@ -799,7 +795,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
     comm_fail_streak = 0     # consecutive ticks with zero position reads — bus disconnect detection
-    max_phase_err   = 0.0    # degrees — max |PhErr| across all servos from previous tick (PhErr governor)
     prev_gait_id    = shared_gait_id.value  # Fix 65: track gait ID to detect switches for CPG snap
 
     try:
@@ -1160,16 +1155,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
 
-            # PhErr Governor: throttle Hz when phase error accumulates.
-            # Breaks the positive feedback loop: PhErr → high correction → high load → more PhErr.
-            # Uses max_phase_err from PREVIOUS tick (computed in per-servo loop below).
-            pherr_gov_active = False
-            if max_phase_err > PHERR_GOV_THRESHOLD:
-                pherr_scale = max(PHERR_GOV_MIN_SCALE,
-                                  1.0 - (max_phase_err - PHERR_GOV_THRESHOLD) / PHERR_GOV_RANGE)
-                hz_L *= pherr_scale
-                hz_R *= pherr_scale
-                pherr_gov_active = True
 
             cycle_hz_L, cycle_hz_R = abs(hz_L), abs(hz_R)
             if cycle_hz_L > 0.001: master_time_L = (master_time_L + cycle_hz_L * real_dt) % 1.0
@@ -1258,10 +1243,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             blend = min(1.0, depth / transition_deg)
                             short_error -= 360 * blend
 
-                    raw_speed = ff_speed + (short_error * KP_PHASE if abs(short_error) >= PHERR_DEADBAND else 0.0)
+                    correction = short_error * KP_PHASE if abs(short_error) >= PHERR_DEADBAND else 0.0
+                    directed_ff = -ff_speed if is_rev_leg else ff_speed  # only flip feedforward, not correction
+                    raw_speed = directed_ff + correction
                     tick_max_pherr = max(tick_max_pherr, abs(short_error))
-
-                    if is_rev_leg:            raw_speed = -raw_speed
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
@@ -1610,6 +1595,7 @@ if __name__ == "__main__":
     TRIPOD_CRUISE_SPEED = 450
     SLOW_SPEED = 200
     BACKWARD_SPEED = 200
+    BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -2060,6 +2046,7 @@ if __name__ == "__main__":
             self.dwell_start = 0.0
             self.dwell_duration = 0.0
             self.hold_position_count = 0
+            self.backward_entry_time = 0.0  # monotonic time when BACKWARD was entered
             self.consecutive_pivot_count = 0
             self.pivot_direction = -1  # -1=left, +1=right
             self.stall_start_time = 0.0
@@ -2211,6 +2198,7 @@ if __name__ == "__main__":
             if front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
+                    self.backward_entry_time = time.monotonic()
                 self._transition(NAV_BACKWARD)
                 self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
                 return self._backward_action(frame)
@@ -2259,13 +2247,35 @@ if __name__ == "__main__":
                 step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
                 return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-            # P10: Front DANGER (2+ frames, not dead-end)
+            # P10: Front DANGER (2+ frames, not dead-end) -- escape-route awareness
             if self.front_danger_frames >= 2:
-                if self.state != NAV_BACKWARD:
-                    self.hold_position_count = 0
-                self._transition(NAV_BACKWARD)
-                self._start_dwell(0.8)  # Fix A5b: refreshes every frame; dwell counts from last danger
-                return self._backward_action(frame)
+                # Prefer arc escape over backward when a side is clear
+                if left_class < DIST_DANGER or right_class < DIST_DANGER:
+                    # Pick the freer side; tie-break with raw cm (most clearance)
+                    if left_class != right_class:
+                        escape_dir = -1 if left_class < right_class else 1
+                    else:
+                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                        escape_dir = -1 if l_cm >= r_cm else 1
+                    if escape_dir < 0:
+                        self._transition(NAV_ARC_LEFT)
+                    else:
+                        self._transition(NAV_ARC_RIGHT)
+                    self._start_dwell(0.8)
+                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
+                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                    step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
+                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
+                    return (state, speed, turn, 1, step)
+                else:
+                    # Both sides blocked -- BACKWARD is last resort
+                    if self.state != NAV_BACKWARD:
+                        self.hold_position_count = 0
+                        self.backward_entry_time = time.monotonic()
+                    self._transition(NAV_BACKWARD)
+                    self._start_dwell(0.8)
+                    return self._backward_action(frame)
 
             # Reset pivot count when front clears
             if front_class < DIST_DANGER:
@@ -2351,15 +2361,16 @@ if __name__ == "__main__":
             return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
         def _backward_action(self, frame):
-            """Compute backward recovery action with rear safety check."""
+            """Compute backward recovery action with rear safety check and dwell guard."""
             if is_rear_safe(frame):
                 self.hold_position_count = 0
                 return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
             else:
                 self.hold_position_count += 1
                 brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
-                if self.hold_position_count >= 2:
-                    # Stuck — try pivot
+                backward_elapsed = time.monotonic() - self.backward_entry_time
+                if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
+                    # Stuck long enough — try pivot
                     self._pick_pivot_direction(frame)
                     self._transition(NAV_PIVOT_TURN)
                     self._start_dwell(1.5)

@@ -30,6 +30,7 @@ CRUISE_SPEED = 400
 TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
+BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
 PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 HEADING_CORRECTION_BIAS = 0.1
@@ -371,6 +372,7 @@ class NavStateMachine:
         self.dwell_start = 0.0
         self.dwell_duration = 0.0
         self.hold_position_count = 0
+        self.backward_entry_time = 0.0
         self.consecutive_pivot_count = 0
         self.pivot_direction = -1
         self.stall_start_time = 0.0
@@ -502,6 +504,7 @@ class NavStateMachine:
         if front_cliff:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
+                self.backward_entry_time = time.monotonic()
                 self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
             return self._backward_action(frame)
@@ -546,13 +549,33 @@ class NavStateMachine:
             step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
             return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-        # P10: Front DANGER (2+ frames)
+        # P10: Front DANGER (2+ frames) -- escape-route awareness
         if self.front_danger_frames >= 2:
-            if self.state != NAV_BACKWARD:
-                self.hold_position_count = 0
-                self._start_dwell(0.8)  # Fix 68: only on first transition
-            self._transition(NAV_BACKWARD)
-            return self._backward_action(frame)
+            # Prefer arc escape over backward when a side is clear
+            if left_class < DIST_DANGER or right_class < DIST_DANGER:
+                if left_class != right_class:
+                    escape_dir = -1 if left_class < right_class else 1
+                else:
+                    l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                    r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                    escape_dir = -1 if l_cm >= r_cm else 1
+                if escape_dir < 0:
+                    self._transition(NAV_ARC_LEFT)
+                else:
+                    self._transition(NAV_ARC_RIGHT)
+                self._start_dwell(0.8)
+                turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
+                speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+                step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
+                state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
+                return (state, speed, turn, 1, step)
+            else:
+                if self.state != NAV_BACKWARD:
+                    self.hold_position_count = 0
+                    self.backward_entry_time = time.monotonic()
+                    self._start_dwell(0.8)
+                self._transition(NAV_BACKWARD)
+                return self._backward_action(frame)
 
         # Reset pivot count when front clears
         if front_class < DIST_DANGER:
@@ -624,14 +647,15 @@ class NavStateMachine:
         return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
     def _backward_action(self, frame):
-        """Compute backward recovery action with rear safety check."""
+        """Compute backward recovery action with rear safety check and dwell guard."""
         if is_rear_safe(frame):
             self.hold_position_count = 0
             return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
         else:
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
-            if self.hold_position_count >= 2:
+            backward_elapsed = time.monotonic() - self.backward_entry_time
+            if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
                 self._start_dwell(1.5)
@@ -1203,14 +1227,43 @@ def run_n3():
     check(cid, state3 != NAV_PIVOT_TURN,
           f"P9 should NOT fire without prev_state=BACKWARD: got {state3}")
 
-    # --- P10: Front DANGER (2+ frames) ---
+    # --- P10: Front DANGER (2+ frames) -- escape-route awareness ---
+
+    # P10a: Both sides clear -- escape-arc, not backward
     nav = fresh_nav()
     frame_front_danger = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
-    # First frame increments counter
-    fsm_update_simple(nav, frame=frame_front_danger)
-    # Second frame triggers P10
-    state, _, _, x_flip, _ = fsm_update_simple(nav, frame=frame_front_danger)
-    check(cid, state == NAV_BACKWARD, f"P10 front danger: state={state} expected {NAV_BACKWARD}")
+    fsm_update_simple(nav, frame=frame_front_danger)  # 1st frame: counter++
+    state, _, _, _, step = fsm_update_simple(nav, frame=frame_front_danger)  # 2nd: P10 fires
+    check(cid, state in (NAV_ARC_LEFT, NAV_ARC_RIGHT),
+          f"N3.P10a: both sides clear should escape-arc: state={NAV_STATE_NAMES.get(state)} step={step}")
+    check(cid, "nav_escape" in step,
+          f"N3.P10a: step should be nav_escape_*: got {step}")
+
+    # P10b: One side clear, other DANGER -- escape toward clear side
+    nav = fresh_nav()
+    frame_right_blocked = make_frame(fcf=10, fdr=10, rdl=100, rdr=10)
+    fsm_update_simple(nav, frame=frame_right_blocked)
+    state, _, turn, _, step = fsm_update_simple(nav, frame=frame_right_blocked)
+    check(cid, state == NAV_ARC_LEFT,
+          f"N3.P10b: right blocked should escape left: state={NAV_STATE_NAMES.get(state)} step={step}")
+    check(cid, turn < 0, f"N3.P10b: escape left turn should be negative: turn={turn}")
+
+    # P10c: Both sides DANGER -- BACKWARD (last resort)
+    nav = fresh_nav()
+    frame_all_danger = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rdr=10, rcf=100)
+    fsm_update_simple(nav, frame=frame_all_danger)
+    state, _, _, _, step = fsm_update_simple(nav, frame=frame_all_danger)
+    check(cid, state == NAV_BACKWARD,
+          f"N3.P10c: both sides blocked should backward: state={NAV_STATE_NAMES.get(state)} step={step}")
+
+    # P10d: Tie-break -- same classification, pick side with more raw cm
+    nav = fresh_nav()
+    frame_tie = make_frame(fcf=10, fdl=35, rdl=35, fdr=45, rdr=45)
+    fsm_update_simple(nav, frame=frame_tie)
+    state, _, turn, _, step = fsm_update_simple(nav, frame=frame_tie)
+    check(cid, state == NAV_ARC_RIGHT,
+          f"N3.P10d: right has more cm should escape right: state={NAV_STATE_NAMES.get(state)} step={step}")
+    check(cid, turn > 0, f"N3.P10d: escape right turn should be positive: turn={turn}")
 
     # --- P11: Lateral obstacle (one side NEAR, other freer) ---
     nav = fresh_nav()
@@ -1321,16 +1374,24 @@ def run_n4():
     # Dwell should be active
     check(cid, nav._dwell_active(), "dwell should be active after ARC transition")
 
-    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot
+    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot (after dwell expires)
     nav = fresh_nav()
-    frame_rear_blocked = make_frame(fcf=10, rdl=10, rcf=10, rdr=10)
+    frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=10, rdr=10)
     nav.front_danger_frames = 2  # force P10
     # First update: BACKWARD with rear unsafe -> hold (count=1)
     state1, speed1, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state1 == NAV_BACKWARD, f"backward first: state={state1}")
     check(cid, speed1 == 0, f"rear unsafe hold: speed={speed1} expected 0")
-    # Second update: hold_position_count reaches 2 -> escalate to pivot
-    nav.front_danger_frames = 2  # re-set
+
+    # Dwell guard: premature escalation should be blocked
+    nav.front_danger_frames = 2
+    state_early, _, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
+    check(cid, state_early == NAV_BACKWARD,
+          f"dwell guard: premature escalation blocked: state={NAV_STATE_NAMES.get(state_early)}")
+
+    # Simulate dwell elapsed, then escalate
+    nav.backward_entry_time = time.monotonic() - 1.0  # 1s ago > BACKWARD_MIN_DWELL
+    nav.front_danger_frames = 2
     state2, _, _, _, step2 = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state2 == NAV_PIVOT_TURN,
           f"backward escalation to pivot: state={state2} expected {NAV_PIVOT_TURN}")
@@ -1818,8 +1879,9 @@ def run_n10():
     cid = "N10"
 
     # BACKWARD checks rear sensors before reversing
+    # Note: fdl=10, fdr=10 ensure both sides DANGER so P10 escape-route falls through to BACKWARD
     nav = fresh_nav()
-    frame_rear_safe = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
+    frame_rear_safe = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
     nav.front_danger_frames = 2
     state, speed, _, x_flip, _ = fsm_update_simple(nav, frame=frame_rear_safe)
     check(cid, state == NAV_BACKWARD, f"rear safe: state={NAV_STATE_NAMES.get(state)}")
@@ -1828,7 +1890,7 @@ def run_n10():
 
     # Rear distance < 20 or -1 -> hold (speed=0)
     nav = fresh_nav()
-    frame_rear_blocked = make_frame(fcf=10, rdl=10, rcf=100, rdr=100)
+    frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=100, rdr=100)
     nav.front_danger_frames = 2
     state, speed, _, x_flip, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state == NAV_BACKWARD, f"rear blocked: state={NAV_STATE_NAMES.get(state)}")
@@ -1836,14 +1898,14 @@ def run_n10():
 
     # Rear with -1 sentinel -> hold
     nav = fresh_nav()
-    frame_rear_blind = make_frame(fcf=10, rdl=-1, rcf=100, rdr=100)
+    frame_rear_blind = make_frame(fcf=10, fdl=10, fdr=10, rdl=-1, rcf=100, rdr=100)
     nav.front_danger_frames = 2
     state, speed, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blind)
     check(cid, speed == 0, f"rear -1: speed={speed} expected 0 (hold)")
 
     # Reverse uses x_flip=-1, NOT negative speed
     nav = fresh_nav()
-    frame_rev = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
+    frame_rev = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
     nav.front_danger_frames = 2
     state, speed, _, x_flip, _ = fsm_update_simple(nav, frame=frame_rev)
     check(cid, x_flip == -1, "reverse should use x_flip=-1")
@@ -2110,9 +2172,10 @@ def run_nc():
 
     # ------------------------------------------------------------------
     # C6: Fix 68 same guard for P10 (front DANGER 2+ frames)
+    # Note: fdl=10, fdr=10 ensure both sides DANGER so P10 escape-route falls through to BACKWARD
     # ------------------------------------------------------------------
     nav = fresh_nav()
-    frame_front_danger = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
+    frame_front_danger = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
 
     fsm_update_simple(nav, frame=frame_front_danger)  # frame 1: counter -> 1, not BACKWARD yet
     state_p10_1, _, _, _, _ = fsm_update_simple(nav, frame=frame_front_danger)  # frame 2 -> BACKWARD
