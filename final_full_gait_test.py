@@ -143,12 +143,8 @@ LOG_MAX_SIZE = 10 * 1024 * 1024
 
 # Phase Error Governor — breaks the PhErr positive feedback loop
 # (see Hexapod Phase Error Accumulation Root Cause Analysis, 2026-03-17)
-# When PhErr exceeds PHERR_GOV_THRESHOLD, Hz is scaled down to prevent runaway.
 # When PhErr is below PHERR_DEADBAND, no correction is applied (noise floor).
 PHERR_DEADBAND          = 6.0     # degrees — no phase correction below this (noise floor)
-PHERR_GOV_THRESHOLD     = 30.0    # degrees — above this, Hz is throttled
-PHERR_GOV_RANGE         = 120.0   # degrees — throttle linearly over this range (30°→150° maps to 1.0→0.3)
-PHERR_GOV_MIN_SCALE     = 0.3     # minimum Hz multiplier when phase error is severe
 
 # Mirrored Physical Mounting Map
 DIRECTION_MAP = {
@@ -617,7 +613,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
                         f"{ghost_tag}{vwarn_tag}{twarn_tag}{phgov_tag}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
-                        f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_err:.1f}° PG:{int(pherr_gov_active)}"
+                        f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_error_prev:.1f}° PG:{int(pherr_gov_active)}"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
                 f.write(_hb_line)
                 # UDP broadcast heartbeat (fire-and-forget for live analyst)
@@ -799,7 +795,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
     comm_fail_streak = 0     # consecutive ticks with zero position reads — bus disconnect detection
-    max_phase_err   = 0.0    # degrees — max |PhErr| across all servos from previous tick (PhErr governor)
     prev_gait_id    = shared_gait_id.value  # Fix 65: track gait ID to detect switches for CPG snap
 
     try:
@@ -1160,16 +1155,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
             hz_R = max(-max_safe_hz, min(max_safe_hz, hz_R))
 
-            # PhErr Governor: throttle Hz when phase error accumulates.
-            # Breaks the positive feedback loop: PhErr → high correction → high load → more PhErr.
-            # Uses max_phase_err from PREVIOUS tick (computed in per-servo loop below).
-            pherr_gov_active = False
-            if max_phase_err > PHERR_GOV_THRESHOLD:
-                pherr_scale = max(PHERR_GOV_MIN_SCALE,
-                                  1.0 - (max_phase_err - PHERR_GOV_THRESHOLD) / PHERR_GOV_RANGE)
-                hz_L *= pherr_scale
-                hz_R *= pherr_scale
-                pherr_gov_active = True
 
             cycle_hz_L, cycle_hz_R = abs(hz_L), abs(hz_R)
             if cycle_hz_L > 0.001: master_time_L = (master_time_L + cycle_hz_L * real_dt) % 1.0
