@@ -2269,6 +2269,11 @@ if __name__ == "__main__":
                 self.stall_count_30s = 0
                 self.stall_speed_mult = 1.0
                 self._last_stall_clear_time = now
+            # Gradual stall_speed_mult recovery: 5s grace after last stall, then +0.01/tick (~0.05/s at 5Hz)
+            # Recovers 0.4 → 1.0 in ~12s. Any new stall immediately knocks it back down via *= 0.75.
+            elif self.stall_speed_mult < 1.0 and self.stall_start_time == 0.0:
+                if (now - self.last_stall_time) > 5.0:
+                    self.stall_speed_mult = min(1.0, self.stall_speed_mult + 0.01)
 
             # P9: Dead end (front DANGER + both sides DANGER + came from BACKWARD)
             if (front_class >= DIST_DANGER and left_class >= DIST_DANGER
@@ -3042,7 +3047,7 @@ if __name__ == "__main__":
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
                                                step_name="nav_pre_wiggle")
                                 state_recovery_wiggle()
-                                nav.stall_speed_mult *= 0.75
+                                nav.stall_speed_mult = max(0.4, nav.stall_speed_mult * 0.75)
                                 if nav.stall_count_30s >= 3:
                                     # Switch to wave gait, halve speed
                                     nav.terrain_gait = 1
