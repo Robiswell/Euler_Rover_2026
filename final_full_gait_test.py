@@ -1595,7 +1595,7 @@ if __name__ == "__main__":
 
     # --- Nav tunable constants ---
     CRUISE_SPEED = 380          # lowered: just under governor limit at 80° sweep
-    TRIPOD_CRUISE_SPEED = 470   # lowered: avoids constant governor clamping
+    TRIPOD_CRUISE_SPEED = 420   # just under FF governor limit (max 424 at 80° sweep)
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
