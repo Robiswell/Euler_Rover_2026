@@ -14,8 +14,8 @@ STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 GAITS = {
     0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
-    1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
-    2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
+    1: {'duty': 0.60, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
+    2: {'duty': 0.55, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 real_dt           = 0.02
 
@@ -186,7 +186,7 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
@@ -316,7 +316,7 @@ class SimState:
             self.v10_xflips.append(self.sh.x_flip)
 
         # V11 impact slew safety (during slew segments only)
-        if seg in ("Quad obstacle 345/15", "Quad low 325/35", "Wave slope 315/15"):
+        if seg in ("Quad obstacle 320/40", "Quad low 325/35", "Wave slope 315/15"):
             td5 = (self.smooth_imp_start + LEG_SPLAY[5]) % 360
             safe = (td5 >= 340) or (td5 <= 30)
             if not safe:
@@ -402,8 +402,8 @@ class SimState:
         speed_lr = min(1.0, 4.0 * real_dt)
         worst_frames = 0
         worst_tx = None
-        for (nm, df, dt) in [("Tripod->Wave",0.5,0.75),("Wave->Quad",0.75,0.7),
-                             ("Quad->Tripod",0.7,0.5),("Tripod->Quad",0.5,0.7)]:
+        for (nm, df, dt) in [("Tripod->Wave",0.5,0.60),("Wave->Quad",0.60,0.55),
+                             ("Quad->Tripod",0.55,0.5),("Tripod->Quad",0.5,0.55)]:
             delta = abs(dt - df)
             thresh = 0.01 * dt
             if delta <= thresh:
@@ -451,7 +451,7 @@ def make_schedule():
     s.append((500,  {'turn_bias': 0.8}, 2, "Quad pivot right"))
     s.append((600,  {'turn_bias':0.0,'speed':-550}, 2, "Quad reverse"))
     s.append((100,  {'speed':0}, 2, "Quad stop"))
-    s.append((750,  {'speed':500,'impact_start':345,'impact_end':15}, 2, "Quad obstacle 345/15"))
+    s.append((750,  {'speed':500,'impact_start':320,'impact_end':40}, 2, "Quad obstacle 320/40"))
     s.append((750,  {'impact_start':325,'impact_end':35}, 2, "Quad low 325/35"))
     s.append((0,   {'gait_id':1,'speed':350,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 3, "Wave forward start"))
     s.append((600,  {'speed':350}, 3, "Wave forward"))
@@ -625,13 +625,13 @@ def check_V19_turn_clearance():
     # from vertical where r=62.5mm only gives 0.9mm clearance. The governor
     # handles this dynamically by limiting Hz; the V2 governor check covers it.
     impact_configs = [
-        (340, 20, 'narrow'),      # 40-deg stance sweep (standard cruise)
+        (320, 40, 'default'),     # 80-deg stance sweep (standard walking)
         (345, 15, 'pivot'),       # 30-deg stance sweep (pivot turns)
     ]
     # Nav turn bias constants to validate (from final_full_gait_test.py)
     nav_biases = [
-        ('MAX_TURN', 0.20, [(340, 20), (345, 15)]),   # arc/carve turns
-        ('PIVOT_TURN', 0.28, [(345, 15)]),             # pivot turns only use pivot angles
+        ('MAX_TURN', 0.20, [(320, 40)]),               # arc/carve turns use walking stance
+        ('PIVOT_TURN', 0.28, [(345, 15)]),              # pivot turns use narrow stance
     ]
 
     worst_max_hz = float('inf')

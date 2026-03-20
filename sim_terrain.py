@@ -43,8 +43,8 @@ STALL_THRESHOLD = 750
 real_dt           = 0.02
 GAITS = {
     0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
-    1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
-    2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
+    1: {'duty': 0.60, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
+    2: {'duty': 0.55, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
@@ -192,8 +192,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
     smooth_offsets  = {s: g['offsets'][s] for s in ALL_SERVOS}
     smooth_speed    = speed * 1.0
     smooth_turn     = turn_bias * 1.0
-    imp_start       = 330.0
-    imp_end         = 30.0
+    imp_start       = 320.0
+    imp_end         = 40.0
 
     master_L = 0.0; master_R = 0.0
     actual_phases = {s: 0.0 for s in ALL_SERVOS}
@@ -254,7 +254,7 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
         base_sweep = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
         # v2 governor: NO pi/2 factor
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         # governor headroom (outer wheel)
         outer_hz = max(abs(hz_L_raw), abs(hz_R_raw))
@@ -627,7 +627,7 @@ def run_t14_pherr_governor():
     smooth_duty    = g['duty']
     smooth_offsets = {s: g['offsets'][s] for s in ALL_SERVOS}
     smooth_speed   = speed * 1.0
-    imp_start = 330.0; imp_end = 30.0
+    imp_start = 320.0; imp_end = 40.0
     master_L = 0.0; master_R = 0.0
     actual_phases = {s: 0.0 for s in ALL_SERVOS}
     is_stalled = {s: False for s in ALL_SERVOS}
@@ -661,7 +661,7 @@ def run_t14_pherr_governor():
 
         base_sweep    = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         # Inject synthetic phase error (replaces the real per-servo accumulation)
         injected_error = HIGH_ERROR_DEG if tick < PHASE_A_FRAMES else LOW_ERROR_DEG
@@ -812,10 +812,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.55->0.60, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.75 - 0.7)
-        thresh = 0.01 * 0.75
+        delta = abs(0.60 - 0.55)
+        thresh = 0.01 * 0.60
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -829,10 +829,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.55->0.60, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.75 - 0.7)
-        thresh = 0.01 * 0.75
+        delta = abs(0.60 - 0.55)
+        thresh = 0.01 * 0.60
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -960,15 +960,15 @@ def main():
     t11 = next((r for r in all_results if r['name'].startswith('T11')), None)
     if t11:
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.75 - 0.7)
-        thresh = 0.01 * 0.75
+        delta = abs(0.60 - 0.55)
+        thresh = 0.01 * 0.60
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         print(f"\nT11 Gait transition under load (Quad@400 -> Wave@350 at frame 500):")
         print(f"    Governor headroom: {t11['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t11['total_stalls']} | max_dur: {t11['max_stall_dur']} frames")
         print(f"    Max exit snap: {t11['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t11.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
-        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7->0.75, limit 150)")
+        print(f"    LERP convergence: {lerp_frames} frames (duty 0.55->0.60, limit 150)")
 
     # T12 timed fallback
     t12 = next((r for r in all_results if r['name'].startswith('T12')), None)

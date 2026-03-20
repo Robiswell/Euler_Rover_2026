@@ -48,9 +48,9 @@ LEG_SPLAY = {1: -35, 2: -35, 6: 0, 3: 0, 5: 35, 4: 35}
 GAITS = {
     0: {'name': 'Tripod',    'duty': 0.5,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave',      'duty': 0.75,
+    1: {'name': 'Wave',      'duty': 0.60,
         'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
-    2: {'name': 'Quadruped', 'duty': 0.7,
+    2: {'name': 'Quadruped', 'duty': 0.55,
         'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
 }
 
@@ -115,7 +115,7 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang):
 
 def compute_governor_limit(duty, air_sweep):
     """v2 governor: max safe cycle rate (Hz). No pi/2 factor."""
-    return (2800.0 / VELOCITY_SCALAR * (1.0 - duty)) / max(5.0, abs(air_sweep))
+    return (660.0 / VELOCITY_SCALAR * (1.0 - duty)) / max(5.0, abs(air_sweep))
 
 
 def compute_feedforward_v2(t_leg, duty, base_sweep, air_sweep, hz):

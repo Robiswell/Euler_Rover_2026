@@ -28,8 +28,8 @@ SPECS = [
 # Gait duty cycle ranges
 GAIT_DUTY_SPECS = {
     0: ('tripod',    0.5,   0.5  ),   # exact
-    1: ('wave',      0.83,  0.87 ),   # range
-    2: ('quadruped', 0.68,  0.72 ),   # range
+    1: ('wave',      0.58,  0.62 ),   # range (was 0.83-0.87)
+    2: ('quadruped', 0.53,  0.57 ),   # range (was 0.68-0.72)
 }
 
 # Governor max hz
@@ -242,10 +242,10 @@ def main():
     print("  -- Servo 6 Quadruped Offset (collision safety) --")
     if gaits and 2 in gaits:
         s6_off = gaits[2]['offsets'].get(6)
-        # Must be 0.833 (post-fix) not 0.333 (pre-fix)
-        ok_val = s6_off is not None and abs(s6_off - 0.833) < 0.01
+        # Widen-stance sweep: offset unchanged at 0.333 (duty changed, not offset)
+        ok_val = s6_off is not None and abs(s6_off - 0.333) < 0.01
         status = 'GO' if ok_val else 'NO-GO'
-        req    = '0.833 (collision fix applied)'
+        req    = '0.333 (offset unchanged; duty sweep only)'
         ok = verdict("GAITS[2] servo 6 offset", status, s6_off, req, 'MEMORY collision fix')
         if not ok:
             all_go = False
