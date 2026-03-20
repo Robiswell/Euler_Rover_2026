@@ -106,6 +106,10 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (chassis must not contact ground; r=125mm gives 78mm at rest)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
+GOVERNOR_FF_BUDGET      = 660.0    # STS raw units — max total speed budget (ff + KP correction) per leg
+                                   # Derived: FEEDFORWARD_CAP + ~13° allowable lag * KP_PHASE = 499 + 161
+                                   # Baseline at this value: 0 stalls, 18.7° mean phase error, 556 max load
+                                   # Produces: tripod max 0.54 Hz, quad 0.32 Hz, wave 0.27 Hz at 345/15 stance
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
@@ -1115,7 +1119,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             stance_sweep = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
             air_sweep    = get_air_sweep(stance_sweep)
 
-            max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
+            max_safe_hz = (GOVERNOR_FF_BUDGET / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
 
             # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
             # Roll-aware: during turns, body tilt drops inside chassis corner closer
@@ -2036,6 +2040,13 @@ if __name__ == "__main__":
                 return False
         return True
 
+    def is_rear_blind(frame):
+        """True if ALL rear sensors read -1 (blind zone -- sensor min-range artifact).
+        Distinguished from real obstacles to allow longer debounce before pivot escalation."""
+        if frame is None:
+            return False
+        return all(frame.get(k) == -1 for k in ("RCF", "RDL", "RDR"))
+
     class NavStateMachine:
         """8-state FSM for autonomous obstacle course navigation."""
 
@@ -2412,7 +2423,10 @@ if __name__ == "__main__":
                 self.hold_position_count += 1
                 brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
                 backward_elapsed = time.monotonic() - self.backward_entry_time
-                if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
+                # Blind zone needs more frames to confirm -- sensor min-range artifact
+                # prevents rapid BACKWARD->PIVOT cycling (144 events in telemetry 2026-03-19)
+                min_hold = 6 if is_rear_blind(frame) else 2
+                if self.hold_position_count >= min_hold and backward_elapsed >= BACKWARD_MIN_DWELL:
                     # Stuck long enough — try pivot
                     self._pick_pivot_direction(frame)
                     self._transition(NAV_PIVOT_TURN)
@@ -2642,7 +2656,7 @@ if __name__ == "__main__":
                 (TE cycling) still fires independently via load magnitude check
 
         Geometry (from design specs):
-          Leg radius = 75mm, arc = 210°. Chassis 510x280x75mm.
+          Leg radius = 125mm, arc = 190°. Chassis 510x280x80mm.
           Inverted window: 140/220 (±40° around 180°). Legs reach floor when inverted. ✓
 
         Physics caveat: even with DIRECTION_MAP bypass, lateral friction on wet sand
@@ -3122,10 +3136,10 @@ if __name__ == "__main__":
         elif "--test-tripod" in sys.argv:
             # === TEST: Tripod phase only ===
             # Ground clearance derivation (measured dimensions):
-            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 74.0 × cos(θ) mm
+            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 330/30 (±30° sweep): clearance = 17.1mm, governor allows ~0.1° lag only
-            #   Fix: 340/20 (±20° sweep), speed=450 → clearance ~22.5mm with lag margin ✓
+            #   At 345/15 (±15° sweep): clearance = 73.7mm -- generous headroom with r=125mm
+            #   Governor allows large phase lag margin at these angles ✓
             tripod_impact_start = 345  # narrowed from 340 — increases static clearance to 24.5mm, tilt budget to 9.2°
             tripod_impact_end   = 15   # symmetric ±15° about vertical
             tripod_duty = GAITS[0]['duty']  # 0.5
@@ -3159,7 +3173,7 @@ if __name__ == "__main__":
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
             #   Quad duty=0.7 → air phase is only 30% of cycle → higher ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=19.1mm.
+            #   345/15 sweep: half=15°, static clearance=73.7mm (r=125mm).
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = 345  # narrowed from 330 — increases static clearance to 24.5mm, tilt budget to 9.2°
             quad_impact_end   = 15   # symmetric ±15° about vertical
@@ -3205,7 +3219,7 @@ if __name__ == "__main__":
             # === TEST: Wave phase only ===
             # Clearance analysis:
             #   Wave duty=0.75 → air phase is only 25% of cycle → highest ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=17.1mm (with measured SHAFT_TO_CHASSIS_BOTTOM=47mm).
+            #   345/15 sweep: half=15°, static clearance=73.7mm (r=125mm, SHAFT_TO_CHASSIS_BOTTOM=47mm).
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             wave_impact_start = 345  # narrowed from 330 — increases static clearance to 24.5mm, tilt budget to 9.2°
             wave_impact_end   = 15   # symmetric ±15° about vertical

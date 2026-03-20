@@ -363,6 +363,12 @@ def is_rear_safe(frame):
             return False
     return True
 
+def is_rear_blind(frame):
+    """True if ALL rear sensors read -1 (blind zone -- sensor min-range artifact)."""
+    if frame is None:
+        return False
+    return all(frame.get(k) == -1 for k in ("RCF", "RDL", "RDR"))
+
 
 class NavStateMachine:
     """8-state FSM for autonomous obstacle course navigation."""
@@ -701,7 +707,8 @@ class NavStateMachine:
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
             backward_elapsed = time.monotonic() - self.backward_entry_time
-            if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
+            min_hold = 6 if is_rear_blind(frame) else 2
+            if self.hold_position_count >= min_hold and backward_elapsed >= BACKWARD_MIN_DWELL:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
                 self.cliff_backup_until = 0.0  # clear lockout so pivot can complete

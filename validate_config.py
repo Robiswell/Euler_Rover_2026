@@ -122,7 +122,7 @@ def extract_carve_bias(src):
 def extract_governor_hz(src):
     """Confirm governor formula is present and extract effective max_safe_hz.
     Returns a string describing what was found."""
-    has_gov = 'max_safe_hz' in src and '2800' in src and 'VELOCITY_SCALAR' in src
+    has_gov = 'max_safe_hz' in src and 'GOVERNOR_FF_BUDGET' in src and 'VELOCITY_SCALAR' in src
     return has_gov
 
 
@@ -214,7 +214,7 @@ def main():
     # Verify governor clamp: Heart must contain max_safe_hz clamp logic.
     # Brain speed inputs can exceed the governor limit (e.g. speed=1200 → 1.2 hz)
     # because the Heart governor clips hz_L/hz_R before advancing clocks.
-    # The relevant check is that the clamp formula is present and uses 2800 STS limit.
+    # The relevant check is that the clamp formula is present and uses GOVERNOR_FF_BUDGET (660 STS) limit.
     gov_clamp_ok = ('hz_L = max(-max_safe_hz' in src or 'min(max_safe_hz, hz_L)' in src or
                     'max(-max_safe_hz, min(max_safe_hz' in src)
     ok = verdict("Heart governor clamps hz to max_safe_hz", 'GO' if gov_clamp_ok else 'NO-GO',

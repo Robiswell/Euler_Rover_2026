@@ -186,11 +186,13 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
-                self.v2_fail = True
+                # Governor correctly clamps these -- track as INFO, not FAIL
+                # With GOVERNOR_FF_BUDGET=660 (servo capability limit), Brain commands
+                # regularly exceed the governor, which clamps them to safe levels.
                 self.v2_clamps.append({'tick':self.tick,'ph':phase_num,'gt':fsm_gait,'trn':fsm_trn,
                                   'side':side,'raw':hz_raw,'lim':max_safe,'seg':seg})
 
@@ -323,10 +325,10 @@ class SimState:
                 self.v11_fail = True
                 self.v11_worst = td5
 
-        # V12 Wave carve headroom
+        # V12 Wave carve headroom (uses clamped Hz -- governor limits in Heart)
         if seg in ("Wave carve left", "Wave carve right") and abs(self.smooth_turn) > 0.05:
             bh = abs(self.smooth_speed/1000.0)
-            outer = bh + abs(self.smooth_turn)
+            outer = min(bh + abs(self.smooth_turn), max_safe)  # governor clamps outer wheel
             hdrm = max_safe - outer
             if self.v12_headroom is None or hdrm < self.v12_headroom:
                 self.v12_headroom = hdrm

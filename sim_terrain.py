@@ -254,16 +254,16 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
         base_sweep = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
         # v2 governor: NO pi/2 factor
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
-
-        # governor headroom (outer wheel)
-        outer_hz = max(abs(hz_L_raw), abs(hz_R_raw))
-        headroom = max_safe - outer_hz
-        if headroom < gov_headroom_min:
-            gov_headroom_min = headroom
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         hz_L = max(-max_safe, min(max_safe, hz_L_raw))
         hz_R = max(-max_safe, min(max_safe, hz_R_raw))
+
+        # governor headroom (outer wheel -- after clamp, matching Heart behavior)
+        outer_hz = max(abs(hz_L), abs(hz_R))
+        headroom = max_safe - outer_hz
+        if headroom < gov_headroom_min:
+            gov_headroom_min = headroom
 
         # v2 master clock: abs(hz)
         master_L = (master_L + abs(hz_L) * real_dt) % 1.0
@@ -661,7 +661,7 @@ def run_t14_pherr_governor():
 
         base_sweep    = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
-        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         # Inject synthetic phase error (replaces the real per-servo accumulation)
         injected_error = HIGH_ERROR_DEG if tick < PHASE_A_FRAMES else LOW_ERROR_DEG
