@@ -93,7 +93,7 @@ RIGHT_SERVOS       = [1, 6, 5]
 ALL_SERVOS         = LEFT_SERVOS + RIGHT_SERVOS
 ROLL_FRONT_SERVOS        = {1, 2}   # Fix 76: counter-rotating front pair for self-right
 ROLL_REAR_SERVOS         = {4, 5}   # Fix 76: counter-rotating rear pair for self-right
-SERVO_SPEED_GOVERNOR_CAP = 499     # Absolute speed ceiling (matches FEEDFORWARD_CAP)
+SERVO_SPEED_GOVERNOR_CAP = 499     # Speed ceiling for roll/self-right mode (walking uses GOVERNOR_FF_BUDGET)
 
 # Body Geometry (measured from physical robot — verified from physical robot measurements)
 # These values are the foundation for all ground-clearance calculations.
@@ -106,19 +106,19 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — max total speed budget (ff + KP correction) per leg
-DEFAULT_IMPACT_START    = 320      # walking stance start angle (80 deg sweep)
-DEFAULT_IMPACT_END      = 40       # walking stance end angle
+GOVERNOR_FF_BUDGET      = 2800.0   # STS raw units — max total speed budget (ff + KP correction) per leg
+DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
+DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
 BODY_WIDTH          = 220.0   # mm — total side-to-side (22.0 cm)
 CHASSIS_HEIGHT      = 80.0    # mm — total chassis height side view (8.0 cm)
-SERVO_SPACING       = 215.0   # mm — shaft center-to-center, adjacent same side (21.5 cm)
+SERVO_SPACING       = 175.0   # mm — shaft center-to-center, adjacent same side (17.5 cm)
 CORNER_CHAMFER      = 40.0    # mm — front chamfer vertical side (4.0 cm)
 CHAMFER_HORIZONTAL  = 69.0    # mm — front chamfer horizontal side (6.9 cm)
 FRONT_SERVO_OFFSET  = 40.0    # mm — front chassis edge to front servo shaft center (4.0 cm)
-REAR_SERVO_OFFSET   = 41.0    # mm — rear chassis edge to rear servo shaft center (511 - 40 - 2×215)
+REAR_SERVO_OFFSET   = 121.0   # mm — rear chassis edge to rear servo shaft center (511 - 40 - 2×175)
 SHAFT_TO_TOP        = 33.0    # mm — shaft center to top face (CHASSIS_HEIGHT - SHAFT_TO_CHASSIS_BOTTOM)
 
 # Roll-aware clearance constants (for turn governor -- see hardware.md)
@@ -188,7 +188,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
-        'duty': 0.70,
+        'duty': 0.75,
         # Lift order: 5(RR)→3(LM)→1(RF)→4(LR)→6(RM)→2(LF)
         # Each consecutive pair in the air is on OPPOSITE sides AND different
         # columns, guaranteeing the support polygon always spans the full body.
@@ -200,8 +200,8 @@ GAITS = {
         # causing the chassis edge to hit the ground.
         #
         # New pattern interleaves columns: rear->middle->front per side.
-        # Spacing 0.167; with duty=0.70, same-column legs are >=0.5 apart
-        # (air=0.30 < spacing=0.5), so no same-column overlap is possible.
+        # Spacing 0.167; with duty=0.75, same-column legs are >=0.5 apart
+        # (air=0.25), so no same-column overlap is possible.
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
@@ -1253,7 +1253,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-SERVO_SPEED_GOVERNOR_CAP, min(SERVO_SPEED_GOVERNOR_CAP, int(raw_speed)))
+                    final_speed = max(-1023, min(1023, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
@@ -1417,7 +1417,7 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 320/40 = 80° sweep
+    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 345/15 = 30° sweep
     shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_heartbeat    = mp.Value('i', 0)
@@ -1594,8 +1594,8 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # under governor limit at 80° sweep with duty 0.70
-    TRIPOD_CRUISE_SPEED = 420   # just under FF governor limit (max 424 at 80° sweep)
+    CRUISE_SPEED = 350          # under governor limit at 30° sweep with duty 0.75
+    TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 30° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -1604,7 +1604,7 @@ if __name__ == "__main__":
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
-    PIVOT_IMPACT_END   = 15           # ° — (default 330/30 = 60° too wide during zero-speed turns)
+    PIVOT_IMPACT_END   = 15           # ° — same as default 345/15, explicit for pivot clarity
     HEADING_CORRECTION_BIAS = 0.1
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
@@ -3201,10 +3201,10 @@ if __name__ == "__main__":
             # Ground clearance derivation (measured dimensions):
             #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 320/40 (80° sweep): clearance at 40° = 125*cos(40°)-47 = 48.8mm
-            #   Air sweep = 280°, well within servo 270°/s limit at target Hz
-            tripod_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
-            tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
+            #   At 345/15 (30° sweep): clearance at 15° = 125*cos(15°)-47 = 73.7mm
+            #   Air sweep = 330°, governor limits Hz to keep servo within budget
+            tripod_impact_start = DEFAULT_IMPACT_START  # 30° sweep
+            tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
             tripod_duty = GAITS[0]['duty']  # 0.5
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
             tripod_speed = min(350, max_speed)  # reduced from 450 — less phase lag → more clearance
@@ -3236,10 +3236,10 @@ if __name__ == "__main__":
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
             #   Quad duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
+            #   345/15 (30° sweep): clearance at 15° = 73.7mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
-            quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
+            quad_impact_start = DEFAULT_IMPACT_START  # 30° sweep
+            quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
             quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
@@ -3269,11 +3269,11 @@ if __name__ == "__main__":
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
             set_gait_state(speed=-quad_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            # Walking tall: DEFAULT stance (80° sweep) — standard clearance with r=125mm
+            # Walking tall: DEFAULT stance (30° sweep) — standard clearance with r=125mm
             wt_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, wt_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
-            # Stealth crawl: DEFAULT stance (80° sweep) — same geometry as walking_tall
+            # Stealth crawl: DEFAULT stance (30° sweep) — same geometry as walking_tall
             sc_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, sc_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="stealth_crawl");  stall_tsleep(15)
@@ -3281,12 +3281,12 @@ if __name__ == "__main__":
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
             # Clearance analysis:
-            #   Wave duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
+            #   Wave duty=0.75 → air phase is 25% of cycle → higher ff demand.
+            #   345/15 (30° sweep): clearance at 15° = 73.7mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            wave_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
-            wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            wave_duty = GAITS[1]['duty']  # 0.70
+            wave_impact_start = DEFAULT_IMPACT_START  # 30° sweep
+            wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
+            wave_duty = GAITS[1]['duty']  # 0.75
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
             max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
