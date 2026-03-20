@@ -32,8 +32,8 @@ SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
-MAX_TURN_BIAS = 0.20              # sync: reduced from 0.25 for r=62.5mm roll-aware clearance
+OBSTACLE_BACKUP_DURATION = 3.0    # seconds of forced backward when front blocked + both sides NEAR
+MAX_TURN_BIAS = 0.25              # sync: restored for r=125mm roll-aware clearance
 PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 PIVOT_IMPACT_START = 345          # narrowed 30 deg stance sweep for safe pivot clearance
 PIVOT_IMPACT_END   = 15           # (default 320/40 = 80 deg too wide during zero-speed turns)

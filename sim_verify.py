@@ -186,7 +186,7 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        max_safe = (700.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
@@ -610,7 +610,7 @@ def check_V19_turn_clearance():
 
     Tests:
       (a) Governor viability: compute_max_clearance_hz(turn_bias) must return
-          a positive Hz for MAX_TURN_BIAS=0.20 and PIVOT_TURN_BIAS=0.28 at
+          a positive Hz for MAX_TURN_BIAS=0.25 and PIVOT_TURN_BIAS=0.28 at
           their respective impact angles. If 0, the robot cannot move while turning.
       (b) At-rest positive clearance: with no phase lag (hz=0) and no roll
           (turn_bias=0), clearance must be > 0mm for all impact configs.

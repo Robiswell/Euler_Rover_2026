@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 660.0    # STS raw units — max total speed budget (ff + KP correction) per leg
+GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — max total speed budget (ff + KP correction) per leg
 DEFAULT_IMPACT_START    = 320      # walking stance start angle (80 deg sweep)
 DEFAULT_IMPACT_END      = 40       # walking stance end angle
 
@@ -1253,7 +1253,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-1023, min(1023, int(raw_speed)))
+                    final_speed = max(-SERVO_SPEED_GOVERNOR_CAP, min(SERVO_SPEED_GOVERNOR_CAP, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
@@ -1600,8 +1600,8 @@ if __name__ == "__main__":
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
-    MAX_TURN_BIAS = 0.20              # reduced from 0.25 -- geometry-safe for r=62.5mm with roll
+    OBSTACLE_BACKUP_DURATION = 3.0    # seconds of forced backward when front blocked + both sides NEAR
+    MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — (default 330/30 = 60° too wide during zero-speed turns)
