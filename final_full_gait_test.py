@@ -100,7 +100,7 @@ SERVO_SPEED_GOVERNOR_CAP = 499     # Speed ceiling for roll/self-right mode (wal
 #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  — chassis height above ground at leg angle θ
 #   clearance = h(θ) − SHAFT_TO_CHASSIS_BOTTOM  — must stay > MIN_GROUND_CLEARANCE
 LEG_EFFECTIVE_RADIUS    = 125.0    # mm — C-leg geometry: servo shaft at arc endpoint, not center (full diameter = radius, corrected 2026-03-19)
-LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip measurement across leg arc from servo axis (12.5 cm measured); LEG_OUTER_REACH ≈ LEG_DIAMETER/2
+LEG_DIAMETER            = 125.0    # mm — outer tip-to-tip across leg arc (12.5 cm measured); for C-legs, effective radius = diameter (shaft at endpoint)
 LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg (190° measured, constrains max stance sweep)
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
@@ -2534,8 +2534,8 @@ if __name__ == "__main__":
 
             # T1: Steep climb — symmetric narrow sweep (345°/15°)
             # 30° total sweep, centered on vertical.
-            # Worst angle from vertical = 15° → clearance ~24.5mm (safe).
-            # Old 330°/15° had worst angle 30° → clearance 17.1mm (< 20mm effective with margin).
+            # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
+            # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
             if pitch_deg > 15:
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
