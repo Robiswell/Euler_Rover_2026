@@ -43,8 +43,8 @@ STALL_THRESHOLD = 750
 real_dt           = 0.02
 GAITS = {
     0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
-    1: {'duty': 0.60, 'offsets': {5:0.0, 3:0.167, 1:0.333, 4:0.5, 6:0.667, 2:0.833}},
-    2: {'duty': 0.67, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
+    1: {'duty': 0.70, 'offsets': {5:0.0, 3:0.167, 1:0.333, 4:0.5, 6:0.667, 2:0.833}},
+    2: {'duty': 0.70, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
@@ -821,10 +821,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.67->0.60, lr=0.08)
+        # LERP convergence: analytical (duty 0.70->0.70, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.60 - 0.67)
-        thresh = 0.01 * 0.60
+        delta = abs(0.70 - 0.70) if abs(0.70 - 0.70) > 1e-9 else 0.01
+        thresh = 0.01 * 0.70
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -838,10 +838,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.67->0.60, lr=0.08)
+        # LERP convergence: analytical (duty 0.70->0.70, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.60 - 0.67)
-        thresh = 0.01 * 0.60
+        delta = abs(0.70 - 0.70) if abs(0.70 - 0.70) > 1e-9 else 0.01
+        thresh = 0.01 * 0.70
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -977,7 +977,7 @@ def main():
         print(f"    Stalls: {t11['total_stalls']} | max_dur: {t11['max_stall_dur']} frames")
         print(f"    Max exit snap: {t11['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t11.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
-        print(f"    LERP convergence: {lerp_frames} frames (duty 0.67->0.60, limit 150)")
+        print(f"    LERP convergence: {lerp_frames} frames (duty 0.70->0.70, limit 150)")
 
     # T12 timed fallback
     t12 = next((r for r in all_results if r['name'].startswith('T12')), None)

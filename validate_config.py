@@ -28,8 +28,8 @@ SPECS = [
 # Gait duty cycle ranges
 GAIT_DUTY_SPECS = {
     0: ('tripod',    0.5,   0.5  ),   # exact
-    1: ('wave',      0.58,  0.62 ),   # range (was 0.83-0.87)
-    2: ('quadruped', 0.65,  0.69 ),   # range (was 0.68-0.72)
+    1: ('wave',      0.68,  0.72 ),   # range — restored for 4-leg stability
+    2: ('quadruped', 0.68,  0.72 ),   # range — restored for 4-leg stability
 }
 
 # Governor max hz
