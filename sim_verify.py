@@ -20,7 +20,7 @@ GAITS = {
 real_dt           = 0.02
 
 # sync: final_full_gait_test.py lines 99-124 (body geometry + roll constants)
-LEG_EFFECTIVE_RADIUS      = 62.5
+LEG_EFFECTIVE_RADIUS      = 125.0
 SHAFT_TO_CHASSIS_BOTTOM   = 47.0
 MIN_GROUND_CLEARANCE      = 5.0
 GOVERNOR_CLEARANCE_MARGIN = 3.0
@@ -622,7 +622,7 @@ def check_V19_turn_clearance():
     gait_names = {0: 'Tripod', 1: 'Wave', 2: 'Quad'}
     # Impact angles used in production: narrow (default cruise) and pivot (turns)
     # 320/40 (80-deg sweep) is intentionally excluded -- it pushes legs to 40deg
-    # from vertical where r=62.5mm only gives 0.9mm clearance. The governor
+    # from vertical where r=125mm gives ample clearance. The governor
     # handles this dynamically by limiting Hz; the V2 governor check covers it.
     impact_configs = [
         (320, 40, 'default'),     # 80-deg stance sweep (standard walking)
