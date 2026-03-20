@@ -106,6 +106,9 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
+GOVERNOR_FF_BUDGET      = 660.0    # STS raw units — max total speed budget (ff + KP correction) per leg
+DEFAULT_IMPACT_START    = 320      # walking stance start angle (80 deg sweep)
+DEFAULT_IMPACT_END      = 40       # walking stance end angle
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
@@ -185,7 +188,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
-        'duty': 0.75,
+        'duty': 0.60,
         # Lift order: 5(RR)→3(LM)→1(RF)→4(LR)→6(RM)→2(LF)
         # Each consecutive pair in the air is on OPPOSITE sides AND different
         # columns, guaranteeing the support polygon always spans the full body.
@@ -202,7 +205,7 @@ GAITS = {
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.7,
+        'duty': 0.55,
         'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
     }
 }
@@ -1115,7 +1118,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             stance_sweep = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
             air_sweep    = get_air_sweep(stance_sweep)
 
-            max_safe_hz = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
+            max_safe_hz = (GOVERNOR_FF_BUDGET / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
 
             # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
             # Roll-aware: during turns, body tilt drops inside chassis corner closer
