@@ -115,7 +115,7 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang):
 
 def compute_governor_limit(duty, air_sweep):
     """v2 governor: max safe cycle rate (Hz). No pi/2 factor."""
-    return (660.0 / VELOCITY_SCALAR * (1.0 - duty)) / max(5.0, abs(air_sweep))
+    return (700.0 / VELOCITY_SCALAR * (1.0 - duty)) / max(5.0, abs(air_sweep))
 
 
 def compute_feedforward_v2(t_leg, duty, base_sweep, air_sweep, hz):

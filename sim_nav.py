@@ -32,9 +32,9 @@ SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
-MAX_TURN_BIAS = 0.25              # restored -- safe with r=125mm clearance headroom
-PIVOT_TURN_BIAS = 0.35            # restored -- safe with r=125mm roll-aware clearance governor
+OBSTACLE_BACKUP_DURATION = 3.0    # seconds of forced backward when front blocked + both sides NEAR
+MAX_TURN_BIAS = 0.25              # sync: restored for r=125mm roll-aware clearance
+PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 PIVOT_IMPACT_START = 345          # narrowed 30 deg stance sweep for safe pivot clearance
 PIVOT_IMPACT_END   = 15           # (default 320/40 = 80 deg too wide during zero-speed turns)
 HEADING_CORRECTION_BIAS = 0.1
@@ -366,12 +366,6 @@ def is_rear_safe(frame):
             return False
     return True
 
-def is_rear_blind(frame):
-    """True if ALL rear sensors read -1 (blind zone -- sensor min-range artifact)."""
-    if frame is None:
-        return False
-    return all(frame.get(k) == -1 for k in ("RCF", "RDL", "RDR"))
-
 
 class NavStateMachine:
     """8-state FSM for autonomous obstacle course navigation."""
@@ -585,11 +579,6 @@ class NavStateMachine:
             self.stall_count_30s = 0
             self.stall_speed_mult = 1.0
             self._last_stall_clear_time = now
-        # Gradual stall_speed_mult recovery: 5s grace after last stall, then +0.01/tick (~0.05/s at 5Hz)
-        # Recovers 0.4 → 1.0 in ~12s. Any new stall immediately knocks it back down via *= 0.75.
-        elif self.stall_speed_mult < 1.0 and self.stall_start_time == 0.0:
-            if (now - self.last_stall_time) > 5.0:
-                self.stall_speed_mult = min(1.0, self.stall_speed_mult + 0.01)
 
         # P9: Dead end
         if (front_class >= DIST_DANGER and left_class >= DIST_DANGER
@@ -754,8 +743,7 @@ class NavStateMachine:
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
             backward_elapsed = time.monotonic() - self.backward_entry_time
-            min_hold = 6 if is_rear_blind(frame) else 2
-            if self.hold_position_count >= min_hold and backward_elapsed >= BACKWARD_MIN_DWELL:
+            if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
                 self.cliff_backup_until = 0.0  # clear lockout so pivot can complete

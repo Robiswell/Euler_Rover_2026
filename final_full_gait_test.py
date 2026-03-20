@@ -106,9 +106,9 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 750.0    # STS raw units — max total speed budget (ff + KP correction) per leg
-DEFAULT_IMPACT_START    = 330      # walking stance start angle (60 deg sweep)
-DEFAULT_IMPACT_END      = 30       # walking stance end angle
+GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — max total speed budget (ff + KP correction) per leg
+DEFAULT_IMPACT_START    = 320      # walking stance start angle (80 deg sweep)
+DEFAULT_IMPACT_END      = 40       # walking stance end angle
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
@@ -1253,7 +1253,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-1023, min(1023, int(raw_speed)))
+                    final_speed = max(-SERVO_SPEED_GOVERNOR_CAP, min(SERVO_SPEED_GOVERNOR_CAP, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
@@ -1417,7 +1417,7 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 330/30 = 60° sweep
+    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 320/40 = 80° sweep
     shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_heartbeat    = mp.Value('i', 0)
@@ -1594,15 +1594,15 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # under governor limit at 60° sweep with duty 0.70
-    TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 60° sweep
+    CRUISE_SPEED = 350          # under governor limit at 80° sweep with duty 0.70
+    TRIPOD_CRUISE_SPEED = 420   # just under FF governor limit (max 424 at 80° sweep)
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
-    MAX_TURN_BIAS = 0.25              # restored -- safe with r=125mm clearance headroom (78mm)
-    PIVOT_TURN_BIAS = 0.35            # restored -- safe with r=125mm roll-aware clearance governor
+    OBSTACLE_BACKUP_DURATION = 3.0    # seconds of forced backward when front blocked + both sides NEAR
+    MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
+    PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — (default 330/30 = 60° too wide during zero-speed turns)
     HEADING_CORRECTION_BIAS = 0.1
@@ -2074,13 +2074,6 @@ if __name__ == "__main__":
                 return False
         return True
 
-    def is_rear_blind(frame):
-        """True if ALL rear sensors read -1 (blind zone -- sensor min-range artifact).
-        Distinguished from real obstacles to allow longer debounce before pivot escalation."""
-        if frame is None:
-            return False
-        return all(frame.get(k) == -1 for k in ("RCF", "RDL", "RDR"))
-
     class NavStateMachine:
         """8-state FSM for autonomous obstacle course navigation."""
 
@@ -2317,11 +2310,6 @@ if __name__ == "__main__":
                 self.stall_count_30s = 0
                 self.stall_speed_mult = 1.0
                 self._last_stall_clear_time = now
-            # Gradual stall_speed_mult recovery: 5s grace after last stall, then +0.01/tick (~0.05/s at 5Hz)
-            # Recovers 0.4 → 1.0 in ~12s. Any new stall immediately knocks it back down via *= 0.75.
-            elif self.stall_speed_mult < 1.0 and self.stall_start_time == 0.0:
-                if (now - self.last_stall_time) > 5.0:
-                    self.stall_speed_mult = min(1.0, self.stall_speed_mult + 0.01)
 
             # P9: Dead end (front DANGER + both sides DANGER + came from BACKWARD)
             if (front_class >= DIST_DANGER and left_class >= DIST_DANGER
@@ -2500,10 +2488,7 @@ if __name__ == "__main__":
                 self.hold_position_count += 1
                 brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
                 backward_elapsed = time.monotonic() - self.backward_entry_time
-                # Blind zone needs more frames to confirm -- sensor min-range artifact
-                # prevents rapid BACKWARD->PIVOT cycling (144 events in telemetry 2026-03-19)
-                min_hold = 6 if is_rear_blind(frame) else 2
-                if self.hold_position_count >= min_hold and backward_elapsed >= BACKWARD_MIN_DWELL:
+                if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
                     # Stuck long enough — try pivot
                     self._pick_pivot_direction(frame)
                     self._transition(NAV_PIVOT_TURN)
@@ -3139,7 +3124,7 @@ if __name__ == "__main__":
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
                                                step_name="nav_pre_wiggle")
                                 state_recovery_wiggle()
-                                nav.stall_speed_mult = max(0.4, nav.stall_speed_mult * 0.75)
+                                nav.stall_speed_mult *= 0.75
                                 if nav.stall_count_30s >= 3:
                                     # Switch to wave gait, halve speed
                                     nav.terrain_gait = 1
@@ -3216,9 +3201,9 @@ if __name__ == "__main__":
             # Ground clearance derivation (measured dimensions):
             #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 330/30 (60° sweep): clearance at 30° = 125*cos(30°)-47 = 61.2mm
-            #   Air sweep = 300°, well within servo limit at target Hz
-            tripod_impact_start = DEFAULT_IMPACT_START  # 60° sweep
+            #   At 320/40 (80° sweep): clearance at 40° = 125*cos(40°)-47 = 48.8mm
+            #   Air sweep = 280°, well within servo 270°/s limit at target Hz
+            tripod_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             tripod_duty = GAITS[0]['duty']  # 0.5
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
@@ -3251,9 +3236,9 @@ if __name__ == "__main__":
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
             #   Quad duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   330/30 (60° sweep): clearance at 30° = 61.2mm.
+            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            quad_impact_start = DEFAULT_IMPACT_START  # 60° sweep
+            quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
@@ -3284,11 +3269,11 @@ if __name__ == "__main__":
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
             set_gait_state(speed=-quad_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            # Walking tall: DEFAULT stance (60° sweep) — standard clearance with r=125mm
+            # Walking tall: DEFAULT stance (80° sweep) — standard clearance with r=125mm
             wt_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, wt_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
-            # Stealth crawl: DEFAULT stance (60° sweep) — same geometry as walking_tall
+            # Stealth crawl: DEFAULT stance (80° sweep) — same geometry as walking_tall
             sc_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, sc_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="stealth_crawl");  stall_tsleep(15)
@@ -3297,9 +3282,9 @@ if __name__ == "__main__":
             # === TEST: Wave phase only ===
             # Clearance analysis:
             #   Wave duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   330/30 (60° sweep): clearance at 30° = 61.2mm.
+            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            wave_impact_start = DEFAULT_IMPACT_START  # 60° sweep
+            wave_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             wave_duty = GAITS[1]['duty']  # 0.70
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
