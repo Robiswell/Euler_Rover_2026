@@ -26,8 +26,8 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 # =========================================================================
 
 # --- Nav tunable constants ---
-CRUISE_SPEED = 400
-TRIPOD_CRUISE_SPEED = 450
+CRUISE_SPEED = 380
+TRIPOD_CRUISE_SPEED = 420
 SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -397,8 +397,8 @@ class NavStateMachine:
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
         self.terrain_gait = 2
-        self.terrain_impact_start = 340     # Fix 75: matches production default (belly clearance)
-        self.terrain_impact_end = 20
+        self.terrain_impact_start = 320     # Fix 115: matches production DEFAULT_IMPACT_START
+        self.terrain_impact_end = 40       # Fix 115: matches production DEFAULT_IMPACT_END
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0

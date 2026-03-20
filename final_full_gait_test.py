@@ -205,7 +205,7 @@ GAITS = {
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.55,
+        'duty': 0.67,
         'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
     }
 }
@@ -2685,7 +2685,7 @@ if __name__ == "__main__":
         saved_gait_for_check = shared_gait_id.value
         #shared_gait_id.value = 1   # WAVE — duty 0.85, 5 legs in stance
         # V0.5.01
-        shared_gait_id.value = 1   # WAVE — duty 0.75, max legs in stance for load detection
+        shared_gait_id.value = 1   # WAVE — duty 0.60, max legs in stance for load detection
         shared_speed.value = 0
         tsleep(1.5)                 # Wait for LERP convergence to wave offsets (tsleep detects Heart crash)
 
@@ -2794,10 +2794,10 @@ if __name__ == "__main__":
                 print("=== COMPETITION MODE (autonomous nav) ===")
             # Confirm clearance governor integration
             default_duty = GAITS[2]['duty']  # quad is default gait
-            default_clr_hz = compute_max_clearance_hz(330, 30, default_duty,
+            default_clr_hz = compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, default_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
-            print(f"    default config: 330°/30° quad(duty={default_duty}) → "
+            print(f"    default config: {DEFAULT_IMPACT_START}°/{DEFAULT_IMPACT_END}° quad(duty={default_duty}) → "
                   f"max_speed={int(default_clr_hz * 1000)}")
             print(f"    body: radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm, "
@@ -3190,12 +3190,12 @@ if __name__ == "__main__":
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
-            #   Quad duty=0.55 → air phase is 45% of cycle → lower ff demand than before.
+            #   Quad duty=0.67 → air phase is 33% of cycle → lower ff demand than before.
             #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            quad_duty = GAITS[2]['duty']  # 0.55
+            quad_duty = GAITS[2]['duty']  # 0.67
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
