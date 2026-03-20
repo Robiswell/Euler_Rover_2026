@@ -106,9 +106,9 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 660.0    # STS raw units — max total speed budget (ff + KP correction) per leg
-DEFAULT_IMPACT_START    = 320      # walking stance start angle (80 deg sweep)
-DEFAULT_IMPACT_END      = 40       # walking stance end angle
+GOVERNOR_FF_BUDGET      = 750.0    # STS raw units — max total speed budget (ff + KP correction) per leg
+DEFAULT_IMPACT_START    = 330      # walking stance start angle (60 deg sweep)
+DEFAULT_IMPACT_END      = 30       # walking stance end angle
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
@@ -1417,7 +1417,7 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 320/40 = 80° sweep
+    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 330/30 = 60° sweep
     shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_heartbeat    = mp.Value('i', 0)
@@ -1594,8 +1594,8 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # under governor limit at 80° sweep with duty 0.70
-    TRIPOD_CRUISE_SPEED = 420   # just under FF governor limit (max 424 at 80° sweep)
+    CRUISE_SPEED = 350          # under governor limit at 60° sweep with duty 0.70
+    TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 60° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -3216,9 +3216,9 @@ if __name__ == "__main__":
             # Ground clearance derivation (measured dimensions):
             #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 320/40 (80° sweep): clearance at 40° = 125*cos(40°)-47 = 48.8mm
-            #   Air sweep = 280°, well within servo 270°/s limit at target Hz
-            tripod_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
+            #   At 330/30 (60° sweep): clearance at 30° = 125*cos(30°)-47 = 61.2mm
+            #   Air sweep = 300°, well within servo limit at target Hz
+            tripod_impact_start = DEFAULT_IMPACT_START  # 60° sweep
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             tripod_duty = GAITS[0]['duty']  # 0.5
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
@@ -3251,9 +3251,9 @@ if __name__ == "__main__":
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
             #   Quad duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
+            #   330/30 (60° sweep): clearance at 30° = 61.2mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
+            quad_impact_start = DEFAULT_IMPACT_START  # 60° sweep
             quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
@@ -3284,11 +3284,11 @@ if __name__ == "__main__":
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
             set_gait_state(speed=-quad_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            # Walking tall: DEFAULT stance (80° sweep) — standard clearance with r=125mm
+            # Walking tall: DEFAULT stance (60° sweep) — standard clearance with r=125mm
             wt_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, wt_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
-            # Stealth crawl: DEFAULT stance (80° sweep) — same geometry as walking_tall
+            # Stealth crawl: DEFAULT stance (60° sweep) — same geometry as walking_tall
             sc_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
             set_gait_state(speed=min(300, sc_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="stealth_crawl");  stall_tsleep(15)
@@ -3297,9 +3297,9 @@ if __name__ == "__main__":
             # === TEST: Wave phase only ===
             # Clearance analysis:
             #   Wave duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
+            #   330/30 (60° sweep): clearance at 30° = 61.2mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            wave_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
+            wave_impact_start = DEFAULT_IMPACT_START  # 60° sweep
             wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             wave_duty = GAITS[1]['duty']  # 0.70
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)

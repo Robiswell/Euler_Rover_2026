@@ -95,7 +95,7 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False)
 
 class Sh:
     speed=0; x_flip=1; z_flip=1; turn_bias=0.0
-    gait_id=0; impact_start=320; impact_end=40; is_running=True
+    gait_id=0; impact_start=330; impact_end=30; is_running=True
 
 
 class SimState:
@@ -186,7 +186,7 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        max_safe = (660.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        max_safe = (750.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
@@ -319,7 +319,7 @@ class SimState:
             self.v10_xflips.append(self.sh.x_flip)
 
         # V11 impact slew safety (during slew segments only)
-        if seg in ("Quad obstacle 320/40", "Quad low 325/35", "Wave slope 315/15"):
+        if seg in ("Quad obstacle 330/30", "Quad low 325/35", "Wave slope 315/15"):
             td5 = (self.smooth_imp_start + LEG_SPLAY[5]) % 360
             safe = (td5 >= 340) or (td5 <= 30)
             if not safe:
@@ -439,14 +439,14 @@ class SimState:
 
 def make_schedule():
     s = []
-    s.append((0,   {'gait_id':0,'impact_start':320,'impact_end':40,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
+    s.append((0,   {'gait_id':0,'impact_start':330,'impact_end':30,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
     s.append((1000, {'speed':420}, 1, "Ph1 forward"))
     s.append((800,  {'turn_bias':-0.4}, 1, "Ph1 carve left"))
     s.append((800,  {'turn_bias': 0.4}, 1, "Ph1 carve right"))
     s.append((800,  {'speed':0,'turn_bias':-1.0}, 1, "Ph1 pivot left"))
     s.append((800,  {'turn_bias': 1.0}, 1, "Ph1 pivot right"))
     s.append((1000, {'turn_bias':0.0,'speed':-420}, 1, "Ph1 reverse"))
-    s.append((0,   {'gait_id':2,'speed':380,'turn_bias':0.0,'impact_start':320,'impact_end':40}, 2, "Quad forward start"))
+    s.append((0,   {'gait_id':2,'speed':380,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 2, "Quad forward start"))
     s.append((600,  {'speed':380}, 2, "Quad forward"))
     s.append((500,  {'turn_bias':-0.3}, 2, "Quad carve left"))
     s.append((500,  {'turn_bias': 0.3}, 2, "Quad carve right"))
@@ -454,9 +454,9 @@ def make_schedule():
     s.append((500,  {'turn_bias': 0.8}, 2, "Quad pivot right"))
     s.append((600,  {'turn_bias':0.0,'speed':-380}, 2, "Quad reverse"))
     s.append((100,  {'speed':0}, 2, "Quad stop"))
-    s.append((750,  {'speed':380,'impact_start':320,'impact_end':40}, 2, "Quad obstacle 320/40"))
+    s.append((750,  {'speed':380,'impact_start':330,'impact_end':30}, 2, "Quad obstacle 330/30"))
     s.append((750,  {'impact_start':325,'impact_end':35}, 2, "Quad low 325/35"))
-    s.append((0,   {'gait_id':1,'speed':350,'turn_bias':0.0,'impact_start':320,'impact_end':40}, 3, "Wave forward start"))
+    s.append((0,   {'gait_id':1,'speed':350,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 3, "Wave forward start"))
     s.append((600,  {'speed':350}, 3, "Wave forward"))
     s.append((500,  {'turn_bias':-0.12}, 3, "Wave carve left"))
     s.append((500,  {'turn_bias': 0.12}, 3, "Wave carve right"))
@@ -624,16 +624,15 @@ def check_V19_turn_clearance():
     failures = []
     gait_names = {0: 'Tripod', 1: 'Wave', 2: 'Quad'}
     # Impact angles used in production: narrow (default cruise) and pivot (turns)
-    # 320/40 (80-deg sweep) is intentionally excluded -- it pushes legs to 40deg
-    # from vertical where r=125mm gives ample clearance. The governor
-    # handles this dynamically by limiting Hz; the V2 governor check covers it.
+    # 330/30 (60-deg sweep) is the default walking stance.
+    # Max 30deg from vertical where r=125mm gives 61mm clearance.
     impact_configs = [
-        (320, 40, 'default'),     # 80-deg stance sweep (standard walking)
+        (330, 30, 'default'),     # 60-deg stance sweep (standard walking)
         (345, 15, 'pivot'),       # 30-deg stance sweep (pivot turns)
     ]
     # Nav turn bias constants to validate (from final_full_gait_test.py)
     nav_biases = [
-        ('MAX_TURN', 0.20, [(320, 40)]),               # arc/carve turns use walking stance
+        ('MAX_TURN', 0.20, [(330, 30)]),               # arc/carve turns use walking stance
         ('PIVOT_TURN', 0.28, [(345, 15)]),              # pivot turns use narrow stance
     ]
 
