@@ -195,13 +195,13 @@ GAITS = {
         #
         # Previous offsets ({5:0,4:0.166,...}) had same-COLUMN overlaps:
         # legs 5(RR)+4(LR) both rear, 6(RM)+3(LM) both middle, 1(RF)+2(LF)
-        # both front — these pairs are simultaneously in air (duty=0.75,
+        # both front -- these pairs are simultaneously in air (old duty=0.75,
         # air=0.25 > spacing=0.166), leaving entire rows unsupported and
         # causing the chassis edge to hit the ground.
         #
-        # New pattern interleaves columns: rear→middle→front per side.
-        # Spacing 0.167; with duty=0.75, same-column legs are ≥0.5 apart
-        # (air=0.25), so no same-column overlap is possible.
+        # New pattern interleaves columns: rear->middle->front per side.
+        # Spacing 0.167; with duty=0.60, same-column legs are >=0.5 apart
+        # (air=0.40 < spacing=0.5), so no same-column overlap is possible.
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
