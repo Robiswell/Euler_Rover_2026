@@ -2674,7 +2674,7 @@ if __name__ == "__main__":
                 (TE cycling) still fires independently via load magnitude check
 
         Geometry (from design specs):
-          Leg radius = 75mm, arc = 210°. Chassis 510x280x75mm.
+          Leg radius = 125mm, arc = 190°. Chassis 510x280x80mm.
           Inverted window: 140/220 (±40° around 180°). Legs reach floor when inverted. ✓
 
         Physics caveat: even with DIRECTION_MAP bypass, lateral friction on wet sand
@@ -3154,10 +3154,10 @@ if __name__ == "__main__":
         elif "--test-tripod" in sys.argv:
             # === TEST: Tripod phase only ===
             # Ground clearance derivation (measured dimensions):
-            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 74.0 × cos(θ) mm
+            #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 330/30 (±30° sweep): clearance = 17.1mm, governor allows ~0.1° lag only
-            #   Fix: 340/20 (±20° sweep), speed=450 → clearance ~22.5mm with lag margin ✓
+            #   At 320/40 (80° sweep): clearance at 40° = 125*cos(40°)-47 = 48.8mm
+            #   Air sweep = 280°, well within servo 270°/s limit at target Hz
             tripod_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
             tripod_duty = GAITS[0]['duty']  # 0.5
@@ -3190,12 +3190,12 @@ if __name__ == "__main__":
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
-            #   Quad duty=0.7 → air phase is only 30% of cycle → higher ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=19.1mm.
+            #   Quad duty=0.55 → air phase is 45% of cycle → lower ff demand than before.
+            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            quad_duty = GAITS[2]['duty']  # 0.7
+            quad_duty = GAITS[2]['duty']  # 0.55
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
@@ -3236,12 +3236,12 @@ if __name__ == "__main__":
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
             # Clearance analysis:
-            #   Wave duty=0.75 → air phase is only 25% of cycle → highest ff demand per Hz.
-            #   330/30 sweep: half=30°, static clearance=17.1mm (with measured SHAFT_TO_CHASSIS_BOTTOM=47mm).
+            #   Wave duty=0.60 → air phase is 40% of cycle → much lower ff demand than before.
+            #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             wave_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            wave_duty = GAITS[1]['duty']  # 0.75
+            wave_duty = GAITS[1]['duty']  # 0.60
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
             max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
