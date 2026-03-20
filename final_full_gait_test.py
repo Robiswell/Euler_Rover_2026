@@ -188,7 +188,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
-        'duty': 0.60,
+        'duty': 0.70,
         # Lift order: 5(RR)→3(LM)→1(RF)→4(LR)→6(RM)→2(LF)
         # Each consecutive pair in the air is on OPPOSITE sides AND different
         # columns, guaranteeing the support polygon always spans the full body.
@@ -200,12 +200,12 @@ GAITS = {
         # causing the chassis edge to hit the ground.
         #
         # New pattern interleaves columns: rear->middle->front per side.
-        # Spacing 0.167; with duty=0.60, same-column legs are >=0.5 apart
-        # (air=0.40 < spacing=0.5), so no same-column overlap is possible.
+        # Spacing 0.167; with duty=0.70, same-column legs are >=0.5 apart
+        # (air=0.30 < spacing=0.5), so no same-column overlap is possible.
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.67,
+        'duty': 0.70,
         'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
     }
 }
@@ -1594,7 +1594,7 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 380          # lowered: just under governor limit at 80° sweep
+    CRUISE_SPEED = 350          # under governor limit at 80° sweep with duty 0.70
     TRIPOD_CRUISE_SPEED = 420   # just under FF governor limit (max 424 at 80° sweep)
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
@@ -2730,7 +2730,7 @@ if __name__ == "__main__":
         saved_gait_for_check = shared_gait_id.value
         #shared_gait_id.value = 1   # WAVE — duty 0.85, 5 legs in stance
         # V0.5.01
-        shared_gait_id.value = 1   # WAVE — duty 0.60, max legs in stance for load detection
+        shared_gait_id.value = 1   # WAVE — duty 0.70, max legs in stance for load detection
         shared_speed.value = 0
         tsleep(1.5)                 # Wait for LERP convergence to wave offsets (tsleep detects Heart crash)
 
@@ -3235,12 +3235,12 @@ if __name__ == "__main__":
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
             # Clearance analysis (same framework as test-tripod):
-            #   Quad duty=0.67 → air phase is 33% of cycle → lower ff demand than before.
+            #   Quad duty=0.70 → air phase is 30% of cycle → moderate ff demand.
             #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            quad_duty = GAITS[2]['duty']  # 0.67
+            quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
@@ -3281,12 +3281,12 @@ if __name__ == "__main__":
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
             # Clearance analysis:
-            #   Wave duty=0.60 → air phase is 40% of cycle → much lower ff demand than before.
+            #   Wave duty=0.70 → air phase is 30% of cycle → moderate ff demand.
             #   320/40 (80° sweep): clearance at 40° = 48.8mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             wave_impact_start = DEFAULT_IMPACT_START  # 80° sweep — servo speed headroom
             wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 40°: 48.8mm
-            wave_duty = GAITS[1]['duty']  # 0.60
+            wave_duty = GAITS[1]['duty']  # 0.70
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
             max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)

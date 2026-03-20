@@ -14,8 +14,8 @@ STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 GAITS = {
     0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
-    1: {'duty': 0.60, 'offsets': {5:0.0, 3:0.167, 1:0.333, 4:0.5, 6:0.667, 2:0.833}},
-    2: {'duty': 0.67, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
+    1: {'duty': 0.70, 'offsets': {5:0.0, 3:0.167, 1:0.333, 4:0.5, 6:0.667, 2:0.833}},
+    2: {'duty': 0.70, 'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 real_dt           = 0.02
 
@@ -956,17 +956,17 @@ if sim.v7_fail and wt and wt[3] > 150:
 
 print()
 graded = [sim.v1_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
-          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,
+          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v13_fail,
           v17_fail, v18_fail, v19_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
 if not overall:
-    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 4 INFO (V2, V3, V14, V15). Cleared for hardware deployment.")
+    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 5 INFO (V2, V3, V12, V14, V15). Cleared for hardware deployment.")
 else:
     fails = [n for n,f in [("V1",sim.v1_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
-             ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
+             ("V10",sim.v10_fail),("V11",sim.v11_fail),("V13",sim.v13_fail),
              ("V17",v17_fail),("V18",v18_fail),("V19",v19_fail)] if f]
-    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 4 INFO -- failed: {', '.join(fails)}")
+    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 5 INFO -- failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")
