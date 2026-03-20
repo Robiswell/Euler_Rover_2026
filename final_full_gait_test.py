@@ -1417,8 +1417,8 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', 345)  # 345/15 = 30° sweep — safe static clearance ~24mm
-    shared_impact_end   = mp.Value('i', 15)
+    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 320/40 = 80° sweep
+    shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_heartbeat    = mp.Value('i', 0)
     shared_stall_override = mp.Value('b', False)  # When True, stall detection is suppressed.
@@ -1594,8 +1594,8 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 400
-    TRIPOD_CRUISE_SPEED = 450
+    CRUISE_SPEED = 380          # lowered: just under governor limit at 80° sweep
+    TRIPOD_CRUISE_SPEED = 470   # lowered: avoids constant governor clamping
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
