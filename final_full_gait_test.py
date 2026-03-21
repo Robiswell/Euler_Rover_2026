@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 550.0    # STS raw units — Hz ceiling budget (reduced from 700: closes 201-STS gap with FEEDFORWARD_CAP=499, adds ~12mm dynamic clearance)
+GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
@@ -185,6 +185,7 @@ GAITS = {
     0: {  # TRIPOD — do NOT use on slopes >10°: peak servo torque exceeds rated 10 kg·cm.
         #         Use Wave with COG shift for ramps (see Phase 3 hill climb).
         'duty': 0.55,
+        'ff_budget': 575.0,  # conservative — 6.3 deg lag, 69mm clearance
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
@@ -202,10 +203,12 @@ GAITS = {
         # New pattern interleaves columns: rear->middle->front per side.
         # Spacing 0.167; with duty=0.75, same-column legs are >=0.5 apart
         # (air=0.25), so no same-column overlap is possible.
+        'ff_budget': 700.0,  # aggressive — competition gait, max speed, 52mm clearance (37mm margin)
         'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
         'duty': 0.70,
+        'ff_budget': 650.0,  # moderate — enough for speed=318 on sand, 61mm clearance
         'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
     }
 }
@@ -785,6 +788,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     smooth_imp_start = float(shared_impact_start.value)
     smooth_imp_end   = float(shared_impact_end.value)
     smooth_duty      = 0.55
+    smooth_ff_budget = GAITS[0].get('ff_budget', GOVERNOR_FF_BUDGET)
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
@@ -1087,6 +1091,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             current_gait_id = shared_gait_id.value  # single read -- eliminates TOCTOU between gait_params fetch and snap block
             gait_params = GAITS.get(current_gait_id, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
+            t_ff_budget = gait_params.get('ff_budget', GOVERNOR_FF_BUDGET)
 
             # Phase offsets target (needed by both snap block and CPG ramp below)
             t_offsets = gait_params['offsets']
@@ -1097,12 +1102,14 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # see the offset snap because feedforward+KP_PHASE smooth it mechanically.
             if current_gait_id != prev_gait_id:
                 smooth_duty = t_duty
+                smooth_ff_budget = t_ff_budget
                 for sid in ALL_SERVOS:
                     smooth_offsets[sid] = t_offsets[sid]
                 prev_gait_id = current_gait_id
 
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
             smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
+            smooth_ff_budget = cpg_exp_ramp(smooth_ff_budget, t_ff_budget, KAPPA_TRANSITION, real_dt)
 
             # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
             for sid in ALL_SERVOS:
@@ -1118,7 +1125,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             stance_sweep = (smooth_imp_end - smooth_imp_start + 180) % 360 - 180
             air_sweep    = get_air_sweep(stance_sweep)
 
-            max_safe_hz = (GOVERNOR_FF_BUDGET / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
+            max_safe_hz = (smooth_ff_budget / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep))
 
             # Clearance governor: limit Hz so chassis stays above MIN_GROUND_CLEARANCE.
             # Roll-aware: during turns, body tilt drops inside chassis corner closer
