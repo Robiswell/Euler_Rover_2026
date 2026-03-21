@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 499.0    # STS raw units — Hz ceiling budget (hardware tested: 700 causes issues, 499 is safe)
+GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — Hz ceiling budget (below 900 which caused ground contact; 700 passes all sims)
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
@@ -1594,7 +1594,7 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 600          # under governor limit at 30° sweep with duty 0.75
+    CRUISE_SPEED = 350          # governor clamps to ~287 for Wave (duty 0.75, budget 700)
     TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 30° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
