@@ -214,7 +214,7 @@ def main():
     # Verify governor clamp: Heart must contain max_safe_hz clamp logic.
     # Brain speed inputs can exceed the governor limit (e.g. speed=1200 → 1.2 hz)
     # because the Heart governor clips hz_L/hz_R before advancing clocks.
-    # The relevant check is that the clamp formula is present and uses GOVERNOR_FF_BUDGET (660 STS) limit.
+    # The relevant check is that the clamp formula is present and uses GOVERNOR_FF_BUDGET (700 STS) limit.
     gov_clamp_ok = ('hz_L = max(-max_safe_hz' in src or 'min(max_safe_hz, hz_L)' in src or
                     'max(-max_safe_hz, min(max_safe_hz' in src)
     ok = verdict("Heart governor clamps hz to max_safe_hz", 'GO' if gov_clamp_ok else 'NO-GO',

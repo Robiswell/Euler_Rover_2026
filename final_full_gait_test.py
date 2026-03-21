@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 499.0    # STS raw units — max total speed budget per leg (900 caused ground contact; 499 is safe)
+GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — Hz ceiling budget (FEEDFORWARD_CAP=499 is the binding servo clamp; 900 caused ground contact)
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
