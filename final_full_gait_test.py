@@ -1600,7 +1600,7 @@ if __name__ == "__main__":
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 5.0    # seconds of forced backward when front blocked + both sides NEAR
+    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
