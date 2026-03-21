@@ -1594,13 +1594,13 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # governor clamps to ~287 for Wave (duty 0.75, budget 700)
+    CRUISE_SPEED = 500          # Quad unclamped (limit 496), Wave governor-clamped to ~287
     TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 30° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 3.0    # seconds of forced backward when front blocked + both sides NEAR
+    OBSTACLE_BACKUP_DURATION = 5.0    # seconds of forced backward when front blocked + both sides NEAR
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -2276,7 +2276,7 @@ if __name__ == "__main__":
                             self._transition(NAV_ARC_LEFT)
                         else:
                             self._transition(NAV_ARC_RIGHT)
-                        self._start_dwell(0.8)
+                        self._start_dwell(1.5)
                         turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         step = "nav_cliff_escape_L" if escape_dir < 0 else "nav_cliff_escape_R"
@@ -2348,7 +2348,7 @@ if __name__ == "__main__":
                         self._transition(NAV_ARC_LEFT)
                     else:
                         self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(0.8)
+                    self._start_dwell(1.5)
                     turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
@@ -2384,7 +2384,7 @@ if __name__ == "__main__":
                             self._transition(NAV_ARC_LEFT)
                         else:
                             self._transition(NAV_ARC_RIGHT)
-                        self._start_dwell(0.8)
+                        self._start_dwell(1.5)
                         turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                         speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                         step = "nav_obs_escape_L" if escape_dir < 0 else "nav_obs_escape_R"

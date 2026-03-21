@@ -26,7 +26,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 # =========================================================================
 
 # --- Nav tunable constants ---
-CRUISE_SPEED = 350
+CRUISE_SPEED = 500
 TRIPOD_CRUISE_SPEED = 420
 SLOW_SPEED = 200
 BACKWARD_SPEED = 300
