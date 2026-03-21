@@ -1621,6 +1621,7 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
+    CLIFF_DETECTION_ENABLED = False  # disable for competition -- soft surfaces cause false positives
     CLIFF_CONFIRM_FRAMES = 3    # consecutive candidate frames before cliff confirmed (raised from 2 for false-positive filtering)
 
     # --- CSV column indices ---
@@ -2237,7 +2238,7 @@ if __name__ == "__main__":
                 self._freefall_start = 0.0
 
             # P6: Front cliff
-            if front_cliff:
+            if CLIFF_DETECTION_ENABLED and front_cliff:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                     self.backward_entry_time = time.monotonic()
@@ -2248,7 +2249,7 @@ if __name__ == "__main__":
                 return self._backward_action(frame)
 
             # P7: Rear cliff (overrides cliff lockout -- don't back into a drop-off)
-            if rear_cliff:
+            if CLIFF_DETECTION_ENABLED and rear_cliff:
                 self.cliff_backup_until = 0.0  # clear lockout on rear cliff
                 self.obstacle_backup_until = 0.0  # clear obstacle lockout on rear cliff
                 self._transition(NAV_SLOW_FORWARD)
