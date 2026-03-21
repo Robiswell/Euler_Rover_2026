@@ -1594,7 +1594,7 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # under governor limit at 30° sweep with duty 0.75
+    CRUISE_SPEED = 600          # under governor limit at 30° sweep with duty 0.75
     TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 30° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
