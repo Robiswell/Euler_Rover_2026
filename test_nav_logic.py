@@ -36,8 +36,8 @@ def brain_log(msg):
 # Keep in sync with gait file.
 # ---------------------------------------------------------------------------
 
-CRUISE_SPEED = 450
-TRIPOD_CRUISE_SPEED = 600
+CRUISE_SPEED = 350
+TRIPOD_CRUISE_SPEED = 420
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
 MAX_TURN_BIAS = 0.25
