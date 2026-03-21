@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — Hz ceiling budget (below 900 which caused ground contact; 700 passes all sims)
+GOVERNOR_FF_BUDGET      = 550.0    # STS raw units — Hz ceiling budget (reduced from 700: closes 201-STS gap with FEEDFORWARD_CAP=499, adds ~12mm dynamic clearance)
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
@@ -184,7 +184,7 @@ VERBOSE_TELEMETRY = "--no-verbose-telemetry" not in sys.argv
 GAITS = {
     0: {  # TRIPOD — do NOT use on slopes >10°: peak servo torque exceeds rated 10 kg·cm.
         #         Use Wave with COG shift for ramps (see Phase 3 hill climb).
-        'duty': 0.5,
+        'duty': 0.55,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
@@ -784,7 +784,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     smooth_turn      = 0.0
     smooth_imp_start = float(shared_impact_start.value)
     smooth_imp_end   = float(shared_impact_end.value)
-    smooth_duty      = 0.5
+    smooth_duty      = 0.55
     # Seed offsets from default gait (TRIPOD) so legs are correctly phased
     # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
     smooth_offsets   = dict(GAITS[0]['offsets'])
@@ -1253,7 +1253,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-1023, min(1023, int(raw_speed)))
+                    final_speed = max(-860, min(860, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
@@ -3207,7 +3207,7 @@ if __name__ == "__main__":
             #   Air sweep = 330°, governor limits Hz to keep servo within budget
             tripod_impact_start = DEFAULT_IMPACT_START  # 30° sweep
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
-            tripod_duty = GAITS[0]['duty']  # 0.5
+            tripod_duty = GAITS[0]['duty']  # 0.55
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
             tripod_speed = min(350, max_speed)  # reduced from 450 — less phase lag → more clearance
             print("=== TEST MODE: TRIPOD ===")
