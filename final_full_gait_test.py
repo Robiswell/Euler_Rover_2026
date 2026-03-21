@@ -94,6 +94,7 @@ ALL_SERVOS         = LEFT_SERVOS + RIGHT_SERVOS
 ROLL_FRONT_SERVOS        = {1, 2}   # Fix 76: counter-rotating front pair for self-right
 ROLL_REAR_SERVOS         = {4, 5}   # Fix 76: counter-rotating rear pair for self-right
 SERVO_SPEED_GOVERNOR_CAP = 499     # Speed ceiling for roll/self-right mode (walking uses GOVERNOR_FF_BUDGET)
+WALKING_SPEED_CAP        = 1200    # STS -- walking mode clamp: ff(499) + phase correction for up to ~58 deg error
 
 # Body Geometry (measured from physical robot — verified from physical robot measurements)
 # These values are the foundation for all ground-clearance calculations.
@@ -162,8 +163,8 @@ DIRECTION_MAP = {
 # V0.5.01 New Constants for calibrated home positions and stall detection tuning for wet sand operation.
 # Calibrated zero points (Legs pointing straight down)
 HOME_POSITIONS = {
-    1: 3447, 2: 955, 3: 1420,
-    4: 1569, 5: 3197, 6: 3175,
+    1: 3474, 2: 954, 3: 1423,
+    4: 1613, 5: 3238, 6: 3201,
 }
 
 # Servo ID -> shared_servo_loads array index (0-based, clean mapping)
@@ -1260,7 +1261,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if sid in LEFT_SERVOS and not shared_roll_mode.value:
                         raw_speed = -raw_speed
 
-                    final_speed = max(-860, min(860, int(raw_speed)))
+                    final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw_speed)))
 
                 # Capture for [H5] verbose telemetry (no overhead when disabled -- just dict writes)
                 cmd_speeds[sid] = final_speed
