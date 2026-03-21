@@ -2692,12 +2692,12 @@ if __name__ == "__main__":
             else:
                 self._roll_sustained_start = 0.0
 
-            # M5: Asymmetric loading
+            # M5: Asymmetric loading (reduced penalty for competition -- 5% instead of 20%)
             if load_asymmetry > LOAD_ASYMMETRY_THRESHOLD:
                 if self._asymmetry_start == 0.0:
                     self._asymmetry_start = now
                 if (now - self._asymmetry_start) >= 1.0:
-                    speed = int(speed * 0.8)
+                    speed = int(speed * 0.95)
             else:
                 self._asymmetry_start = 0.0
 
