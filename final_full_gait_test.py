@@ -106,7 +106,7 @@ SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (serv
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
-GOVERNOR_FF_BUDGET      = 700.0    # STS raw units — Hz ceiling budget (FEEDFORWARD_CAP=499 is the binding servo clamp; 900 caused ground contact)
+GOVERNOR_FF_BUDGET      = 499.0    # STS raw units — Hz ceiling budget (hardware tested: 700 causes issues, 499 is safe)
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
 
@@ -1621,6 +1621,7 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
+    CLIFF_CONFIRM_FRAMES = 3    # consecutive candidate frames before cliff confirmed (raised from 2 for false-positive filtering)
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -1902,7 +1903,7 @@ if __name__ == "__main__":
             if reading is None:
                 # Defensive: possible cliff, increment
                 setattr(self, counter_attr, count + 1)
-                return count + 1 >= 2
+                return count + 1 >= CLIFF_CONFIRM_FRAMES
 
             # Update ground EMA with valid low readings (runs during warmup so baseline converges)
             if 0 < reading <= 40:
@@ -1917,7 +1918,7 @@ if __name__ == "__main__":
 
             if is_candidate:
                 setattr(self, counter_attr, count + 1)
-                return count + 1 >= 2
+                return count + 1 >= CLIFF_CONFIRM_FRAMES
             else:
                 setattr(self, counter_attr, 0)
                 return False

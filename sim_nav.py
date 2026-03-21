@@ -223,7 +223,7 @@ class CliffDetector:
 
         if reading is None:
             setattr(self, counter_attr, count + 1)
-            return count + 1 >= 2
+            return count + 1 >= 3
 
         # Update ground EMA with valid low readings (runs during warmup so baseline converges)
         if 0 < reading <= 40:
@@ -238,7 +238,7 @@ class CliffDetector:
 
         if is_candidate:
             setattr(self, counter_attr, count + 1)
-            return count + 1 >= 2
+            return count + 1 >= 3
         else:
             setattr(self, counter_attr, 0)
             return False
@@ -1644,9 +1644,12 @@ def run_n5():
     # Frame 1: candidate, not confirmed yet
     fc1, rc1 = cliff.update(35, 15)
     check(cid, fc1 is False, f"single frame should not confirm cliff: got {fc1}")
-    # Frame 2: confirmed
+    # Frame 2: still not confirmed (need 3 consecutive)
     fc2, rc2 = cliff.update(35, 15)
-    check(cid, fc2 is True, f"2nd frame should confirm front cliff: got {fc2}")
+    check(cid, fc2 is False, f"2nd frame should not yet confirm front cliff: got {fc2}")
+    # Frame 3: confirmed
+    fc3_front, _ = cliff.update(35, 15)
+    check(cid, fc3_front is True, f"3rd frame should confirm front cliff: got {fc3_front}")
 
     # FCD == -1 -> NOT a cliff (reset)
     cliff2 = CliffDetector()
@@ -1666,8 +1669,10 @@ def run_n5():
     for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
         cliff4.update(15, 15)
     _, rc1 = cliff4.update(15, 35)  # rear candidate
-    _, rc2 = cliff4.update(15, 35)  # rear confirmed
-    check(cid, rc2 is True, f"rear cliff should confirm after 2 frames: got {rc2}")
+    _, rc2 = cliff4.update(15, 35)  # 2nd consecutive -- not yet confirmed
+    check(cid, rc2 is False, f"rear cliff should not confirm after 2 frames: got {rc2}")
+    _, rc3 = cliff4.update(15, 35)  # rear confirmed on 3rd frame
+    check(cid, rc3 is True, f"rear cliff should confirm after 3 frames: got {rc3}")
 
     # Ground EMA updates from valid readings in (0, 40]
     # update(fcd=20, rcd=15): both are non-candidates (< 30 and < EMA+10)
@@ -1696,9 +1701,11 @@ def run_n5():
     cliff7 = CliffDetector()
     cliff7._ground_ema = 10.0
     cliff7._warmup_frames = CLIFF_WARMUP + 1  # bypass warmup for delta test
-    fc_d1, _ = cliff7.update(28, -1)
-    fc_d2, _ = cliff7.update(28, -1)
-    check(cid, fc_d2 is True, f"delta-based cliff should confirm: reading=28 > EMA(~10)+10")
+    fc_d1, _ = cliff7.update(45, -1)
+    fc_d2, _ = cliff7.update(45, -1)
+    check(cid, fc_d2 is False, f"delta-based cliff: 2nd frame should not yet confirm: got {fc_d2}")
+    fc_d3, _ = cliff7.update(45, -1)
+    check(cid, fc_d3 is True, f"delta-based cliff should confirm on 3rd frame: reading=45 > EMA(~10)+10")
 
     # FCD=-1 sentinel specifically resets front counter
     cliff8 = CliffDetector()
@@ -1724,7 +1731,8 @@ def run_n5():
     # spurious cliff detection before sensor has settled.
     # _warmup_frames increments once per update() call. CLIFF_WARMUP=5.
     # Updates 1-5: suppressed. Update 6: first active (candidate, count=1).
-    # Update 7: confirmed (count=2).
+    # Update 7: second consecutive (count=2), not yet confirmed.
+    # Update 8: confirmed (count=3).
     cliff_b = CliffDetector()
     for i in range(CLIFF_WARMUP):  # updates 1-5: cliff still in warmup
         fc_b, _ = cliff_b.update(50.0, 15)  # fcd=50 > 30 = cliff candidate if active
@@ -1734,10 +1742,14 @@ def run_n5():
     fc_b4, _ = cliff_b.update(50.0, 15)
     check(cid, fc_b4 is False,
           f"N5.B: single active candidate should not confirm cliff: got {fc_b4}")
-    # Update 5: second consecutive active candidate -- confirmed
+    # Update 7: second consecutive active candidate -- still not confirmed (need 3)
     fc_b5, _ = cliff_b.update(50.0, 15)
-    check(cid, fc_b5 is True,
-          f"N5.B: cliff should confirm after warmup + 2 consecutive frames: got {fc_b5}")
+    check(cid, fc_b5 is False,
+          f"N5.B: 2nd active candidate should not yet confirm cliff: got {fc_b5}")
+    # Update 8: third consecutive active candidate -- confirmed
+    fc_b6, _ = cliff_b.update(50.0, 15)
+    check(cid, fc_b6 is True,
+          f"N5.B: cliff should confirm after warmup + 3 consecutive frames: got {fc_b6}")
 
 
 # =========================================================================
@@ -2055,9 +2067,10 @@ def run_n9():
     cliff = CliffDetector()
     for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
         cliff.update(15, 15)
-    # 2 cliff frames
-    cliff.update(50, 15)  # candidate
-    fc, _ = cliff.update(50, 15)  # confirmed
+    # 3 cliff frames
+    cliff.update(50, 15)  # candidate 1
+    cliff.update(50, 15)  # candidate 2
+    fc, _ = cliff.update(50, 15)  # confirmed on 3rd
     check(cid, fc is True, "cliff scenario: cliff should be confirmed")
     frame_cliff = make_frame(rdl=100, rcf=100, rdr=100)
     state, _, _, x_flip, _ = fsm_update_simple(nav, frame=frame_cliff, front_cliff=True)
