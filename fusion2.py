@@ -25,8 +25,8 @@ State IDs:
 
 Distance classes:
   0 = UNKNOWN  (None or other invalid reading)
-  1 = CLEAR    (> 50 cm)
-  2 = CAUTION  (30–50 cm)
+  1 = CLEAR    (> 60 cm)
+  2 = CAUTION  (30-60 cm)
   3 = NEAR     (20–30 cm)
   4 = DANGER   (< 20 cm  OR  -1 very-near sentinel)
 
@@ -144,7 +144,7 @@ class FusionConfig:
     """Tunable parameters for the sensor-fusion layer."""
 
     # Distance classification thresholds (cm)
-    T_CLEAR:   float = 50.0
+    T_CLEAR:   float = 60.0
     T_CAUTION: float = 30.0
     T_NEAR:    float = 20.0
 

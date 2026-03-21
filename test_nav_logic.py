@@ -103,7 +103,7 @@ def classify_distance(cm):
         return DIST_DANGER
     if cm <= 30:
         return DIST_NEAR
-    if cm <= 50:
+    if cm <= 60:
         return DIST_CAUTION
     return DIST_CLEAR
 
@@ -712,14 +712,14 @@ def test_classify_distance_boundary_31_is_caution():
     assert classify_distance(31) == DIST_CAUTION
 
 
-def test_classify_distance_boundary_50_is_caution():
-    """Upper boundary of CAUTION zone (31–50 inclusive): 50 → CAUTION."""
-    assert classify_distance(50) == DIST_CAUTION
+def test_classify_distance_boundary_60_is_caution():
+    """Upper boundary of CAUTION zone (31-60 inclusive): 60 -> CAUTION."""
+    assert classify_distance(60) == DIST_CAUTION
 
 
-def test_classify_distance_boundary_51_is_clear():
-    """First value above CAUTION boundary: 51 → CLEAR."""
-    assert classify_distance(51) == DIST_CLEAR
+def test_classify_distance_boundary_61_is_clear():
+    """First value above CAUTION boundary: 61 → CLEAR."""
+    assert classify_distance(61) == DIST_CLEAR
 
 
 def test_classify_distance_large_value_is_clear():

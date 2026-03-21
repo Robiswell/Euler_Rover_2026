@@ -158,7 +158,7 @@ def classify_distance(cm):
         return DIST_DANGER
     if cm <= 30:
         return DIST_NEAR
-    if cm <= 50:
+    if cm <= 60:
         return DIST_CAUTION
     return DIST_CLEAR
 
@@ -1148,8 +1148,8 @@ def run_n2():
     check(cid, classify_distance(30) == DIST_NEAR, "30 should be NEAR")
     check(cid, classify_distance(30.1) == DIST_CAUTION, "30.1 should be CAUTION")
     check(cid, classify_distance(40) == DIST_CAUTION, "40 should be CAUTION")
-    check(cid, classify_distance(50) == DIST_CAUTION, "50 should be CAUTION")
-    check(cid, classify_distance(50.1) == DIST_CLEAR, "50.1 should be CLEAR")
+    check(cid, classify_distance(60) == DIST_CAUTION, "60 should be CAUTION")
+    check(cid, classify_distance(60.1) == DIST_CLEAR, "60.1 should be CLEAR")
     check(cid, classify_distance(100) == DIST_CLEAR, "100 should be CLEAR")
     check(cid, classify_distance(None) == DIST_UNKNOWN, "None should be UNKNOWN")
     check(cid, classify_distance(-5) == DIST_UNKNOWN, "-5 should be UNKNOWN")

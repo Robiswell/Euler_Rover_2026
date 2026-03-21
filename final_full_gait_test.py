@@ -1806,7 +1806,7 @@ if __name__ == "__main__":
             return DIST_DANGER
         if cm <= 30:
             return DIST_NEAR
-        if cm <= 50:
+        if cm <= 60:
             return DIST_CAUTION
         return DIST_CLEAR
 
