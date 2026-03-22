@@ -212,8 +212,8 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.70,
-        'ff_budget': 750.0,  # aggressive -- enough for speed=405 at duty=0.70, 20.9 deg lag
+        'duty': 0.75,
+        'ff_budget': 750.0,  # aggressive -- enough for speed=338 at duty=0.75, 20.9 deg lag
         'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.667, 5: 0.667}
     }
 }

@@ -16,7 +16,7 @@ GOVERNOR_FF_BUDGET = 575.0  # default fallback; per-gait 'ff_budget' overrides
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.70, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 750.0},
+    2: {'duty': 0.75, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 750.0},
 }
 WALKING_SPEED_CAP = 1200
 PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
@@ -413,8 +413,8 @@ class SimState:
         speed_lr = min(1.0, 4.0 * real_dt)
         worst_frames = 0
         worst_tx = None
-        for (nm, df, dt) in [("Tripod->Wave",0.55,0.75),("Wave->Quad",0.75,0.70),
-                             ("Quad->Tripod",0.70,0.55),("Tripod->Quad",0.55,0.70)]:
+        for (nm, df, dt) in [("Tripod->Wave",0.55,0.75),("Wave->Quad",0.75,0.75),
+                             ("Quad->Tripod",0.75,0.55),("Tripod->Quad",0.55,0.75)]:
             delta = abs(dt - df)
             thresh = 0.01 * dt
             if delta <= thresh:
