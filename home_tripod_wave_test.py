@@ -47,11 +47,11 @@ GAITS = {
         'duty': 0.85, 
         # HARDWARE CALIBRATION: Leg 5 offset increased from 0.333 to 0.380.
         # This forces Leg 5 to move further back along the ground before Leg 6 swings!
-        'offsets': {4: 0.833, 3: 0.666, 2: 0.5,  5: 0.380, 6: 0.166, 1: 0.0}
+        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED / RIPPLE
         'duty': 0.7,
-        'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
+        'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.666, 5: 0.666}
     }
 }
 

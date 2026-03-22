@@ -205,12 +205,12 @@ GAITS = {
         # Spacing 0.167; with duty=0.75, same-column legs are >=0.5 apart
         # (air=0.25), so no same-column overlap is possible.
         'ff_budget': 700.0,  # aggressive — competition gait, max speed, 52mm clearance (37mm margin)
-        'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
+        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
         'duty': 0.70,
         'ff_budget': 650.0,  # moderate — enough for speed=318 on sand, 61mm clearance
-        'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
+        'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.666, 5: 0.666}
     }
 }
 
