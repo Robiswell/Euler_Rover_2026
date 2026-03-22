@@ -37,7 +37,6 @@ def brain_log(msg):
 # ---------------------------------------------------------------------------
 
 CRUISE_SPEED = 500
-TRIPOD_CRUISE_SPEED = 420
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
 MAX_TURN_BIAS = 0.25
@@ -526,8 +525,6 @@ class NavStateMachine:
                 self._refresh_dwell(0.4)
 
         base_speed = CRUISE_SPEED
-        if self.terrain_is_tripod:
-            base_speed = TRIPOD_CRUISE_SPEED
         speed_s = speed_scale_from_front(front_class)
         speed   = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 

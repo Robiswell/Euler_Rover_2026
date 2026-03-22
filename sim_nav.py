@@ -27,7 +27,6 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 # --- Nav tunable constants ---
 CRUISE_SPEED = 500
-TRIPOD_CRUISE_SPEED = 420
 SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -716,8 +715,6 @@ class NavStateMachine:
 
         # FORWARD with heading correction
         base_speed = CRUISE_SPEED
-        if self.terrain_is_tripod:
-            base_speed = TRIPOD_CRUISE_SPEED
         speed_s = speed_scale_from_front(front_class)
         speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
