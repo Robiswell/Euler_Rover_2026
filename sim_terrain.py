@@ -48,7 +48,7 @@ PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.75, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 750.0},
+    2: {'duty': 0.75, 'offsets': {2:0.0, 5:0.0, 1:0.333, 3:0.333, 4:0.666, 6:0.666}, 'ff_budget': 750.0},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
