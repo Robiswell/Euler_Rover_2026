@@ -138,6 +138,7 @@ PHERR_FLOOR_SCALE  = 0.35   # minimum Hz multiplier at full throttle (35% of max
 PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near threshold, aggressive at high error)
 PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
 KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
+MIN_STANCE_HZ      = 0.15   # Hz -- absolute floor after PhErr governor; prevents positive feedback loop
 
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
@@ -1161,6 +1162,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 ph_scale = 1.0  # governor inactive -- no throttle
                 pherr_low_scale_start = 0.0
+
+            # Hz floor: prevents PhErr positive feedback (low Hz -> low FF -> higher PhErr -> lower Hz)
+            # Capped by clearance governor so floor never causes ground scraping
+            max_safe_hz = max(min(MIN_STANCE_HZ, max_clr_hz), max_safe_hz)
 
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
