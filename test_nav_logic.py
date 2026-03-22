@@ -101,7 +101,7 @@ def classify_distance(cm):
         return DIST_UNKNOWN  # invalid
     if cm <= 20:
         return DIST_DANGER
-    if cm <= 30:
+    if cm <= 40:
         return DIST_NEAR
     if cm <= 60:
         return DIST_CAUTION
@@ -146,9 +146,9 @@ def speed_scale_from_front(front_class):
     if front_class == DIST_CLEAR:
         return 1.0
     if front_class == DIST_CAUTION:
-        return 0.7
+        return 0.85
     if front_class == DIST_NEAR:
-        return 0.45
+        return 0.50
     if front_class == DIST_DANGER:
         return 0.0
     return 0.7  # UNKNOWN
