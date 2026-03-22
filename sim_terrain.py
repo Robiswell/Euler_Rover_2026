@@ -46,9 +46,9 @@ FEEDFORWARD_CAP = 499.0     # STS raw units -- max open-loop speed (servo physic
 WALKING_SPEED_CAP = 1200
 PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 GAITS = {
-    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 575.0},
+    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.75, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 650.0},
+    2: {'duty': 0.70, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 750.0},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
@@ -441,7 +441,7 @@ def define_scenarios():
         gait_id=1, speed=270, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=15.0))
 
-    # T7: Ramp 20 deg, Quadruped gait (speed=250 for duty=0.75 governor headroom)
+    # T7: Ramp 20 deg, Quadruped gait (speed=250 for duty=0.70 governor headroom)
     sc.append(dict(name="T7 Ramp 20deg Quad",
         gait_id=2, speed=250, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=20.0))

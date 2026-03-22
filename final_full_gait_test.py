@@ -110,6 +110,8 @@ FEEDFORWARD_CAP         = 499.0    # STS raw units -- matches STS3215 no-load ma
 GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
+QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep for 28% motor margin at duty=0.70
+QUAD_IMPACT_END         = 30       # quad air sweep = 300 deg (vs 330 default) — STS3215 can track this
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
 BODY_LENGTH         = 511.0   # mm — total front-to-back (51.1 cm)
@@ -210,8 +212,8 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.75,
-        'ff_budget': 750.0,  # aggressive -- enough for speed=307 at duty=0.75, 20.9 deg lag
+        'duty': 0.70,
+        'ff_budget': 750.0,  # aggressive -- enough for speed=405 at duty=0.70, 20.9 deg lag
         'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.667, 5: 0.667}
     }
 }
@@ -2174,8 +2176,8 @@ if __name__ == "__main__":
             self._last_stall_clear_time = time.monotonic()
             # Terrain state (held during non-FORWARD/SLOW states)
             self.terrain_gait = 2  # default quad
-            self.terrain_impact_start = DEFAULT_IMPACT_START
-            self.terrain_impact_end = DEFAULT_IMPACT_END
+            self.terrain_impact_start = QUAD_IMPACT_START
+            self.terrain_impact_end = QUAD_IMPACT_END
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
@@ -2706,8 +2708,8 @@ if __name__ == "__main__":
 
             # T9: Default — quadruped
             self.terrain_gait = 2
-            self.terrain_impact_start = DEFAULT_IMPACT_START
-            self.terrain_impact_end = DEFAULT_IMPACT_END
+            self.terrain_impact_start = QUAD_IMPACT_START
+            self.terrain_impact_end = QUAD_IMPACT_END
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._apply_gait_transition(prev_gait)
@@ -2898,10 +2900,10 @@ if __name__ == "__main__":
                 print("=== COMPETITION MODE (autonomous nav) ===")
             # Confirm clearance governor integration
             default_duty = GAITS[2]['duty']  # quad is default gait
-            default_clr_hz = compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, default_duty,
+            default_clr_hz = compute_max_clearance_hz(QUAD_IMPACT_START, QUAD_IMPACT_END, default_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
-            print(f"    default config: {DEFAULT_IMPACT_START}°/{DEFAULT_IMPACT_END}° quad(duty={default_duty}) → "
+            print(f"    default config: {QUAD_IMPACT_START}°/{QUAD_IMPACT_END}° quad(duty={default_duty}) → "
                   f"max_speed={int(default_clr_hz * 1000)}")
             print(f"    body: radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm, "
@@ -2910,7 +2912,7 @@ if __name__ == "__main__":
             # --- Timed fallback sequence (used when sensors unavailable) ---
             def run_timed_fallback():
                 brain_log("FALLBACK: timed sequence — no sensor data")
-                set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
                                step_name="fallback_quad_init")
                 set_gait_state(speed=400, turn=0.0, step_name="fallback_quad_fwd")
                 stall_tsleep(45)
@@ -2965,8 +2967,8 @@ if __name__ == "__main__":
                         # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
                         roll_attempts = 0
                         MAX_ROLL_ATTEMPTS = 2
-                        # Set initial gait: quadruped, normal stance
-                        set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                        # Set initial gait: quadruped, wider stance for motor margin
+                        set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
                                        speed=0, turn=0.0, x_flip=1,
                                        step_name="nav_init")
 
@@ -3034,7 +3036,7 @@ if __name__ == "__main__":
                                 else:
                                     remaining = MISSION_TIMEOUT_S - (time.monotonic() - nav.mission_start)
                                     if remaining > 5:
-                                        set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                                        set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
                                                        speed=400, turn=0.0, x_flip=1,
                                                        step_name="fallback_mid_quad")
                                         stall_tsleep(min(remaining * 0.6, 45))
@@ -3293,12 +3295,13 @@ if __name__ == "__main__":
 
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
-            # Clearance analysis (same framework as test-tripod):
-            #   Quad duty=0.70 → air phase is 30% of cycle → moderate ff demand.
-            #   345/15 (30° sweep): clearance at 15° = 73.7mm.
+            # Clearance analysis:
+            #   Quad duty=0.70 → air phase is 30% of cycle.
+            #   330/30 (60° sweep): air_sweep=300°, motor margin=28% at max Hz.
+            #   Worst angle from vertical = 30° → clearance = 125*cos(30)-47 = 61mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            quad_impact_start = DEFAULT_IMPACT_START  # 30° sweep
-            quad_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
+            quad_impact_start = QUAD_IMPACT_START  # 60° sweep, 300° air
+            quad_impact_end   = QUAD_IMPACT_END    # clearance at 30°: 61mm
             quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
@@ -3328,14 +3331,14 @@ if __name__ == "__main__":
             set_gait_state(speed=0, step_name="decel_pre_reverse"); tsleep(0.5)
             set_gait_state(speed=-quad_speed, turn=0.0, step_name="reverse");                  stall_tsleep(12)
             set_gait_state(speed=0, step_name="decel"); tsleep(2)
-            # Walking tall: DEFAULT stance (30° sweep) — standard clearance with r=125mm
-            wt_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
+            # Walking tall: quad stance (60° sweep) — wider sweep for motor margin
+            wt_clr = int(compute_max_clearance_hz(QUAD_IMPACT_START, QUAD_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
-            set_gait_state(speed=min(300, wt_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
-            # Stealth crawl: DEFAULT stance (30° sweep) — same geometry as walking_tall
-            sc_clr = int(compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, quad_duty,
+            set_gait_state(speed=min(250, wt_clr), impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
+            # Stealth crawl: quad stance (60° sweep) — same geometry as walking_tall
+            sc_clr = int(compute_max_clearance_hz(QUAD_IMPACT_START, QUAD_IMPACT_END, quad_duty,
                                                   min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN) * 1000)
-            set_gait_state(speed=min(300, sc_clr), impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="stealth_crawl");  stall_tsleep(15)
+            set_gait_state(speed=min(250, sc_clr), impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="stealth_crawl");  stall_tsleep(15)
 
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
@@ -3615,7 +3618,7 @@ if __name__ == "__main__":
             print("=== TEST MODE: COMPETITION ===")
 
             # Phase 1: Quadruped forward (best stability + speed balance on sand)
-            set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="comp_quad_init")
+            set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="comp_quad_init")
             set_gait_state(speed=400, turn=0.0, step_name="comp_quad_fwd")
             stall_tsleep(45)
 
@@ -3656,7 +3659,7 @@ if __name__ == "__main__":
             # PHASE 2: QUADRUPED
             # =========================================================
             print("\n-- phase 2: quadruped --")
-            set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="phase2_init")
+            set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="phase2_init")
 
             set_gait_state(speed=900, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.15, step_name="carve_left");                                stall_tsleep(10)
@@ -3664,17 +3667,17 @@ if __name__ == "__main__":
             set_gait_state(turn=0.15, step_name="carve_right");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.35, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.35, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=900, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p2"); tsleep(0.5)
             set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel before walking tall - avoids ~720ms of backward motion bleed into forward mode
             set_gait_state(speed=0, step_name="decel_p2"); tsleep(2)
 
-            set_gait_state(speed=300, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
-            set_gait_state(impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="stealth_crawl");              stall_tsleep(15)
+            set_gait_state(speed=250, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
+            set_gait_state(impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="stealth_crawl");              stall_tsleep(15)
 
             # =========================================================
             # PHASE 3: WAVE
