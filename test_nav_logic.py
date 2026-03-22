@@ -699,14 +699,14 @@ def test_classify_distance_boundary_21_is_near():
     assert classify_distance(21) == DIST_NEAR
 
 
-def test_classify_distance_boundary_30_is_near():
-    """Upper boundary of NEAR zone (21–30 inclusive): 30 → NEAR."""
-    assert classify_distance(30) == DIST_NEAR
+def test_classify_distance_boundary_40_is_near():
+    """Upper boundary of NEAR zone (21–40 inclusive): 40 → NEAR."""
+    assert classify_distance(40) == DIST_NEAR
 
 
-def test_classify_distance_boundary_31_is_caution():
-    """First value above NEAR boundary: 31 → CAUTION."""
-    assert classify_distance(31) == DIST_CAUTION
+def test_classify_distance_boundary_41_is_caution():
+    """First value above NEAR boundary: 41 → CAUTION."""
+    assert classify_distance(41) == DIST_CAUTION
 
 
 def test_classify_distance_boundary_60_is_caution():
@@ -757,20 +757,27 @@ def test_classify_sectors_front_fdr_danger_dominates():
 
 
 def test_classify_sectors_left_uses_fdl_and_rdl_only():
-    """Left sector = worst of FDL and RDL. FCF danger must NOT pollute left sector.
+    """Left sector = worst of FDL and RDL with voted downgrade.
+    FCF danger must NOT pollute left sector.
 
-    Physical failure caught: if FCF leaked into left classification, the robot
-    would arc when it should reverse.
+    With voted classify_sectors: FDL=60 (CAUTION=2), RDL=100 (CLEAR=0).
+    Disagreement = 2 levels >= 2, so downgrade: left = max-1 = NEAR(1).
     """
-    # FCF=15 (DANGER) but not in left sector; FDL=60 (CLEAR), RDL=100 (CLEAR)
+    # FCF=15 (DANGER) but not in left sector; FDL=60 (CAUTION=1), RDL=100 (CLEAR=0)
+    # Disagreement = 1 level < 2, so no downgrade: left = max = CAUTION(1)
     _, l, _ = classify_sectors(make_frame(fdl=60, fcf=15, rdl=100))
-    assert l == DIST_CLEAR
+    assert l == DIST_CAUTION
 
 
 def test_classify_sectors_right_uses_fdr_and_rdr_only():
-    """Right sector = worst of FDR and RDR only. FCF must not pollute right."""
+    """Right sector = worst of FDR and RDR only. FCF must not pollute right.
+
+    With voted classify_sectors: FDR=60 (CAUTION=2), RDR=100 (CLEAR=0).
+    Disagreement = 2 levels >= 2, so downgrade: right = max-1 = NEAR(1).
+    """
+    # FDR=60 (CAUTION=1), RDR=100 (CLEAR=0). Disagreement = 1 < 2, no downgrade.
     _, _, r = classify_sectors(make_frame(fdr=60, fcf=15, rdr=100))
-    assert r == DIST_CLEAR
+    assert r == DIST_CAUTION
 
 
 def test_classify_sectors_left_danger_from_rdl():
@@ -898,14 +905,14 @@ def test_speed_scale_clear_is_1():
     assert speed_scale_from_front(DIST_CLEAR) == 1.0
 
 
-def test_speed_scale_caution_is_0_7():
-    """DIST_CAUTION → 70% speed."""
-    assert speed_scale_from_front(DIST_CAUTION) == 0.7
+def test_speed_scale_caution_is_0_85():
+    """DIST_CAUTION → 85% speed."""
+    assert speed_scale_from_front(DIST_CAUTION) == 0.85
 
 
-def test_speed_scale_near_is_0_45():
-    """DIST_NEAR → 45% speed."""
-    assert speed_scale_from_front(DIST_NEAR) == 0.45
+def test_speed_scale_near_is_0_50():
+    """DIST_NEAR → 50% speed."""
+    assert speed_scale_from_front(DIST_NEAR) == 0.50
 
 
 def test_speed_scale_danger_is_0():
@@ -913,9 +920,9 @@ def test_speed_scale_danger_is_0():
     assert speed_scale_from_front(DIST_DANGER) == 0.0
 
 
-def test_speed_scale_unknown_is_0_7():
-    """DIST_UNKNOWN (value==1) → conservative 70% speed, same as CAUTION."""
-    assert speed_scale_from_front(DIST_UNKNOWN) == 0.7
+def test_speed_scale_unknown_is_0_85():
+    """DIST_UNKNOWN (value==1, same as CAUTION) → 85% speed."""
+    assert speed_scale_from_front(DIST_UNKNOWN) == 0.85
 
 
 # ============================================================================
