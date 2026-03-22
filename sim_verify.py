@@ -12,11 +12,14 @@ HOME_POSITIONS = {1:3447, 2:955, 3:1420, 4:1569, 5:3197, 6:3175}
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
+GOVERNOR_FF_BUDGET = 575.0  # default fallback; per-gait 'ff_budget' overrides
 GAITS = {
-    0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
-    1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}},
-    2: {'duty': 0.70, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}},
+    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 575.0},
+    1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
+    2: {'duty': 0.70, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 650.0},
 }
+WALKING_SPEED_CAP = 1200
+PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 real_dt           = 0.02
 
 # sync: final_full_gait_test.py lines 99-124 (body geometry + roll constants)
@@ -95,7 +98,7 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False)
 
 class Sh:
     speed=0; x_flip=1; z_flip=1; turn_bias=0.0
-    gait_id=0; impact_start=320; impact_end=40; is_running=True
+    gait_id=0; impact_start=345; impact_end=15; is_running=True
 
 
 class SimState:
@@ -113,9 +116,9 @@ class SimState:
         self.smooth_speed = self.smooth_turn = 0.0
         self.smooth_imp_start = float(self.sh.impact_start)
         self.smooth_imp_end   = float(self.sh.impact_end)
-        self.smooth_duty      = 0.5
+        self.smooth_duty      = 0.55
         self.smooth_offsets   = {s: GAITS[0]['offsets'][s] for s in ALL_SERVOS}
-        self.prev_smooth_duty = 0.5
+        self.prev_smooth_duty = 0.55
         self.tick = 0
 
         # V1 speed limit
@@ -186,7 +189,8 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        max_safe = (700.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        gait_ff_budget = g.get('ff_budget', GOVERNOR_FF_BUDGET)
+        max_safe = (gait_ff_budget / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
@@ -270,19 +274,20 @@ class SimState:
                                 'phase_num':phase_num,'gait':fsm_gait})
                 self.prev_in_stance[sid] = in_s
 
-                ff_speed = dps * VELOCITY_SCALAR
+                ff_speed = min(FEEDFORWARD_CAP, dps * VELOCITY_SCALAR)
                 error = (tp - cur_ph + 180) % 360 - 180
                 if t_leg > self.smooth_duty:
                     if not is_rev and error < -90: error += 360
                     elif is_rev and error > 90: error -= 360
+                correction = error * KP_PHASE if abs(error) >= PHERR_DEADBAND else 0.0
                 directed_ff = -ff_speed if is_rev else ff_speed  # only flip feedforward, not correction
-                raw_speed = directed_ff + (error * KP_PHASE)
+                raw_speed = directed_ff + correction
                 if sid in LEFT_SERVOS: raw_speed = -raw_speed
 
-                final_speed = max(-3000, min(3000, int(raw_speed)))
+                final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw_speed)))
 
                 # V1: check final speed
-                if abs(final_speed) > 3000:
+                if abs(final_speed) > WALKING_SPEED_CAP:
                     self.v1_fail = True
                     if abs(final_speed) > abs(self.v1_worst[1]): self.v1_worst=(sid,int(final_speed),self.tick)
 
@@ -442,32 +447,32 @@ class SimState:
 
 def make_schedule():
     s = []
-    s.append((0,   {'gait_id':0,'impact_start':320,'impact_end':40,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
-    s.append((1000, {'speed':420}, 1, "Ph1 forward"))
+    s.append((0,   {'gait_id':0,'impact_start':345,'impact_end':15,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
+    s.append((1000, {'speed':400}, 1, "Ph1 forward"))
     s.append((800,  {'turn_bias':-0.4}, 1, "Ph1 carve left"))
     s.append((800,  {'turn_bias': 0.4}, 1, "Ph1 carve right"))
     s.append((800,  {'speed':0,'turn_bias':-1.0}, 1, "Ph1 pivot left"))
     s.append((800,  {'turn_bias': 1.0}, 1, "Ph1 pivot right"))
-    s.append((1000, {'turn_bias':0.0,'speed':-420}, 1, "Ph1 reverse"))
-    s.append((0,   {'gait_id':2,'speed':380,'turn_bias':0.0,'impact_start':320,'impact_end':40}, 2, "Quad forward start"))
-    s.append((600,  {'speed':380}, 2, "Quad forward"))
+    s.append((1000, {'turn_bias':0.0,'speed':-400}, 1, "Ph1 reverse"))
+    s.append((0,   {'gait_id':2,'speed':300,'turn_bias':0.0,'impact_start':345,'impact_end':15}, 2, "Quad forward start"))
+    s.append((600,  {'speed':300}, 2, "Quad forward"))
     s.append((500,  {'turn_bias':-0.3}, 2, "Quad carve left"))
     s.append((500,  {'turn_bias': 0.3}, 2, "Quad carve right"))
     s.append((500,  {'speed':0,'turn_bias':-0.8}, 2, "Quad pivot left"))
     s.append((500,  {'turn_bias': 0.8}, 2, "Quad pivot right"))
-    s.append((600,  {'turn_bias':0.0,'speed':-380}, 2, "Quad reverse"))
+    s.append((600,  {'turn_bias':0.0,'speed':-300}, 2, "Quad reverse"))
     s.append((100,  {'speed':0}, 2, "Quad stop"))
-    s.append((750,  {'speed':380,'impact_start':320,'impact_end':40}, 2, "Quad obstacle 320/40"))
+    s.append((750,  {'speed':300,'impact_start':320,'impact_end':40}, 2, "Quad obstacle 320/40"))
     s.append((750,  {'impact_start':325,'impact_end':35}, 2, "Quad low 325/35"))
-    s.append((0,   {'gait_id':1,'speed':280,'turn_bias':0.0,'impact_start':320,'impact_end':40}, 3, "Wave forward start"))
-    s.append((600,  {'speed':280}, 3, "Wave forward"))
+    s.append((0,   {'gait_id':1,'speed':270,'turn_bias':0.0,'impact_start':345,'impact_end':15}, 3, "Wave forward start"))
+    s.append((600,  {'speed':270}, 3, "Wave forward"))
     s.append((500,  {'turn_bias':-0.12}, 3, "Wave carve left"))
     s.append((500,  {'turn_bias': 0.12}, 3, "Wave carve right"))
     s.append((500,  {'speed':0,'turn_bias':-0.48}, 3, "Wave pivot left"))
     s.append((500,  {'turn_bias': 0.48}, 3, "Wave pivot right"))
-    s.append((600,  {'turn_bias':0.0,'speed':-280}, 3, "Wave reverse"))
+    s.append((600,  {'turn_bias':0.0,'speed':-270}, 3, "Wave reverse"))
     s.append((100,  {'speed':0}, 3, "Wave stop"))
-    s.append((1000, {'speed':280,'impact_start':315,'impact_end':15}, 3, "Wave slope 315/15"))
+    s.append((1000, {'speed':270,'impact_start':315,'impact_end':15}, 3, "Wave slope 315/15"))
     s.append((0,   {'speed':0,'turn_bias':0.0,'gait_id':0}, 4, "Ph4 reset"))
     s.append((150,  {'speed':0}, 4, "Ph4 pause"))
     for i in range(500 // 15):
@@ -873,7 +878,7 @@ print(f"Total ticks         : {res['ticks']:,}")
 print(f"Wall-clock equiv    : {res['ticks']*real_dt:.1f} s ({res['ticks']*real_dt/60:.1f} min)")
 print()
 print("PASS/FAIL per check:")
-print(f"  V1  Speed limit:         {pf(sim.v1_fail)}  (worst SID={sim.v1_worst[0]} @ {sim.v1_worst[1]} STS tick {sim.v1_worst[2]})" if sim.v1_fail else f"  V1  Speed limit:         {pf(sim.v1_fail)}  (all within +-3000 STS)")
+print(f"  V1  Speed limit:         {pf(sim.v1_fail)}  (worst SID={sim.v1_worst[0]} @ {sim.v1_worst[1]} STS tick {sim.v1_worst[2]})" if sim.v1_fail else f"  V1  Speed limit:         {pf(sim.v1_fail)}  (all within +-{WALKING_SPEED_CAP} STS)")
 print(f"  V2  Governor:            {pf(sim.v2_fail)}  ({len(sim.v2_clamps)} clamp events)" if sim.v2_clamps else f"  V2  Governor:            {pf(sim.v2_fail)}  (no clamping)")
 
 gnames={0:'Tripod',1:'Wave',2:'Quad'}

@@ -401,8 +401,8 @@ class NavStateMachine:
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
         self.terrain_gait = 2
-        self.terrain_impact_start = 320     # Fix 115: matches production DEFAULT_IMPACT_START
-        self.terrain_impact_end = 40       # Fix 115: matches production DEFAULT_IMPACT_END
+        self.terrain_impact_start = 345     # matches production DEFAULT_IMPACT_START
+        self.terrain_impact_end = 15       # matches production DEFAULT_IMPACT_END
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0
@@ -545,7 +545,7 @@ class NavStateMachine:
                         self._transition(NAV_ARC_LEFT)
                     else:
                         self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(0.8)
+                    self._start_dwell(1.5)
                     turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     step = "nav_cliff_escape_L" if escape_dir < 0 else "nav_cliff_escape_R"
@@ -610,7 +610,7 @@ class NavStateMachine:
                     self._transition(NAV_ARC_LEFT)
                 else:
                     self._transition(NAV_ARC_RIGHT)
-                self._start_dwell(0.8)
+                self._start_dwell(1.5)
                 turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                 speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                 step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
@@ -646,7 +646,7 @@ class NavStateMachine:
                         self._transition(NAV_ARC_LEFT)
                     else:
                         self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(0.8)
+                    self._start_dwell(1.5)
                     turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
                     speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                     step = "nav_obs_escape_L" if escape_dir < 0 else "nav_obs_escape_R"
