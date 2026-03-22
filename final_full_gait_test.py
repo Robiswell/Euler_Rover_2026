@@ -106,7 +106,7 @@ LEG_ARC_DEGREES         = 190.0    # degrees — physical arc of the curved leg 
 SHAFT_TO_CHASSIS_BOTTOM = 47.0     # mm — shaft center to chassis bottom (servo mounting block height 4.7 cm measured)
 MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=125mm gives 78mm static clearance)
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
-FEEDFORWARD_CAP         = 499.0    # STS raw units — max open-loop speed to prevent servo overshoot
+FEEDFORWARD_CAP         = 499.0    # STS raw units -- matches STS3215 no-load max (45 RPM = 270 deg/s * 1.85)
 GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
 DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
 DEFAULT_IMPACT_END      = 15       # walking stance end angle
@@ -210,9 +210,9 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.70,
-        'ff_budget': 650.0,  # moderate — enough for speed=318 on sand, 61mm clearance
-        'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.666, 5: 0.666}
+        'duty': 0.75,
+        'ff_budget': 650.0,  # moderate -- enough for speed=266 at duty=0.75
+        'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.667, 5: 0.667}
     }
 }
 
@@ -803,6 +803,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     pherr_gov_active     = False # True when governor is engaged (hysteresis)
     pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor -- stuck timeout
     pherr_stuck_cooldown_until = 0.0  # monotonic time: suppress re-trigger for 30s after firing
+    pherr_gov_suppress_until = 0.0   # monotonic time: suppress PhGov after gait switch (2s settle)
     ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
     prev_z_flip          = 1     # track z_flip transitions (roll entry/exit)
 
@@ -963,7 +964,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                                             f"load={load_mag} cycle={overload_cycle_count[sid]}/{OVERLOAD_MAX_CYCLES}\n")
                             except:
                                 pass
-                            if comm1 == 0 and comm2 == 0:  # COMM_SUCCESS
+                            if comm1 == 0:  # COMM_SUCCESS
                                 stall_sustained_start[sid] = 0.0
                             # else: leave timer running -- retry on next tick
                 else:
@@ -1132,6 +1133,13 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 for sid in ALL_SERVOS:
                     smooth_offsets[sid] = t_offsets[sid]
                 prev_gait_id = current_gait_id
+                # Suppress PhGov for 2s -- gait switch causes instant phase offset
+                # that would trigger governor before servos can settle
+                pherr_gov_active = False
+                ph_scale = 1.0
+                max_phase_error_prev = 0.0
+                pherr_low_scale_start = 0.0
+                pherr_gov_suppress_until = time.monotonic() + 2.0
 
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
             smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
@@ -1165,7 +1173,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             # PhErr governor: throttle Hz when servos can't track commanded phase
             # Exponential ramp (CPG paper Eqs. 20-21) — gentle near threshold, aggressive at high error
-            if max_phase_error_prev >= PHERR_ENGAGE_DEG:
+            if time.monotonic() > pherr_gov_suppress_until and max_phase_error_prev >= PHERR_ENGAGE_DEG:
                 pherr_gov_active = True
             elif max_phase_error_prev < PHERR_RELEASE_DEG:
                 pherr_gov_active = False
@@ -1644,7 +1652,7 @@ if __name__ == "__main__":
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 4.0    # seconds of forced backward when front blocked + both sides NEAR
+    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides DANGER
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -1856,7 +1864,7 @@ if __name__ == "__main__":
             return DIST_UNKNOWN  # invalid
         if cm <= 20:
             return DIST_DANGER
-        if cm <= 30:
+        if cm <= 40:
             return DIST_NEAR
         if cm <= 60:
             return DIST_CAUTION
@@ -1913,9 +1921,9 @@ if __name__ == "__main__":
         if front_class == DIST_CLEAR:
             return 1.0
         if front_class == DIST_CAUTION:
-            return 0.7
+            return 0.85
         if front_class == DIST_NEAR:
-            return 0.45
+            return 0.50
         if front_class == DIST_DANGER:
             return 0.0
         return 0.7  # UNKNOWN
@@ -2388,7 +2396,7 @@ if __name__ == "__main__":
             # P10: Front DANGER (2+ frames, not dead-end) -- escape-route awareness
             if self.front_danger_frames >= 2:
                 # Prefer arc escape over backward when a side is clear
-                if left_class < DIST_NEAR or right_class < DIST_NEAR:
+                if left_class < DIST_DANGER or right_class < DIST_DANGER:
                     # Pick the freer side; tie-break with raw cm (most clearance)
                     if left_class != right_class:
                         escape_dir = -1 if left_class < right_class else 1
@@ -2407,7 +2415,7 @@ if __name__ == "__main__":
                     state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
                     return (state, speed, turn, 1, step)
                 else:
-                    # Both sides NEAR or worse -- timed BACKWARD + escape turn
+                    # Both sides DANGER -- timed BACKWARD + escape turn
                     if self.state != NAV_BACKWARD:
                         self.hold_position_count = 0
                         self.backward_entry_time = time.monotonic()
@@ -3299,7 +3307,7 @@ if __name__ == "__main__":
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             max_clr_speed_q = int(max_clr_hz_q * 1000)
-            quad_speed = min(250, max_clr_speed_q)  # reduced from 300 — less phase lag
+            quad_speed = min(200, max_clr_speed_q)  # within governor Hz ceiling (max_safe_hz=0.319)
             print("=== TEST MODE: QUADRUPED ===")
             print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")

@@ -32,7 +32,7 @@ SLOW_SPEED = 200
 BACKWARD_SPEED = 300
 BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
 CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-OBSTACLE_BACKUP_DURATION = 4.0    # seconds of forced backward when front blocked + both sides NEAR
+OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides DANGER
 MAX_TURN_BIAS = 0.25              # sync: restored for r=125mm roll-aware clearance
 PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
 PIVOT_IMPACT_START = 345          # narrowed 30 deg stance sweep for safe pivot clearance
@@ -156,7 +156,7 @@ def classify_distance(cm):
         return DIST_UNKNOWN
     if cm <= 20:
         return DIST_DANGER
-    if cm <= 30:
+    if cm <= 40:
         return DIST_NEAR
     if cm <= 60:
         return DIST_CAUTION
@@ -181,9 +181,9 @@ def speed_scale_from_front(front_class):
     if front_class == DIST_CLEAR:
         return 1.0
     if front_class == DIST_CAUTION:
-        return 0.7
+        return 0.85
     if front_class == DIST_NEAR:
-        return 0.45
+        return 0.50
     if front_class == DIST_DANGER:
         return 0.0
     return 0.7  # UNKNOWN
@@ -599,7 +599,7 @@ class NavStateMachine:
         # P10: Front DANGER (2+ frames) -- escape-route awareness
         if self.front_danger_frames >= 2:
             # Prefer arc escape over backward when a side is clear
-            if left_class < DIST_NEAR or right_class < DIST_NEAR:
+            if left_class < DIST_DANGER or right_class < DIST_DANGER:
                 if left_class != right_class:
                     escape_dir = -1 if left_class < right_class else 1
                 else:
@@ -617,7 +617,7 @@ class NavStateMachine:
                 state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
                 return (state, speed, turn, 1, step)
             else:
-                # Both sides NEAR or worse -- timed BACKWARD + escape turn
+                # Both sides DANGER -- timed BACKWARD + escape turn
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                     self.backward_entry_time = time.monotonic()
@@ -1146,8 +1146,8 @@ def run_n2():
     check(cid, classify_distance(20.1) == DIST_NEAR, "20.1 should be NEAR")
     check(cid, classify_distance(25) == DIST_NEAR, "25 should be NEAR")
     check(cid, classify_distance(30) == DIST_NEAR, "30 should be NEAR")
-    check(cid, classify_distance(30.1) == DIST_CAUTION, "30.1 should be CAUTION")
-    check(cid, classify_distance(40) == DIST_CAUTION, "40 should be CAUTION")
+    check(cid, classify_distance(30.1) == DIST_NEAR, "30.1 should be NEAR")
+    check(cid, classify_distance(40) == DIST_NEAR, "40 should be NEAR")
     check(cid, classify_distance(60) == DIST_CAUTION, "60 should be CAUTION")
     check(cid, classify_distance(60.1) == DIST_CLEAR, "60.1 should be CLEAR")
     check(cid, classify_distance(100) == DIST_CLEAR, "100 should be CLEAR")
@@ -1183,8 +1183,8 @@ def run_n2():
 
     # Speed scale mapping
     check(cid, speed_scale_from_front(DIST_CLEAR) == 1.0, "CLEAR speed scale should be 1.0")
-    check(cid, speed_scale_from_front(DIST_CAUTION) == 0.7, "CAUTION speed scale should be 0.7")
-    check(cid, speed_scale_from_front(DIST_NEAR) == 0.45, "NEAR speed scale should be 0.45")
+    check(cid, speed_scale_from_front(DIST_CAUTION) == 0.85, "CAUTION speed scale should be 0.85")
+    check(cid, speed_scale_from_front(DIST_NEAR) == 0.50, "NEAR speed scale should be 0.50")
     check(cid, speed_scale_from_front(DIST_DANGER) == 0.0, "DANGER speed scale should be 0.0")
 
 
@@ -1408,13 +1408,13 @@ def run_n3():
           f"N3.P10d: right has more cm should escape right: state={NAV_STATE_NAMES.get(state)} step={step}")
     check(cid, turn > 0, f"N3.P10d: escape right turn should be positive: turn={turn}")
 
-    # P10e: One side NEAR, other DANGER -- should BACKWARD (both sides >= NEAR)
+    # P10e: One side NEAR, other DANGER -- should ARC (NEAR < DANGER, so arc escape available)
     nav = fresh_nav()
     frame_near_danger = make_frame(fcf=10, fdl=25, rdl=25, fdr=10, rdr=10, rcf=100)
     fsm_update_simple(nav, frame=frame_near_danger)  # 1st frame: counter++
     state, _, _, _, step = fsm_update_simple(nav, frame=frame_near_danger)  # 2nd: P10 fires
-    check(cid, state == NAV_BACKWARD,
-          f"N3.P10e: both sides >= NEAR should backward: state={NAV_STATE_NAMES.get(state)} step={step}")
+    check(cid, state == NAV_ARC_LEFT,
+          f"N3.P10e: left NEAR (< DANGER) should arc left: state={NAV_STATE_NAMES.get(state)} step={step}")
 
     # P10f: One side NEAR, other CAUTION -- should arc (one side < NEAR)
     nav = fresh_nav()
@@ -1429,7 +1429,7 @@ def run_n3():
 
     # P10b-1: Lockout holds BACKWARD even when front clears
     nav = fresh_nav()
-    frame_blocked = make_frame(fcf=10, fdl=25, rdl=25, fdr=10, rdr=10, rcf=100)
+    frame_blocked = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
     fsm_update_simple(nav, frame=frame_blocked)  # 1st danger frame
     state, _, _, _, step = fsm_update_simple(nav, frame=frame_blocked)  # 2nd: P10 fires -> BACKWARD
     check(cid, state == NAV_BACKWARD,
@@ -1444,7 +1444,7 @@ def run_n3():
 
     # P10b-2: Lockout expires -> escape arc (not FORWARD)
     nav2 = fresh_nav()
-    frame_blocked2 = make_frame(fcf=10, fdl=25, rdl=25, fdr=10, rdr=10, rcf=100)
+    frame_blocked2 = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
     fsm_update_simple(nav2, frame=frame_blocked2)
     fsm_update_simple(nav2, frame=frame_blocked2)  # enters BACKWARD + sets lockout
     # Expire the lockout manually
@@ -1459,8 +1459,9 @@ def run_n3():
 
     # P10b-3: Lockout expires with all sides blocked -> pivot
     nav3 = fresh_nav()
-    fsm_update_simple(nav3, frame=frame_blocked2)
-    fsm_update_simple(nav3, frame=frame_blocked2)  # enters BACKWARD
+    frame_blocked3 = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
+    fsm_update_simple(nav3, frame=frame_blocked3)
+    fsm_update_simple(nav3, frame=frame_blocked3)  # enters BACKWARD
     nav3.obstacle_backup_until = time.monotonic() - 0.1
     # Front cleared (robot backed up) but both sides still blocked via rear diagonals
     # FDL/FDR must be clear so front_class = CLEAR; RDL/RDR carry side blocking
