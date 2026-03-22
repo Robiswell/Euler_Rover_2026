@@ -188,7 +188,7 @@ GAITS = {
     0: {  # TRIPOD — do NOT use on slopes >10°: peak servo torque exceeds rated 10 kg·cm.
         #         Use Wave with COG shift for ramps (see Phase 3 hill climb).
         'duty': 0.55,
-        'ff_budget': 575.0,  # conservative — 6.3 deg lag, 69mm clearance
+        'ff_budget': 650.0,  # moderate — 12.6 deg lag, 60mm clearance
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
@@ -211,7 +211,7 @@ GAITS = {
     },
     2: {  # QUADRUPED
         'duty': 0.75,
-        'ff_budget': 650.0,  # moderate -- enough for speed=266 at duty=0.75
+        'ff_budget': 750.0,  # aggressive -- enough for speed=307 at duty=0.75, 20.9 deg lag
         'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.667, 5: 0.667}
     }
 }
@@ -1647,7 +1647,6 @@ if __name__ == "__main__":
 
     # --- Nav tunable constants ---
     CRUISE_SPEED = 500          # Quad unclamped (limit 496), Wave governor-clamped to ~287
-    TRIPOD_CRUISE_SPEED = 420   # under FF governor limit at 30° sweep
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -2522,8 +2521,6 @@ if __name__ == "__main__":
 
             # --- FORWARD with heading correction ---
             base_speed = CRUISE_SPEED
-            if self.terrain_is_tripod:
-                base_speed = TRIPOD_CRUISE_SPEED
             speed_s = speed_scale_from_front(front_class)
             speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
@@ -2605,7 +2602,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.7
+                    self.terrain_mult = 0.8
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2632,7 +2629,7 @@ if __name__ == "__main__":
                 self.terrain_gait = 1  # wave
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult = 0.6
+                self.terrain_mult = 0.7
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
                 return
@@ -2645,7 +2642,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.5
+                    self.terrain_mult = 0.6
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
