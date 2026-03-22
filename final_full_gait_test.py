@@ -177,6 +177,7 @@ STALL_THRESHOLD = 750  # raised from 600 for wet sand operation — tune from te
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
 OVERLOAD_MAX_CYCLES = 10  # max TE cycles per servo per session — limits EPROM wear
+OVERLOAD_DECAY_INTERVAL = 30.0  # seconds without overload before decaying 1 cycle from counter
 
 # Verbose Telemetry — ON by default. Adds [H5] servo detail (5Hz), [BS] sensor (2Hz), [BN] nav decision lines.
 # Disable with --no-verbose-telemetry. Total overhead: ~1.6 KB/s, <1 MB for a 10-minute run.
@@ -548,6 +549,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     stall_counters = {sid: 0     for sid in ALL_SERVOS}
     stall_sustained_start = {sid: 0.0 for sid in ALL_SERVOS}  # timestamp of sustained stall onset (0.0 = not timing)
     overload_cycle_count = {sid: 0 for sid in ALL_SERVOS}
+    overload_last_decay  = {sid: 0.0 for sid in ALL_SERVOS}  # timestamp of last decay tick
+    overload_lifetime    = {sid: 0 for sid in ALL_SERVOS}     # total TE cycles ever (for EEPROM tracking)
     te_dwell_remaining = {sid: 0 for sid in ALL_SERVOS}
     last_actual_phases = {sid: 0.0 for sid in ALL_SERVOS}
 
@@ -949,6 +952,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             te_cycled_this_tick = True
                             te_dwell_remaining[sid] = 5  # 100ms dwell before re-enable
                             overload_cycle_count[sid] += 1
+                            overload_lifetime[sid] += 1
                             te_cycle_counts[sid] += 1
                             te_during_stall[sid] += 1
                             try:
@@ -964,6 +968,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             # else: leave timer running -- retry on next tick
                 else:
                     stall_sustained_start[sid] = 0.0
+                    # Decay overload counter: -1 every 30s without overload
+                    if overload_cycle_count[sid] > 0 and now - overload_last_decay[sid] >= OVERLOAD_DECAY_INTERVAL:
+                        overload_cycle_count[sid] -= 1
+                        overload_last_decay[sid] = now
 
             # Rotate which servo supplies temp/voltage/current each tick -
             # individual reads on one servo, not a 6-servo batch transaction.
@@ -1636,7 +1644,7 @@ if __name__ == "__main__":
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR
+    OBSTACLE_BACKUP_DURATION = 4.0    # seconds of forced backward when front blocked + both sides NEAR
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
