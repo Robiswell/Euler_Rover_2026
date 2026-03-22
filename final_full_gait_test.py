@@ -843,6 +843,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 if gsread_pos.isAvailable(sid, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION):
                     pos_read_count += 1
                     servo_comm_fails[sid] = 0
+                    if servo_disabled[sid]:
+                        servo_disabled[sid] = False  # servo responded -- re-enable
                     pos  = gsread_pos.getData(sid, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION)
                     raw_positions[sid] = pos
                     diff = pos - HOME_POSITIONS[sid]
@@ -923,11 +925,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # but hardware overcurrent protection can still trip.
             # Time-based (not frame-based) so margin is invariant to loop rate jitter.
             now = time.perf_counter()
+            te_cycled_this_tick = False  # max 1 TE disable per tick to limit bus load
             for sid in ALL_SERVOS:
                 # TE dwell: space off/on cycle across 5 frames (100ms) instead of 2
                 if te_dwell_remaining[sid] > 0:
                     te_dwell_remaining[sid] -= 1
                     if te_dwell_remaining[sid] == 0:
+                        # Re-confirm velocity mode + torque limit before re-enabling
+                        packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1)
+                        packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
                         packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
                     continue  # skip normal TE logic while dwelling
 
@@ -936,11 +942,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if stall_sustained_start[sid] == 0.0:
                         stall_sustained_start[sid] = now
                     elif now - stall_sustained_start[sid] >= OVERLOAD_PREVENTION_TIME:
-                        if overload_cycle_count[sid] < OVERLOAD_MAX_CYCLES:
+                        if overload_cycle_count[sid] < OVERLOAD_MAX_CYCLES and not te_cycled_this_tick:
                             comm1, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
-                            packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1)
-                            packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
-                            comm2, _ = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
+                            te_cycled_this_tick = True
                             te_dwell_remaining[sid] = 5  # 100ms dwell before re-enable
                             overload_cycle_count[sid] += 1
                             te_cycle_counts[sid] += 1
@@ -1647,6 +1651,8 @@ if __name__ == "__main__":
     IDX_GX, IDX_GY, IDX_GZ = 16, 17, 18
     IDX_UPSIDE = 19
 
+    _fault_logged = [False] * 8  # one-shot FAULT log per sensor position
+
     def _parse_arduino_csv(line):
         """Parse a 20-column CSV line from Arduino sensor hub into a frame dict.
         Returns dict or None on parse failure."""
@@ -1685,8 +1691,14 @@ if __name__ == "__main__":
             dists = dists[4:8] + dists[0:4]
             upside = 0
 
-        # Clamp distances: preserve -1 sentinel, cap max at 450
+        # Clamp distances: preserve -1 sentinel, log -2.0 FAULT once per sensor, cap max at 450
+        _sensor_labels = ["FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR"]
         for i in range(len(dists)):
+            if dists[i] == -2.0:
+                if not _fault_logged[i]:
+                    _fault_logged[i] = True
+                    print(f"[sensor] FAULT on {_sensor_labels[i]} -- sensor hardware error")
+                continue  # pass -2.0 through; classify_distance treats <0 as UNKNOWN
             if dists[i] == -1:
                 continue
             if dists[i] > 450:
