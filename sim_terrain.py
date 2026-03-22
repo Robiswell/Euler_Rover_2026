@@ -48,7 +48,7 @@ PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 575.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.70, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 650.0},
+    2: {'duty': 0.75, 'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}, 'ff_budget': 650.0},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
@@ -441,9 +441,9 @@ def define_scenarios():
         gait_id=1, speed=270, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=15.0))
 
-    # T7: Ramp 20 deg, Quadruped gait
+    # T7: Ramp 20 deg, Quadruped gait (speed=250 for duty=0.75 governor headroom)
     sc.append(dict(name="T7 Ramp 20deg Quad",
-        gait_id=2, speed=300, turn_bias=0.0, frames=2000,
+        gait_id=2, speed=250, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=20.0))
 
     # T8: Worst case -- wet sand + loose rocks + 15 deg ramp, Wave gait
@@ -462,15 +462,15 @@ def define_scenarios():
         gait_id=1, speed=270, turn_bias=-0.12, frames=1500,
         terrain_type='wet_sand', ramp_deg=0.0))
 
-    # T11: Gait transition under terrain load (Quad@300 -> Wave@270 at frame 500)
+    # T11: Gait transition under terrain load (Quad@250 -> Wave@270 at frame 500)
     sc.append(dict(name="T11 Gait transition wet sand",
-        gait_id=2, speed=300, turn_bias=0.0, frames=1500,
+        gait_id=2, speed=250, turn_bias=0.0, frames=1500,
         terrain_type='wet_sand',
         gait_schedule=[(500, {'gait_id': 1, 'speed': 270})]))
 
-    # T12: Timed fallback sequence on wet sand (Quad@300 45s -> Wave@270 30s -> decel)
+    # T12: Timed fallback sequence on wet sand (Quad@250 45s -> Wave@270 30s -> decel)
     sc.append(dict(name="T12 Timed fallback wet sand",
-        gait_id=2, speed=300, turn_bias=0.0, frames=3900,
+        gait_id=2, speed=250, turn_bias=0.0, frames=3900,
         terrain_type='wet_sand', seed=42,
         gait_schedule=[(2250, {'gait_id': 1, 'speed': 270}),
                        (3750, {'speed': 0})]))
@@ -822,10 +822,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.70->0.70, lr=0.08)
+        # LERP convergence: analytical (duty 0.75->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.70 - 0.70) if abs(0.70 - 0.70) > 1e-9 else 0.01
-        thresh = 0.01 * 0.70
+        delta = abs(0.75 - 0.75) if abs(0.75 - 0.75) > 1e-9 else 0.01
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -839,10 +839,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.70->0.70, lr=0.08)
+        # LERP convergence: analytical (duty 0.75->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.70 - 0.70) if abs(0.70 - 0.70) > 1e-9 else 0.01
-        thresh = 0.01 * 0.70
+        delta = abs(0.75 - 0.75) if abs(0.75 - 0.75) > 1e-9 else 0.01
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")

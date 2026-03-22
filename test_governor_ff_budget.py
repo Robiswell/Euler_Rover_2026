@@ -1,5 +1,5 @@
 """
-Tests for GOVERNOR_FF_BUDGET=700 / FEEDFORWARD_CAP=499 invariants.
+Tests for GOVERNOR_FF_BUDGET=700 / FEEDFORWARD_CAP=499 (production values) invariants.
 
 These tests are pure arithmetic -- no hardware, no imports from final_full_gait_test.py.
 They replicate the exact formulas from the source so they survive internal refactors
@@ -53,17 +53,25 @@ def ff_speed_at_hz(hz, air_sweep, duty, ff_cap, velocity_scalar):
 
 def test_governor_budget_geq_feedforward_cap():
     """
-    Invariant: GOVERNOR_FF_BUDGET >= FEEDFORWARD_CAP.
+    Relationship between GOVERNOR_FF_BUDGET, per-gait ff_budget, and FEEDFORWARD_CAP.
 
-    Budget is the speed ceiling the governor enforces via Hz limiting.
-    Cap is the hard per-tick clamp on raw servo speed.
-    If budget < cap, the Hz governor could allow a speed the cap then silently
-    clips, meaning the governor math doesn't reflect reality.
+    FEEDFORWARD_CAP (499) is a per-tick speed clamp applied in the air-phase
+    speed calculation.  It is NOT required to be <= every per-gait ff_budget.
+
+    Per-gait ff_budget drives the Hz governor (how fast the gait cycles), while
+    FEEDFORWARD_CAP limits the raw servo speed written each tick.  They serve
+    different purposes: a gait can have ff_budget=575 (tripod) or ff_budget=499
+    (wave/quad) while FEEDFORWARD_CAP=499 -- the cap simply means the servo is
+    physically allowed up to 499 raw units per tick, and the governor limits Hz
+    so the gait sweeps at a safe rate.  There is no invariant requiring
+    ff_budget >= FEEDFORWARD_CAP.
+
+    What we do assert: GOVERNOR_FF_BUDGET (the global fallback) >= FEEDFORWARD_CAP,
+    so the governor can always reach the cap speed when needed.
     """
     assert GOVERNOR_FF_BUDGET >= FEEDFORWARD_CAP, (
-        f"Budget {GOVERNOR_FF_BUDGET} < cap {FEEDFORWARD_CAP}: "
-        "governor Hz limit would be set below the feedforward cap, "
-        "making the cap the de-facto budget without the governor knowing."
+        f"GOVERNOR_FF_BUDGET {GOVERNOR_FF_BUDGET} < FEEDFORWARD_CAP {FEEDFORWARD_CAP}: "
+        "global fallback budget must be >= cap so the governor is not artificially constrained."
     )
 
 
@@ -74,7 +82,7 @@ def test_governor_budget_geq_feedforward_cap():
 @pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
     ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
     ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
-    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.75, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
 def test_governor_hz_positive_all_gaits(gait_name, duty, budget, air_sweep):
     """
@@ -97,7 +105,7 @@ def test_governor_hz_positive_all_gaits(gait_name, duty, budget, air_sweep):
 @pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
     ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
     ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
-    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.75, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
 def test_feedforward_cap_binds_before_budget(gait_name, duty, budget, air_sweep):
     """
@@ -113,7 +121,7 @@ def test_feedforward_cap_binds_before_budget(gait_name, duty, budget, air_sweep)
     ff = ff_speed_at_hz(max_hz, air_sweep, duty, FEEDFORWARD_CAP, VELOCITY_SCALAR)
 
     # At max_safe_hz, the raw deg_per_sec * VELOCITY_SCALAR should equal the per-gait budget.
-    # min(FEEDFORWARD_CAP, budget) = FEEDFORWARD_CAP since cap < all budgets.
+    # min(FEEDFORWARD_CAP, budget) = FEEDFORWARD_CAP since cap <= all budgets.
     assert ff == pytest.approx(FEEDFORWARD_CAP, abs=1.0), (
         f"Gait '{gait_name}' (duty={duty}): ff_speed={ff:.2f} at max_safe_hz={max_hz:.4f}. "
         f"Expected ff_speed == FEEDFORWARD_CAP ({FEEDFORWARD_CAP}). "
@@ -136,8 +144,7 @@ def test_wave_duty_075_hz_exceeds_minimum_walking_threshold():
 
     Wave is the slowest gait (duty=0.75, most air-phase time). At 0.2 Hz the
     rover completes one full gait cycle in 5 seconds -- below that the robot
-    moves too slowly to be useful on a competition course. Previous budget=499
-    produced hz=0.204 (barely above); budget=700 must give clear headroom.
+    moves too slowly to be useful on a competition course.
     """
     WAVE_DUTY = 0.75
     MIN_WALKING_HZ = 0.2
@@ -168,7 +175,7 @@ def test_budget_900_would_exceed_feedforward_cap():
     hz_at_900 = governor_max_hz(UNSAFE_BUDGET, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
 
     # The governor assumes ff_speed reaches UNSAFE_BUDGET before the cap intervenes.
-    # Since FEEDFORWARD_CAP=499 < 900, the cap clips -- governor math is broken.
+    # Since FEEDFORWARD_CAP=499 < 900, the cap clips -- governor math is broken at budget=900.
     assert FEEDFORWARD_CAP < UNSAFE_BUDGET, (
         "Test setup error: cap should be below the unsafe budget to demonstrate the hazard."
     )
