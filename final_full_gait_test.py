@@ -798,8 +798,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     # PhErr governor state (CPG paper Eqs. 20-21 exponential ramp)
     max_phase_error_prev = 0.0   # worst-case servo phase error from previous tick (degrees)
     pherr_gov_active     = False # True when governor is engaged (hysteresis)
-    pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor — stuck timeout
+    pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor -- stuck timeout
+    pherr_stuck_cooldown_until = 0.0  # monotonic time: suppress re-trigger for 30s after firing
     ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
+    prev_z_flip          = 1     # track z_flip transitions (roll entry/exit)
 
     prev_loop_ms    = 0.0    # last frame's measured elapsed time — logged in 1Hz heartbeat
     ghost_event_flag = False  # latched True when 125C artifact seen; reset after each log tick
@@ -1079,8 +1081,18 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # ----------------------------------------------------------
             # 2. STATE SMOOTHING (CPG exponential ramps — Sensors-19-03705)
             # ----------------------------------------------------------
-            target_hz   = (shared_speed.value * shared_x_flip.value * shared_z_flip.value) / 1000.0
+            cur_z_flip = shared_z_flip.value
+            target_hz   = (shared_speed.value * shared_x_flip.value * cur_z_flip) / 1000.0
             target_turn = shared_turn_bias.value
+
+            # Post-roll PhErr seed: reset governor state when z_flip transitions
+            # (roll exit). Prevents stale high PhErr from throttling the robot.
+            if cur_z_flip != prev_z_flip:
+                max_phase_error_prev = 0.0
+                pherr_gov_active = False
+                pherr_low_scale_start = 0.0
+                ph_scale = 1.0
+                prev_z_flip = cur_z_flip
 
             # Speed/turn: keep linear LERP (command inputs, not CPG parameters)
             lerp_rate    = min(1.0, 4.0 * real_dt)
@@ -1154,13 +1166,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     -KAPPA_GOVERNOR * (max_phase_error_prev - PHERR_ENGAGE_DEG) / PHERR_RAMP_WIDTH)
                 max_safe_hz *= ph_scale
                 # Stuck timeout: if at floor scale too long, escalate to stall recovery
-                if ph_scale <= PHERR_FLOOR_SCALE + 0.01:
+                if ph_scale <= PHERR_FLOOR_SCALE + 0.01 and time.monotonic() > pherr_stuck_cooldown_until:
                     if pherr_low_scale_start == 0.0:
                         pherr_low_scale_start = time.monotonic()
                     elif (time.monotonic() - pherr_low_scale_start) > PHERR_STUCK_TIMEOUT:
                         for sid in ALL_SERVOS:
                             is_stalled[sid] = True  # triggers existing stall/wiggle recovery
+                            stall_counters[sid] = 3  # latch stall through normal exit logic
                         pherr_low_scale_start = 0.0
+                        pherr_stuck_cooldown_until = time.monotonic() + 30.0  # suppress re-trigger
                 else:
                     pherr_low_scale_start = 0.0
             else:
@@ -1381,6 +1395,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 0)  # safety: zero velocity before torque disable to prevent runaway motion
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
         port_handler.closePort()
+        try:
+            udp_sock.close()
+            cmd_sock.close()
+        except Exception:
+            pass
         print("[heart] offline")
 
 
@@ -3688,6 +3707,10 @@ if __name__ == "__main__":
         print("\n[brain] interrupted")
     finally:
         is_running.value = False
+        try:
+            brain_udp_sock.close()
+        except Exception:
+            pass  # may not exist if competition nav wasn't entered
         gait_process.join(timeout=5)
         if gait_process.is_alive():
             gait_process.terminate()
