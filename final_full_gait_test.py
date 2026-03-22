@@ -94,7 +94,7 @@ ALL_SERVOS         = LEFT_SERVOS + RIGHT_SERVOS
 ROLL_FRONT_SERVOS        = {1, 2}   # Fix 76: counter-rotating front pair for self-right
 ROLL_REAR_SERVOS         = {4, 5}   # Fix 76: counter-rotating rear pair for self-right
 SERVO_SPEED_GOVERNOR_CAP = 499     # Speed ceiling for roll/self-right mode (walking uses GOVERNOR_FF_BUDGET)
-WALKING_SPEED_CAP        = 860     # STS -- walking mode clamp: ff(499) + phase correction headroom
+WALKING_SPEED_CAP        = 1200    # STS -- walking mode clamp: ff(499) + phase correction for up to ~58 deg error
 
 # Body Geometry (measured from physical robot — verified from physical robot measurements)
 # These values are the foundation for all ground-clearance calculations.
@@ -138,8 +138,6 @@ PHERR_FLOOR_SCALE  = 0.35   # minimum Hz multiplier at full throttle (35% of max
 PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near threshold, aggressive at high error)
 PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
 KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
-MIN_STANCE_HZ      = 0.15   # Hz -- absolute floor after PhErr governor; prevents positive feedback loop
-                             # where low Hz -> low stance FF -> higher PhErr -> even lower Hz
 
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
@@ -189,7 +187,6 @@ GAITS = {
         #         Use Wave with COG shift for ramps (see Phase 3 hill climb).
         'duty': 0.55,
         'ff_budget': 575.0,  # conservative — 6.3 deg lag, 69mm clearance
-        'impact_start': 340, 'impact_end': 20,  # 40-deg sweep — wider for more stance FF (reduces PhErr)
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
@@ -208,14 +205,12 @@ GAITS = {
         # Spacing 0.167; with duty=0.75, same-column legs are >=0.5 apart
         # (air=0.25), so no same-column overlap is possible.
         'ff_budget': 700.0,  # aggressive — competition gait, max speed, 52mm clearance (37mm margin)
-        'impact_start': 345, 'impact_end': 15,  # 30-deg sweep — default, high duty compensates
-        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
+        'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}
     },
     2: {  # QUADRUPED
         'duty': 0.70,
         'ff_budget': 650.0,  # moderate — enough for speed=318 on sand, 61mm clearance
-        'impact_start': 345, 'impact_end': 15,  # 30-deg sweep — default, high duty compensates
-        'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.666, 5: 0.666}
+        'offsets': {2: 0.0, 5: 0.0,  3: 0.333, 6: 0.333,  4: 0.666, 1: 0.666}
     }
 }
 
@@ -1098,8 +1093,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             gait_params = GAITS.get(current_gait_id, GAITS[0])
             t_duty      = max(0.01, min(0.99, gait_params['duty']))
             t_ff_budget = gait_params.get('ff_budget', GOVERNOR_FF_BUDGET)
-            t_imp_start = gait_params.get('impact_start', DEFAULT_IMPACT_START)
-            t_imp_end   = gait_params.get('impact_end', DEFAULT_IMPACT_END)
 
             # Phase offsets target (needed by both snap block and CPG ramp below)
             t_offsets = gait_params['offsets']
@@ -1111,13 +1104,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if current_gait_id != prev_gait_id:
                 smooth_duty = t_duty
                 smooth_ff_budget = t_ff_budget
-                # Snap per-gait impact angles (terrain override takes priority via shared)
-                if shared_impact_start.value == int(GAITS.get(prev_gait_id, GAITS[0]).get('impact_start', DEFAULT_IMPACT_START)):
-                    shared_impact_start.value = t_imp_start
-                    smooth_imp_start = float(t_imp_start)
-                if shared_impact_end.value == int(GAITS.get(prev_gait_id, GAITS[0]).get('impact_end', DEFAULT_IMPACT_END)):
-                    shared_impact_end.value = t_imp_end
-                    smooth_imp_end = float(t_imp_end)
                 for sid in ALL_SERVOS:
                     smooth_offsets[sid] = t_offsets[sid]
                 prev_gait_id = current_gait_id
@@ -1175,11 +1161,6 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 ph_scale = 1.0  # governor inactive -- no throttle
                 pherr_low_scale_start = 0.0
-
-            # Absolute Hz floor: prevents PhErr positive feedback loop
-            # (low Hz -> low stance FF -> higher PhErr -> even lower Hz)
-            # Capped by clearance governor so floor never causes ground scraping
-            max_safe_hz = max(min(MIN_STANCE_HZ, max_clr_hz), max_safe_hz)
 
             gov_active = (abs(hz_L) > max_safe_hz + 0.001 or abs(hz_R) > max_safe_hz + 0.001)
             hz_L = max(-max_safe_hz, min(max_safe_hz, hz_L))
