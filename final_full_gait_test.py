@@ -1648,7 +1648,8 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 500          # Quad unclamped (limit 496), Wave governor-clamped to ~287
+    CRUISE_SPEED = 500          # Tripod/Wave cruise — Wave governor-clamped to ~287
+    QUAD_CRUISE_SPEED = 200     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
@@ -2522,7 +2523,7 @@ if __name__ == "__main__":
                 return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
 
             # --- FORWARD with heading correction ---
-            base_speed = CRUISE_SPEED
+            base_speed = QUAD_CRUISE_SPEED if self.terrain_gait == 2 else CRUISE_SPEED
             speed_s = speed_scale_from_front(front_class)
             speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
@@ -2914,7 +2915,7 @@ if __name__ == "__main__":
                 brain_log("FALLBACK: timed sequence — no sensor data")
                 set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
                                step_name="fallback_quad_init")
-                set_gait_state(speed=400, turn=0.0, step_name="fallback_quad_fwd")
+                set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="fallback_quad_fwd")
                 stall_tsleep(45)
                 set_gait_state(gait=1, speed=350, step_name="fallback_wave_fwd")
                 stall_tsleep(30)
