@@ -8,7 +8,7 @@ from scservo_sdk import PortHandler, PacketHandler, GroupSyncWrite
 # =================================================================
 # HARDWARE CONFIGURATION
 # =================================================================
-PORT_NAME      = "/dev/ttyUSB0"  
+PORT_NAME      = "/dev/ttyUSB1"
 BAUDRATE       = 1000000       
 SERVO_PROTOCOL = 0               
 
@@ -35,21 +35,19 @@ HOME_POSITIONS = {
 }
 
 KP_PHASE = 12.0 # Slightly lowered as Feed-Forward is now highly accurate
-STALL_THRESHOLD = 600 
+STALL_THRESHOLD = 750
 
-# --- TRUE KINEMATIC GAIT DICTIONARIES ---
+# --- TRUE KINEMATIC GAIT DICTIONARIES (synced with final_full_gait_test.py) ---
 GAITS = {
     0: {  # TRIPOD
-        'duty': 0.5, # FIXED: Must be exactly 0.5 to maintain 180-degree physical separation
+        'duty': 0.55,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE
-        'duty': 0.85, 
-        # HARDWARE CALIBRATION: Leg 5 offset increased from 0.333 to 0.380.
-        # This forces Leg 5 to move further back along the ground before Leg 6 swings!
+        'duty': 0.75,
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
-    2: {  # QUADRUPED / RIPPLE
+    2: {  # QUADRUPED
         'duty': 0.7,
         'offsets': {2: 0.0, 6: 0.0,  4: 0.333, 1: 0.333,  3: 0.666, 5: 0.666}
     }

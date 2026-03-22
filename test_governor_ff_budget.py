@@ -22,11 +22,18 @@ GOVERNOR_FF_BUDGET = 700.0   # line 109
 FEEDFORWARD_CAP    = 499.0   # line 108
 VELOCITY_SCALAR    = 1.85    # line 90
 
-# Stance sweep for DEFAULT_IMPACT_START=345, DEFAULT_IMPACT_END=15:
-#   stance_sweep = (15 - 345 + 180) % 360 - 180 = 210 % 360 - 180 = 30
-#   air_sweep    = get_air_sweep(30) = 360 - 30 = 330 (positive, forward)
-STANCE_SWEEP_DEFAULT = 30.0
-AIR_SWEEP_DEFAULT    = 330.0
+# Per-gait sweep values (from GAITS dict impact_start/impact_end):
+#   Tripod: 340/20 -> stance_sweep = (20-340+180)%360-180 = 40, air = 320
+#   Wave/Quad: 345/15 -> stance_sweep = (15-345+180)%360-180 = 30, air = 330
+STANCE_SWEEP_TRIPOD  = 40.0
+AIR_SWEEP_TRIPOD     = 320.0
+STANCE_SWEEP_DEFAULT = 30.0   # Wave and Quad
+AIR_SWEEP_DEFAULT    = 330.0  # Wave and Quad
+
+# Per-gait ff_budget values (from GAITS dict)
+FF_BUDGET_TRIPOD = 575.0
+FF_BUDGET_WAVE   = 700.0
+FF_BUDGET_QUAD   = 650.0
 
 
 def governor_max_hz(budget, velocity_scalar, duty, air_sweep):
@@ -64,19 +71,19 @@ def test_governor_budget_geq_feedforward_cap():
 # Test 2: governor produces positive Hz for all three gaits at 30-deg sweep
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("gait_name,duty", [
-    ("tripod",    0.50),
-    ("wave",      0.75),
-    ("quadruped", 0.70),
+@pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
+    ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
+    ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
-def test_governor_hz_positive_all_gaits(gait_name, duty):
+def test_governor_hz_positive_all_gaits(gait_name, duty, budget, air_sweep):
     """
-    Invariant: max_safe_hz > 0 for every gait with default 30-deg stance sweep.
+    Invariant: max_safe_hz > 0 for every gait with its per-gait sweep and budget.
 
     A non-positive result would mean the governor clamps Hz to zero or below,
     stalling the robot at any speed command.
     """
-    hz = governor_max_hz(GOVERNOR_FF_BUDGET, VELOCITY_SCALAR, duty, AIR_SWEEP_DEFAULT)
+    hz = governor_max_hz(budget, VELOCITY_SCALAR, duty, air_sweep)
     assert hz > 0.0, (
         f"Gait '{gait_name}' (duty={duty}): governor returned hz={hz:.4f}, "
         "robot would be stalled."
@@ -87,28 +94,26 @@ def test_governor_hz_positive_all_gaits(gait_name, duty):
 # Test 3: feedforward cap (499) is the binding constraint at governor limit
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("gait_name,duty", [
-    ("tripod",    0.50),
-    ("wave",      0.75),
-    ("quadruped", 0.70),
+@pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
+    ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
+    ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
-def test_feedforward_cap_binds_before_budget(gait_name, duty):
+def test_feedforward_cap_binds_before_budget(gait_name, duty, budget, air_sweep):
     """
     Invariant: when the rover walks at max_safe_hz, ff_speed == FEEDFORWARD_CAP.
 
     This confirms the cap (499) is the constraint that limits servo speed,
-    not the budget (700). The governor limits Hz so that the resulting
-    feedforward speed lands exactly at 499. If the cap were raised above 700,
-    the governor would become the binding constraint instead -- which is the
-    unsafe regime that caused ground contact at budget=900.
+    not the per-gait budget. The governor limits Hz so that the resulting
+    feedforward speed lands exactly at 499.
 
     Tolerance: 1 STS raw unit (rounding in integer servo write).
     """
-    max_hz = governor_max_hz(GOVERNOR_FF_BUDGET, VELOCITY_SCALAR, duty, AIR_SWEEP_DEFAULT)
-    ff = ff_speed_at_hz(max_hz, AIR_SWEEP_DEFAULT, duty, FEEDFORWARD_CAP, VELOCITY_SCALAR)
+    max_hz = governor_max_hz(budget, VELOCITY_SCALAR, duty, air_sweep)
+    ff = ff_speed_at_hz(max_hz, air_sweep, duty, FEEDFORWARD_CAP, VELOCITY_SCALAR)
 
-    # At max_safe_hz, the raw deg_per_sec * VELOCITY_SCALAR should equal GOVERNOR_FF_BUDGET.
-    # min(FEEDFORWARD_CAP, GOVERNOR_FF_BUDGET) = FEEDFORWARD_CAP since cap < budget.
+    # At max_safe_hz, the raw deg_per_sec * VELOCITY_SCALAR should equal the per-gait budget.
+    # min(FEEDFORWARD_CAP, budget) = FEEDFORWARD_CAP since cap < all budgets.
     assert ff == pytest.approx(FEEDFORWARD_CAP, abs=1.0), (
         f"Gait '{gait_name}' (duty={duty}): ff_speed={ff:.2f} at max_safe_hz={max_hz:.4f}. "
         f"Expected ff_speed == FEEDFORWARD_CAP ({FEEDFORWARD_CAP}). "
@@ -116,9 +121,9 @@ def test_feedforward_cap_binds_before_budget(gait_name, duty):
     )
 
     # Validate formula round-trip: uncapped speed at max_safe_hz must equal budget
-    uncapped = abs(AIR_SWEEP_DEFAULT) * abs(max_hz) / (1.0 - duty) * VELOCITY_SCALAR
-    assert uncapped == pytest.approx(GOVERNOR_FF_BUDGET, abs=1.0), (
-        f"Governor formula round-trip broken: uncapped={uncapped:.1f}, budget={GOVERNOR_FF_BUDGET}")
+    uncapped = abs(air_sweep) * abs(max_hz) / (1.0 - duty) * VELOCITY_SCALAR
+    assert uncapped == pytest.approx(budget, abs=1.0), (
+        f"Governor formula round-trip broken: uncapped={uncapped:.1f}, budget={budget}")
 
 
 # ---------------------------------------------------------------------------

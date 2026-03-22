@@ -41,21 +41,21 @@ LEFT_SERVOS = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS = [1, 2, 3, 4, 5, 6]
 DIRECTION_MAP = {1: 1, 2: -1, 3: -1, 4: -1, 5: 1, 6: 1}
-HOME_POSITIONS = {1: 3447, 2: 955, 3: 1420, 4: 1569, 5: 3197, 6: 3175}
+HOME_POSITIONS = {1: 3474, 2: 954, 3: 1423, 4: 1613, 5: 3238, 6: 3201}
 KP_PHASE = 12.0
 LEG_SPLAY = {1: -35, 2: -35, 6: 0, 3: 0, 5: 35, 4: 35}
 
 GAITS = {
-    0: {'name': 'Tripod',    'duty': 0.5,
+    0: {'name': 'Tripod',    'duty': 0.55,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave',      'duty': 0.70,
-        'offsets': {5: 0.0, 3: 0.167, 1: 0.333, 4: 0.5, 6: 0.667, 2: 0.833}},
+    1: {'name': 'Wave',      'duty': 0.75,
+        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}},
     2: {'name': 'Quadruped', 'duty': 0.70,
-        'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
+        'offsets': {2: 0.0, 6: 0.0, 4: 0.333, 1: 0.333, 3: 0.666, 5: 0.666}},
 }
 
-DEFAULT_IMPACT_START = 330.0
-DEFAULT_IMPACT_END = 30.0
+DEFAULT_IMPACT_START = 345.0
+DEFAULT_IMPACT_END = 15.0
 
 # CPG transition
 KAPPA_TRANSITION = 8.0

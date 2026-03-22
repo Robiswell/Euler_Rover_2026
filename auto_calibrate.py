@@ -45,8 +45,8 @@ SERVO_LABELS = {
 
 # Current HOME_POSITIONS from final_full_gait_test.py
 HOME_POSITIONS = {
-    1: 3447, 2: 955, 3: 1420,
-    4: 1569, 5: 3197, 6: 3175,
+    1: 3474, 2: 954, 3: 1423,
+    4: 1613, 5: 3238, 6: 3201,
 }
 
 # ---------- Calibration parameters ----------

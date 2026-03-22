@@ -2,7 +2,7 @@
 import time
 from scservo_sdk import PortHandler, PacketHandler
 
-PORT_NAME      = "/dev/ttyUSB0"  
+PORT_NAME      = "/dev/ttyUSB1"
 BAUDRATE       = 1000000       
 SERVO_PROTOCOL = 0               
 
