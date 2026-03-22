@@ -3268,7 +3268,7 @@ if __name__ == "__main__":
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
             tripod_duty = GAITS[0]['duty']  # 0.55
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
-            tripod_speed = min(350, max_speed)  # reduced from 450 — less phase lag → more clearance
+            tripod_speed = min(250, max_speed)  # reduced from 350 — governor was clamping 57%, PhErr 69 deg
             print("=== TEST MODE: TRIPOD ===")
             print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
@@ -3307,7 +3307,7 @@ if __name__ == "__main__":
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             max_clr_speed_q = int(max_clr_hz_q * 1000)
-            quad_speed = min(200, max_clr_speed_q)  # within governor Hz ceiling (max_safe_hz=0.319)
+            quad_speed = min(150, max_clr_speed_q)  # reduced from 200 — PhErr 54 deg, need <30 for overlap margin
             print("=== TEST MODE: QUADRUPED ===")
             print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
