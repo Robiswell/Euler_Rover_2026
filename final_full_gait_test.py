@@ -1210,10 +1210,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if cycle_hz_R > 0.001: master_time_R = (master_time_R + cycle_hz_R * real_dt) % 1.0
 
             # Phase Resync for stability
-            if abs(smooth_turn) < 0.01 and abs(smooth_hz) > 0.01 and (hz_L * hz_R) > 0:
+            if abs(smooth_turn) < 0.05 and abs(smooth_hz) > 0.01 and (hz_L * hz_R) > 0:
                 clock_diff = (master_time_L - master_time_R + 0.5) % 1.0 - 0.5
                 if abs(clock_diff) > 0.005:
-                    decay = clock_diff * min(1.0, 2.0 * real_dt)
+                    decay = clock_diff * min(1.0, 8.0 * real_dt)
                     master_time_L = (master_time_L - decay / 2) % 1.0
                     master_time_R = (master_time_R + decay / 2) % 1.0
                 # else: clocks are within 0.005 cycles - close enough, let decay converge naturally
@@ -2169,7 +2169,7 @@ if __name__ == "__main__":
             self._impact_cooldown_until = 0.0
             self._last_stall_clear_time = time.monotonic()
             # Terrain state (held during non-FORWARD/SLOW states)
-            self.terrain_gait = 0  # default tripod
+            self.terrain_gait = 2  # default quad
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult = 1.0
@@ -2692,13 +2692,13 @@ if __name__ == "__main__":
                 self._light_load_start = 0.0
                 # Tripod safety gate: immediate fallback
                 if self.terrain_is_tripod:
-                    self.terrain_gait = 0  # back to tripod
+                    self.terrain_gait = 2  # back to quad
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(0)  # force transition from tripod
                     # fall through to T9
 
-            # T9: Default — tripod
-            self.terrain_gait = 0
+            # T9: Default — quad
+            self.terrain_gait = 2
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult = 1.0
@@ -2890,7 +2890,7 @@ if __name__ == "__main__":
             else:
                 print("=== COMPETITION MODE (autonomous nav) ===")
             # Confirm clearance governor integration
-            default_duty = GAITS[0]['duty']  # tripod is default gait
+            default_duty = GAITS[2]['duty']  # quad is default gait
             default_clr_hz = compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, default_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
@@ -2903,11 +2903,11 @@ if __name__ == "__main__":
             # --- Timed fallback sequence (used when sensors unavailable) ---
             def run_timed_fallback():
                 brain_log("FALLBACK: timed sequence — no sensor data")
-                set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
-                               step_name="fallback_tripod_init")
-                set_gait_state(speed=CRUISE_SPEED, turn=0.0, step_name="fallback_tripod_fwd")
+                set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                               step_name="fallback_quad_init")
+                set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="fallback_quad_fwd")
                 stall_tsleep(45)
-                set_gait_state(gait=1, speed=350, step_name="fallback_wave_fwd")
+                set_gait_state(gait=2, speed=QUAD_CRUISE_SPEED, step_name="fallback_quad_fwd")
                 stall_tsleep(30)
                 set_gait_state(speed=0, turn=0.0, step_name="fallback_shutdown")
                 tsleep(3)
@@ -2958,8 +2958,8 @@ if __name__ == "__main__":
                         # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
                         roll_attempts = 0
                         MAX_ROLL_ATTEMPTS = 2
-                        # Set initial gait: tripod for competition speed
-                        set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                        # Set initial gait: quad for competition
+                        set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
                                        speed=0, turn=0.0, x_flip=1,
                                        step_name="nav_init")
 
@@ -3027,12 +3027,12 @@ if __name__ == "__main__":
                                 else:
                                     remaining = MISSION_TIMEOUT_S - (time.monotonic() - nav.mission_start)
                                     if remaining > 5:
-                                        set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
-                                                       speed=CRUISE_SPEED, turn=0.0, x_flip=1,
-                                                       step_name="fallback_mid_tripod")
+                                        set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                                                       speed=QUAD_CRUISE_SPEED, turn=0.0, x_flip=1,
+                                                       step_name="fallback_mid_quad")
                                         stall_tsleep(min(remaining * 0.6, 45))
-                                        set_gait_state(gait=1, speed=350,
-                                                       step_name="fallback_mid_wave")
+                                        set_gait_state(gait=2, speed=QUAD_CRUISE_SPEED,
+                                                       step_name="fallback_mid_quad_2")
                                         stall_tsleep(min(remaining * 0.3, 30))
                                     set_gait_state(speed=0, turn=0.0,
                                                    step_name="fallback_mid_stop")
