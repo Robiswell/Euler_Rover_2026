@@ -178,7 +178,7 @@ KP_PHASE        = 12.0
 STALL_THRESHOLD = 750  # raised from 600 for wet sand operation — tune from telemetry after first run
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
-OVERLOAD_MAX_CYCLES = 10  # max TE cycles per servo per session — limits EPROM wear
+OVERLOAD_MAX_CYCLES = 50  # max TE cycles per servo per session — raised from 10 for competition sand (EEPROM rated 100k writes)
 OVERLOAD_DECAY_INTERVAL = 30.0  # seconds without overload before decaying 1 cycle from counter
 
 # Verbose Telemetry — ON by default. Adds [H5] servo detail (5Hz), [BS] sensor (2Hz), [BN] nav decision lines.
@@ -958,14 +958,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             overload_lifetime[sid] += 1
                             te_cycle_counts[sid] += 1
                             te_during_stall[sid] += 1
-                            try:
-                                stall_dur = now - stall_sustained_start[sid]
-                                with open(LOG_FILE, "a") as f:
-                                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                                    f.write(f"[{ts}] [TE-CYCLE] servo=s{sid} stall_dur={stall_dur:.2f}s "
+                            stall_dur = now - stall_sustained_start[sid]
+                            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                            overrun_buffer.append(f"[{ts}] [TE-CYCLE] servo=s{sid} stall_dur={stall_dur:.2f}s "
                                             f"load={load_mag} cycle={overload_cycle_count[sid]}/{OVERLOAD_MAX_CYCLES}\n")
-                            except:
-                                pass
                             if comm1 == 0:  # COMM_SUCCESS
                                 stall_sustained_start[sid] = 0.0
                             # else: leave timer running -- retry on next tick
@@ -1145,6 +1141,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
             smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
+            smooth_duty = max(0.01, min(0.99, smooth_duty))  # clamp after ramp — prevents division by near-zero in stance/air speed calc
             smooth_ff_budget = cpg_exp_ramp(smooth_ff_budget, t_ff_budget, KAPPA_TRANSITION, real_dt)
 
             # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
@@ -1377,12 +1374,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Loop overrun detection
             if prev_loop_ms > 18.0:
                 overrun_streak += 1
-                try:
-                    with open(LOG_FILE, "a") as f:
-                        ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        f.write(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
-                except:
-                    pass
+                ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
                 if overrun_streak >= 3 and (overrun_streak == 3 or overrun_streak % 50 == 0):
                     flush_ring_buffer("OVERRUN-CONTEXT", 50, f"{overrun_streak} consecutive overruns")
             else:
