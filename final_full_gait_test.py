@@ -1646,8 +1646,8 @@ if __name__ == "__main__":
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
-    CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides DANGER
+    CLIFF_BACKUP_DURATION = 10.0      # seconds of forced backward on front cliff before escape
+    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR or worse
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -2169,9 +2169,9 @@ if __name__ == "__main__":
             self._impact_cooldown_until = 0.0
             self._last_stall_clear_time = time.monotonic()
             # Terrain state (held during non-FORWARD/SLOW states)
-            self.terrain_gait = 2  # default quad
-            self.terrain_impact_start = QUAD_IMPACT_START
-            self.terrain_impact_end = QUAD_IMPACT_END
+            self.terrain_gait = 0  # default tripod
+            self.terrain_impact_start = DEFAULT_IMPACT_START
+            self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
@@ -2388,36 +2388,33 @@ if __name__ == "__main__":
                 step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
                 return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-            # P10: Front DANGER (2+ frames, not dead-end) -- escape-route awareness
+            # P10: Front DANGER (2+ frames) -- never advance, only pivot or backup
             if self.front_danger_frames >= 2:
-                # Prefer arc escape over backward when a side is clear
-                if left_class < DIST_DANGER or right_class < DIST_DANGER:
-                    # Pick the freer side; tie-break with raw cm (most clearance)
-                    if left_class != right_class:
-                        escape_dir = -1 if left_class < right_class else 1
-                    else:
-                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
-                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
-                        escape_dir = -1 if l_cm >= r_cm else 1
-                    if escape_dir < 0:
-                        self._transition(NAV_ARC_LEFT)
-                    else:
-                        self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(1.5)
-                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
-                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-                    step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
-                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
-                    return (state, speed, turn, 1, step)
-                else:
-                    # Both sides DANGER -- timed BACKWARD + escape turn
+                if left_class >= DIST_NEAR and right_class >= DIST_NEAR:
+                    # Both sides NEAR or DANGER (<40cm) -- boxed in, backup 8s
                     if self.state != NAV_BACKWARD:
                         self.hold_position_count = 0
                         self.backward_entry_time = time.monotonic()
                         self.obstacle_backup_until = now + OBSTACLE_BACKUP_DURATION
+                        self._start_dwell(0.8)  # only on fresh entry -- avoid resetting every frame
                     self._transition(NAV_BACKWARD)
-                    self._start_dwell(0.8)
                     return self._backward_action(frame)
+                else:
+                    # A side is CLEAR or CAUTION (>40cm) -- pivot toward freer side (speed=0)
+                    if left_class != right_class:
+                        pivot_dir = -1 if left_class < right_class else 1
+                    else:
+                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
+                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
+                        pivot_dir = -1 if l_cm >= r_cm else 1
+                    self.pivot_direction = pivot_dir
+                    self._transition(NAV_PIVOT_TURN)
+                    self._start_dwell(1.5)
+                    self.terrain_impact_start = PIVOT_IMPACT_START
+                    self.terrain_impact_end = PIVOT_IMPACT_END
+                    turn = pivot_dir * PIVOT_TURN_BIAS
+                    step = "nav_danger_pivot_L" if pivot_dir < 0 else "nav_danger_pivot_R"
+                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
             # P10b: Obstacle backup lockout -- forced BACKWARD until duration expires, then escape
             if self.obstacle_backup_until > 0.0:
@@ -2695,15 +2692,15 @@ if __name__ == "__main__":
                 self._light_load_start = 0.0
                 # Tripod safety gate: immediate fallback
                 if self.terrain_is_tripod:
-                    self.terrain_gait = 2  # back to quad
+                    self.terrain_gait = 0  # back to tripod
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(0)  # force transition from tripod
                     # fall through to T9
 
-            # T9: Default — quadruped
-            self.terrain_gait = 2
-            self.terrain_impact_start = QUAD_IMPACT_START
-            self.terrain_impact_end = QUAD_IMPACT_END
+            # T9: Default — tripod
+            self.terrain_gait = 0
+            self.terrain_impact_start = DEFAULT_IMPACT_START
+            self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult = 1.0
             self.terrain_is_tripod = False
             self._apply_gait_transition(prev_gait)
@@ -2893,11 +2890,11 @@ if __name__ == "__main__":
             else:
                 print("=== COMPETITION MODE (autonomous nav) ===")
             # Confirm clearance governor integration
-            default_duty = GAITS[2]['duty']  # quad is default gait
-            default_clr_hz = compute_max_clearance_hz(QUAD_IMPACT_START, QUAD_IMPACT_END, default_duty,
+            default_duty = GAITS[0]['duty']  # tripod is default gait
+            default_clr_hz = compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, default_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
-            print(f"    default config: {QUAD_IMPACT_START}°/{QUAD_IMPACT_END}° quad(duty={default_duty}) → "
+            print(f"    default config: {DEFAULT_IMPACT_START}°/{DEFAULT_IMPACT_END}° tripod(duty={default_duty}) → "
                   f"max_speed={int(default_clr_hz * 1000)}")
             print(f"    body: radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm, "
@@ -2906,9 +2903,9 @@ if __name__ == "__main__":
             # --- Timed fallback sequence (used when sensors unavailable) ---
             def run_timed_fallback():
                 brain_log("FALLBACK: timed sequence — no sensor data")
-                set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
-                               step_name="fallback_quad_init")
-                set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="fallback_quad_fwd")
+                set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                               step_name="fallback_tripod_init")
+                set_gait_state(speed=CRUISE_SPEED, turn=0.0, step_name="fallback_tripod_fwd")
                 stall_tsleep(45)
                 set_gait_state(gait=1, speed=350, step_name="fallback_wave_fwd")
                 stall_tsleep(30)
@@ -2961,8 +2958,8 @@ if __name__ == "__main__":
                         # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
                         roll_attempts = 0
                         MAX_ROLL_ATTEMPTS = 2
-                        # Set initial gait: quadruped, wider stance for motor margin
-                        set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
+                        # Set initial gait: tripod for competition speed
+                        set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
                                        speed=0, turn=0.0, x_flip=1,
                                        step_name="nav_init")
 
@@ -3030,9 +3027,9 @@ if __name__ == "__main__":
                                 else:
                                     remaining = MISSION_TIMEOUT_S - (time.monotonic() - nav.mission_start)
                                     if remaining > 5:
-                                        set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
-                                                       speed=QUAD_CRUISE_SPEED, turn=0.0, x_flip=1,
-                                                       step_name="fallback_mid_quad")
+                                        set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                                                       speed=CRUISE_SPEED, turn=0.0, x_flip=1,
+                                                       step_name="fallback_mid_tripod")
                                         stall_tsleep(min(remaining * 0.6, 45))
                                         set_gait_state(gait=1, speed=350,
                                                        step_name="fallback_mid_wave")
