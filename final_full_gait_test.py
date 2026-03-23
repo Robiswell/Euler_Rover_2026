@@ -3038,7 +3038,7 @@ if __name__ == "__main__":
                                     remaining = MISSION_TIMEOUT_S - (time.monotonic() - nav.mission_start)
                                     if remaining > 5:
                                         set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END,
-                                                       speed=400, turn=0.0, x_flip=1,
+                                                       speed=QUAD_CRUISE_SPEED, turn=0.0, x_flip=1,
                                                        step_name="fallback_mid_quad")
                                         stall_tsleep(min(remaining * 0.6, 45))
                                         set_gait_state(gait=1, speed=350,
@@ -3620,7 +3620,7 @@ if __name__ == "__main__":
 
             # Phase 1: Quadruped forward (best stability + speed balance on sand)
             set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="comp_quad_init")
-            set_gait_state(speed=400, turn=0.0, step_name="comp_quad_fwd")
+            set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="comp_quad_fwd")
             stall_tsleep(45)
 
             # Phase 2: Wave fallback (max ground contact if quad didn't finish)
