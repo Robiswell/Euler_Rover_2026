@@ -2894,7 +2894,7 @@ if __name__ == "__main__":
             default_clr_hz = compute_max_clearance_hz(DEFAULT_IMPACT_START, DEFAULT_IMPACT_END, default_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
             print(f"  Clearance governor: ACTIVE (Sensors-19-03705)")
-            print(f"    default config: {DEFAULT_IMPACT_START}°/{DEFAULT_IMPACT_END}° tripod(duty={default_duty}) → "
+            print(f"    default config: {DEFAULT_IMPACT_START}°/{DEFAULT_IMPACT_END}° quad(duty={default_duty}) → "
                   f"max_speed={int(default_clr_hz * 1000)}")
             print(f"    body: radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm, "
@@ -2907,7 +2907,7 @@ if __name__ == "__main__":
                                step_name="fallback_quad_init")
                 set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="fallback_quad_fwd")
                 stall_tsleep(45)
-                set_gait_state(gait=2, speed=QUAD_CRUISE_SPEED, step_name="fallback_quad_fwd")
+                set_gait_state(speed=QUAD_CRUISE_SPEED, turn=0.0, step_name="fallback_quad_fwd")
                 stall_tsleep(30)
                 set_gait_state(speed=0, turn=0.0, step_name="fallback_shutdown")
                 tsleep(3)
