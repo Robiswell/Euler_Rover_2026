@@ -11,7 +11,7 @@ Usage:
 import sys, csv, math, pathlib, collections
 
 # ── Limits (mirrors sim_terrain.py pass criteria) ────────────────────────────
-STALL_THRESHOLD   = 750
+STALL_THRESHOLD   = 600
 STALL_HYSTERESIS  = 3      # frames to set stall
 STALL_EXIT_FRAMES = 10
 MAX_EXIT_SNAP_STS = 600

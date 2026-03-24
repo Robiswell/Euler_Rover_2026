@@ -41,10 +41,6 @@ LEG_SPLAY      = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 750
 real_dt           = 0.02
-GOVERNOR_FF_BUDGET = 575.0  # default fallback; per-gait 'ff_budget' overrides
-FEEDFORWARD_CAP = 499.0     # STS raw units -- max open-loop speed (servo physical limit)
-WALKING_SPEED_CAP = 1200
-PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
@@ -260,9 +256,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
 
         base_sweep = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
-        # v2 governor: per-gait ff_budget, NO pi/2 factor
-        gait_ff_budget = g.get('ff_budget', GOVERNOR_FF_BUDGET)
-        max_safe = (gait_ff_budget / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+        # v2 governor: NO pi/2 factor
+        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         # governor headroom (outer wheel)
         outer_hz = max(abs(hz_L_raw), abs(hz_R_raw))
@@ -335,23 +330,23 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
                 else:
                     dps = (abs(air_sweep_val) * abs(s_hz)) / (1.0 - smooth_duty)
 
-                ff_sp = min(FEEDFORWARD_CAP, dps * VELOCITY_SCALAR)
+                ff_sp = dps * VELOCITY_SCALAR
 
                 # v2 phase error
                 se = (tp - cur_ph + 180) % 360 - 180
                 if not is_rev and se < -90: se += 360
                 elif is_rev and se > 90: se -= 360
 
-                # v2: flat KP_PHASE with deadband
-                correction = se * KP_PHASE if abs(se) >= PHERR_DEADBAND else 0.0
+                # v2: flat KP_PHASE, no scaling, no error clamping
+                pd = se * KP_PHASE
 
-                # v2 sign chain: directed_ff pattern (only flip feedforward, not correction)
-                directed_ff = -ff_sp if is_rev else ff_sp
-                raw = directed_ff + correction
+                # v2 sign chain: two independent if statements (cumulative)
+                raw = ff_sp + pd
+                if is_rev:       raw = -raw
                 if sid in LEFT_SERVOS: raw = -raw
 
-                # v2: speed cap matches production
-                final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw)))
+                # v2: no stall exit ramp, no low-speed deadband
+                final_speed = max(-3000, min(3000, int(raw)))
 
             # Metrics
             if abs(final_speed) > speed_max[sid]: speed_max[sid] = abs(final_speed)
@@ -414,68 +409,68 @@ def define_scenarios():
 
     # T1: Wet sand drag only, Wave gait 60 s
     sc.append(dict(name="T1 Wet sand Wave",
-        gait_id=1, speed=270, turn_bias=0.0, frames=3000,
+        gait_id=1, speed=350, turn_bias=0.0, frames=3000,
         terrain_type='wet_sand', ramp_deg=0.0))
 
     # T2: Sand + loose rock spikes, Wave gait 60 s
     sc.append(dict(name="T2 Sand+rocks Wave",
-        gait_id=1, speed=270, turn_bias=0.0, frames=3000,
+        gait_id=1, speed=350, turn_bias=0.0, frames=3000,
         terrain_type='sand_rock', ramp_deg=0.0))
 
     # T3: Fixed rock obstruction on servo 1, Wave gait
     sc.append(dict(name="T3 Fixed rock stall",
-        gait_id=1, speed=270, turn_bias=0.0, frames=500,
+        gait_id=1, speed=350, turn_bias=0.0, frames=500,
         terrain_type='wet_sand',
         fixed_rock_at=100, fixed_rock_sid=1, fixed_rock_dur=20))
 
     # T4: Hole on servo 2, Wave gait
     sc.append(dict(name="T4 Hole encounter",
-        gait_id=1, speed=270, turn_bias=0.0, frames=400,
+        gait_id=1, speed=350, turn_bias=0.0, frames=400,
         terrain_type='wet_sand',
         hole_at=50, hole_sid=2))
 
     # T5: Ramp 10 deg, Wave gait
     sc.append(dict(name="T5 Ramp 10deg Wave",
-        gait_id=1, speed=270, turn_bias=0.0, frames=2000,
+        gait_id=1, speed=350, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=10.0))
 
     # T6: Ramp 15 deg, Wave gait
     sc.append(dict(name="T6 Ramp 15deg Wave",
-        gait_id=1, speed=270, turn_bias=0.0, frames=2000,
+        gait_id=1, speed=350, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=15.0))
 
-    # T7: Ramp 20 deg, Quadruped gait (speed=250 for duty=0.70 governor headroom)
+    # T7: Ramp 20 deg, Quadruped gait
     sc.append(dict(name="T7 Ramp 20deg Quad",
-        gait_id=2, speed=250, turn_bias=0.0, frames=2000,
+        gait_id=2, speed=400, turn_bias=0.0, frames=2000,
         terrain_type='wet_sand', ramp_deg=20.0))
 
     # T8: Worst case -- wet sand + loose rocks + 15 deg ramp, Wave gait
     sc.append(dict(name="T8 Worst case Wave",
-        gait_id=1, speed=270, turn_bias=0.0, frames=3000,
+        gait_id=1, speed=350, turn_bias=0.0, frames=3000,
         terrain_type='worst_case', ramp_deg=15.0))
 
     # T9: Hysteresis verification -- 2-frame spikes should NOT cause stall
     #      spike_2on_2off terrain: load 800 for 2 frames, 200 for 2 frames, repeat
     sc.append(dict(name="T9 2-frame spike hysteresis",
-        gait_id=0, speed=400, turn_bias=0.0, frames=1000,
+        gait_id=0, speed=800, turn_bias=0.0, frames=1000,
         terrain_type='spike_2on_2off'))
 
     # T10: Wave carve turn during sand -- governor margin check
     sc.append(dict(name="T10 Wave carve left sand",
-        gait_id=1, speed=270, turn_bias=-0.12, frames=1500,
+        gait_id=1, speed=350, turn_bias=-0.12, frames=1500,
         terrain_type='wet_sand', ramp_deg=0.0))
 
-    # T11: Gait transition under terrain load (Quad@250 -> Wave@270 at frame 500)
+    # T11: Gait transition under terrain load (Quad@400 -> Wave@350 at frame 500)
     sc.append(dict(name="T11 Gait transition wet sand",
-        gait_id=2, speed=250, turn_bias=0.0, frames=1500,
+        gait_id=2, speed=400, turn_bias=0.0, frames=1500,
         terrain_type='wet_sand',
-        gait_schedule=[(500, {'gait_id': 1, 'speed': 270})]))
+        gait_schedule=[(500, {'gait_id': 1, 'speed': 350})]))
 
-    # T12: Timed fallback sequence on wet sand (Quad@250 45s -> Wave@270 30s -> decel)
+    # T12: Timed fallback sequence on wet sand (Quad@400 45s -> Wave@350 30s -> decel)
     sc.append(dict(name="T12 Timed fallback wet sand",
-        gait_id=2, speed=250, turn_bias=0.0, frames=3900,
+        gait_id=2, speed=400, turn_bias=0.0, frames=3900,
         terrain_type='wet_sand', seed=42,
-        gait_schedule=[(2250, {'gait_id': 1, 'speed': 270}),
+        gait_schedule=[(2250, {'gait_id': 1, 'speed': 350}),
                        (3750, {'speed': 0})]))
 
     return sc
@@ -628,14 +623,14 @@ def run_t14_pherr_governor():
 
     # Wave gait on wet sand, 500 frames
     gait_id = 1
-    speed   = 270
+    speed   = 350
     g = GAITS[gait_id]
     tgen = TerrainGen('wet_sand', seed=42)
 
     smooth_duty    = g['duty']
     smooth_offsets = {s: g['offsets'][s] for s in ALL_SERVOS}
     smooth_speed   = speed * 1.0
-    imp_start = 345.0; imp_end = 15.0
+    imp_start = 330.0; imp_end = 30.0
     master_L = 0.0; master_R = 0.0
     actual_phases = {s: 0.0 for s in ALL_SERVOS}
     is_stalled = {s: False for s in ALL_SERVOS}
@@ -669,8 +664,7 @@ def run_t14_pherr_governor():
 
         base_sweep    = (imp_end - imp_start + 180) % 360 - 180
         air_sweep_val = get_air_sweep(base_sweep)
-        gait_ff_budget = g.get('ff_budget', GOVERNOR_FF_BUDGET)
-        max_safe = (gait_ff_budget / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
+        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - smooth_duty)) / max(5.0, abs(air_sweep_val))
 
         # Inject synthetic phase error (replaces the real per-servo accumulation)
         injected_error = HIGH_ERROR_DEG if tick < PHASE_A_FRAMES else LOW_ERROR_DEG
@@ -763,10 +757,10 @@ def evaluate(r):
     if not r['gov_ok']:
         fails.append(f"GOVERNOR EXCEEDED (headroom={r['gov_headroom_hz']:.4f} Hz)")
 
-    if r['max_speed_sts'] > WALKING_SPEED_CAP:
+    if r['max_speed_sts'] > 3000:
         fails.append(f"SPEED LIMIT (max={r['max_speed_sts']})")
 
-    if name.startswith("T1") and not name.startswith("T10") and not name.startswith("T11") and not name.startswith("T12") and not name.startswith("T13") and not name.startswith("T14"):
+    if name.startswith("T1"):
         if r['total_stalls'] > 0:
             fails.append(f"FALSE STALL on sand only (count={r['total_stalls']})")
 
@@ -807,16 +801,12 @@ def evaluate(r):
             fails.append(f"EXIT SNAP in worst-case (exit_snap={r['max_exit_snap']} STS)")
 
     elif name.startswith("T9"):
-        # T9 uses intentionally high speed (800) to generate load spikes for hysteresis testing.
-        # Governor headroom is expected to be negative -- exempt from gov_ok check.
-        fails = [f for f in fails if "GOVERNOR" not in f]
         if r['total_stalls'] > 0:
             fails.append(f"HYSTERESIS FAIL: 2-frame spikes caused stall (count={r['total_stalls']})")
 
     elif name.startswith("T10"):
-        # T10 is Wave carve with turn_bias -- governor clamping the outer wheel is expected
-        # behavior with duty=0.75. Exempt from governor headroom check (same as T9).
-        fails = [f for f in fails if "GOVERNOR" not in f]
+        if r['gov_headroom_hz'] < 0.001:
+            fails.append(f"THIN GOVERNOR MARGIN ({r['gov_headroom_hz']:.5f} Hz)")
         if r['total_stalls'] > 5:
             fails.append(f"STALLS DURING CARVE (count={r['total_stalls']})")
 
@@ -825,9 +815,9 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.75->0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.75 - 0.75) if abs(0.75 - 0.75) > 1e-9 else 0.01
+        delta = abs(0.75 - 0.7)
         thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
@@ -842,9 +832,9 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.75->0.75, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.75 - 0.75) if abs(0.75 - 0.75) > 1e-9 else 0.01
+        delta = abs(0.75 - 0.7)
         thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
@@ -973,20 +963,20 @@ def main():
     t11 = next((r for r in all_results if r['name'].startswith('T11')), None)
     if t11:
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.60 - 0.67)
-        thresh = 0.01 * 0.60
+        delta = abs(0.75 - 0.7)
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
-        print(f"\nT11 Gait transition under load (Quad@300 -> Wave@270 at frame 500):")
+        print(f"\nT11 Gait transition under load (Quad@400 -> Wave@350 at frame 500):")
         print(f"    Governor headroom: {t11['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t11['total_stalls']} | max_dur: {t11['max_stall_dur']} frames")
         print(f"    Max exit snap: {t11['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t11.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
-        print(f"    LERP convergence: {lerp_frames} frames (duty 0.70->0.70, limit 150)")
+        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7->0.75, limit 150)")
 
     # T12 timed fallback
     t12 = next((r for r in all_results if r['name'].startswith('T12')), None)
     if t12:
-        print(f"\nT12 Timed fallback on wet sand (Quad@300 45s -> Wave@270 30s -> decel):")
+        print(f"\nT12 Timed fallback on wet sand (Quad@400 45s -> Wave@350 30s -> decel):")
         print(f"    Governor headroom: {t12['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t12['total_stalls']} | max_dur: {t12['max_stall_dur']} frames")
         print(f"    Stall fraction: {t12['stall_fraction']*100:.1f}% (limit 10%)")
@@ -1011,7 +1001,7 @@ def main():
     print(f"    Result: {'PASS' if t13['passed'] else 'FAIL -- ' + '; '.join(t13['fails'])}")
 
     # T14 PhErr governor
-    print(f"\nT14 PhErr governor under terrain load (Wave@270, wet sand):")
+    print(f"\nT14 PhErr governor under terrain load (Wave@350, wet sand):")
     print(f"    PHERR_ENGAGE_DEG={PHERR_ENGAGE_DEG} | PHERR_RELEASE_DEG={PHERR_RELEASE_DEG} | "
           f"PHERR_FLOOR_SCALE={PHERR_FLOOR_SCALE}")
     print(f"    Min ph_scale during {45.0} deg error: "
@@ -1028,18 +1018,18 @@ def main():
     print("=" * 65)
     print("COMPETITION TERRAIN CLEARANCE NOTES")
     print("=" * 65)
-    chassis_bottom_mm = 74.058 - 45.0
-    print(f"  Body ground clearance (calculated from CAD):")
-    print(f"    Leg outer reach at 0 splay: 122.058 mm")
-    print(f"    Shaft center -> chassis bottom: 45 mm")
-    print(f"    Ground clearance (shaft to ground): 122.058 - 48.0 = 74.058 mm")
-    print(f"    Chassis bottom from ground: 74.058 - 45.0 = {chassis_bottom_mm:.1f} mm")
+    chassis_bottom_mm = 125.0 - 47.0  # LEG_EFFECTIVE_RADIUS - SHAFT_TO_CHASSIS_BOTTOM
+    print(f"  Body ground clearance (physical measurement: 74 mm at home):")
+    print(f"    Leg outer reach (physical): 125.0 mm")
+    print(f"    Shaft center -> chassis bottom: 47 mm (mounting block height)")
+    print(f"    Theoretical clearance: 125.0 - 47.0 = {chassis_bottom_mm:.1f} mm")
+    print(f"    Measured at home: 74 mm (legs not perfectly vertical)")
     print(f"    Rocks < {chassis_bottom_mm-3:.0f} mm: pass under body safely")
     print(f"    Rocks {chassis_bottom_mm-3:.0f}-{chassis_bottom_mm+20:.0f} mm: contact legs only (not body)")
     print(f"    Rocks > {chassis_bottom_mm+20:.0f} mm: potential chassis contact")
     print()
     print(f"  Course: ~15-20 ft (4.6-6.1 m) | Battery: 3000 mAh")
-    print(f"  Wave gait speed=270: ~55-75 s to complete course (estimated)")
+    print(f"  Wave gait speed=350: ~45-60 s to complete course (estimated)")
     print(f"  Tripod gait speed=1200: ~30-40 s to complete course (estimated)")
     print()
 

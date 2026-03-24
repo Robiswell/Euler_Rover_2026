@@ -11,7 +11,7 @@ import sys, re, pathlib
 TARGET = pathlib.Path(__file__).parent / "full_gait_test.py"
 
 # -- Expected HOME_POSITIONS (from MEMORY.md — verified against hardware) ------
-EXPECTED_HOME = {1: 3447, 2: 955, 3: 1420, 4: 1569, 5: 3197, 6: 3175}
+EXPECTED_HOME = {1: 3474, 2: 954, 3: 1423, 4: 1613, 5: 3238, 6: 3201}
 
 # -- Parameter specification --------------------------------------------------
 # Each entry: (name, required_value_or_range, source_description)
@@ -28,8 +28,8 @@ SPECS = [
 # Gait duty cycle ranges
 GAIT_DUTY_SPECS = {
     0: ('tripod',    0.5,   0.5  ),   # exact
-    1: ('wave',      0.68,  0.72 ),   # range — restored for 4-leg stability
-    2: ('quadruped', 0.68,  0.72 ),   # range — restored for 4-leg stability
+    1: ('wave',      0.83,  0.87 ),   # range
+    2: ('quadruped', 0.68,  0.72 ),   # range
 }
 
 # Governor max hz
@@ -122,7 +122,7 @@ def extract_carve_bias(src):
 def extract_governor_hz(src):
     """Confirm governor formula is present and extract effective max_safe_hz.
     Returns a string describing what was found."""
-    has_gov = 'max_safe_hz' in src and 'GOVERNOR_FF_BUDGET' in src and 'VELOCITY_SCALAR' in src
+    has_gov = 'max_safe_hz' in src and '2800' in src and 'VELOCITY_SCALAR' in src
     return has_gov
 
 
@@ -214,7 +214,7 @@ def main():
     # Verify governor clamp: Heart must contain max_safe_hz clamp logic.
     # Brain speed inputs can exceed the governor limit (e.g. speed=1200 → 1.2 hz)
     # because the Heart governor clips hz_L/hz_R before advancing clocks.
-    # The relevant check is that the clamp formula is present and uses GOVERNOR_FF_BUDGET (700 STS) limit.
+    # The relevant check is that the clamp formula is present and uses 2800 STS limit.
     gov_clamp_ok = ('hz_L = max(-max_safe_hz' in src or 'min(max_safe_hz, hz_L)' in src or
                     'max(-max_safe_hz, min(max_safe_hz' in src)
     ok = verdict("Heart governor clamps hz to max_safe_hz", 'GO' if gov_clamp_ok else 'NO-GO',
@@ -242,10 +242,10 @@ def main():
     print("  -- Servo 6 Quadruped Offset (collision safety) --")
     if gaits and 2 in gaits:
         s6_off = gaits[2]['offsets'].get(6)
-        # Widen-stance sweep: offset unchanged at 0.333 (duty changed, not offset)
-        ok_val = s6_off is not None and abs(s6_off - 0.333) < 0.01
+        # Must be 0.833 (post-fix) not 0.333 (pre-fix)
+        ok_val = s6_off is not None and abs(s6_off - 0.833) < 0.01
         status = 'GO' if ok_val else 'NO-GO'
-        req    = '0.333 (offset unchanged; duty sweep only)'
+        req    = '0.833 (collision fix applied)'
         ok = verdict("GAITS[2] servo 6 offset", status, s6_off, req, 'MEMORY collision fix')
         if not ok:
             all_go = False
