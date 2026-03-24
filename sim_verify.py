@@ -8,76 +8,16 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 DIRECTION_MAP = {1:1, 2:-1, 3:-1, 4:-1, 5:1, 6:1}
-HOME_POSITIONS = {1:3474, 2:954, 3:1423, 4:1613, 5:3238, 6:3201}
+HOME_POSITIONS = {1:3447, 2:955, 3:1420, 4:1569, 5:3197, 6:3175}
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
-GOVERNOR_FF_BUDGET = 575.0  # default fallback; per-gait 'ff_budget' overrides
 GAITS = {
-    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
-    1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.75, 'offsets': {2:0.0, 5:0.0, 1:0.333, 3:0.333, 4:0.666, 6:0.666}, 'ff_budget': 750.0},
+    0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
+    1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
+    2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
-WALKING_SPEED_CAP = 1200
-PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 real_dt           = 0.02
-
-# sync: final_full_gait_test.py lines 99-124 (body geometry + roll constants)
-LEG_EFFECTIVE_RADIUS      = 125.0
-SHAFT_TO_CHASSIS_BOTTOM   = 47.0
-MIN_GROUND_CLEARANCE      = 15.0
-GOVERNOR_CLEARANCE_MARGIN = 5.0
-FEEDFORWARD_CAP           = 499.0
-W_SHAFT                   = 160.0
-CORNER_OVERHANG           = 30.0
-ROLL_SAFETY_FACTOR        = 2.0
-
-# sync: final_full_gait_test.py lines 246-362 (clearance functions)
-def _max_angle_from_vertical(impact_start, impact_end):
-    s = impact_start % 360
-    e = impact_end % 360
-    dev_s = min(s, 360.0 - s)
-    dev_e = min(e, 360.0 - e)
-    return max(dev_s, dev_e)
-
-def compute_roll_corner_drop(turn_bias, worst_angle, duty):
-    if abs(turn_bias) < 0.001:
-        return 0.0
-    bias_angle_shift = abs(turn_bias) * worst_angle * 0.5
-    theta_inside = math.radians(worst_angle + bias_angle_shift)
-    theta_outside = math.radians(max(0.0, worst_angle - bias_angle_shift))
-    h_inside = LEG_EFFECTIVE_RADIUS * math.cos(theta_inside)
-    h_outside = LEG_EFFECTIVE_RADIUS * math.cos(theta_outside)
-    delta_h = abs(h_outside - h_inside)
-    return CORNER_OVERHANG * delta_h / W_SHAFT * ROLL_SAFETY_FACTOR
-
-def compute_min_clearance(impact_start, impact_end, phase_lag_deg=0.0):
-    worst_angle = _max_angle_from_vertical(impact_start, impact_end) + phase_lag_deg
-    h = LEG_EFFECTIVE_RADIUS * math.cos(math.radians(worst_angle))
-    return h - SHAFT_TO_CHASSIS_BOTTOM
-
-def compute_max_clearance_hz(impact_start, impact_end, duty,
-                             min_clearance=MIN_GROUND_CLEARANCE,
-                             ff_cap=FEEDFORWARD_CAP, kp=KP_PHASE,
-                             turn_bias=0.0):
-    stance_sweep = (impact_end - impact_start + 180) % 360 - 180
-    worst_static = _max_angle_from_vertical(impact_start, impact_end)
-    air_sweep = 360.0 - abs(stance_sweep)
-    if air_sweep < 1.0 or duty >= 0.99:
-        return 10.0
-    roll_drop = compute_roll_corner_drop(turn_bias, worst_static, duty)
-    effective_clearance = min_clearance + roll_drop
-    ratio = (SHAFT_TO_CHASSIS_BOTTOM + effective_clearance) / LEG_EFFECTIVE_RADIUS
-    if ratio >= 1.0:
-        return 0.0
-    max_total_angle = math.degrees(math.acos(ratio))
-    max_lag = max(0.0, max_total_angle - worst_static)
-    if max_lag <= 0.0:
-        return 0.0
-    max_ff = ff_cap + max_lag * kp
-    max_deg_per_sec = max_ff / VELOCITY_SCALAR
-    max_hz = max_deg_per_sec * (1.0 - duty) / air_sweep
-    return max_hz
 
 # sync: final_full_gait_test.py lines 159-178
 def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
@@ -98,7 +38,7 @@ def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False)
 
 class Sh:
     speed=0; x_flip=1; z_flip=1; turn_bias=0.0
-    gait_id=0; impact_start=345; impact_end=15; is_running=True
+    gait_id=0; impact_start=320; impact_end=40; is_running=True
 
 
 class SimState:
@@ -116,9 +56,9 @@ class SimState:
         self.smooth_speed = self.smooth_turn = 0.0
         self.smooth_imp_start = float(self.sh.impact_start)
         self.smooth_imp_end   = float(self.sh.impact_end)
-        self.smooth_duty      = 0.55
+        self.smooth_duty      = 0.5
         self.smooth_offsets   = {s: GAITS[0]['offsets'][s] for s in ALL_SERVOS}
-        self.prev_smooth_duty = 0.55
+        self.prev_smooth_duty = 0.5
         self.tick = 0
 
         # V1 speed limit
@@ -189,18 +129,13 @@ class SimState:
         base_sweep = (self.smooth_imp_end - self.smooth_imp_start + 180) % 360 - 180
         air_sweep  = 360.0 - abs(base_sweep)
         if base_sweep < 0: air_sweep = -air_sweep
-        gait_ff_budget = g.get('ff_budget', GOVERNOR_FF_BUDGET)
-        max_safe = (gait_ff_budget / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
+        max_safe = (2800.0 / VELOCITY_SCALAR * (1.0 - self.smooth_duty)) / max(5.0, abs(air_sweep))
 
         for side, hz_raw in [('L', hz_L_raw), ('R', hz_R_raw)]:
             if abs(hz_raw) > max_safe + 1e-9:
+                self.v2_fail = True
                 self.v2_clamps.append({'tick':self.tick,'ph':phase_num,'gt':fsm_gait,'trn':fsm_trn,
                                   'side':side,'raw':hz_raw,'lim':max_safe,'seg':seg})
-                # Recovery phases (4=wiggle/roll) intentionally exceed governor.
-                # Turn phases (carve/pivot) are expected to clamp -- governor handles it.
-                # Only flag straight-line walking (phases 1-3, no turn) as failures.
-                if phase_num <= 3 and abs(self.smooth_turn) < 0.01:
-                    self.v2_fail = True
 
         hz_L = max(-max_safe, min(max_safe, hz_L_raw))
         hz_R = max(-max_safe, min(max_safe, hz_R_raw))
@@ -274,20 +209,19 @@ class SimState:
                                 'phase_num':phase_num,'gait':fsm_gait})
                 self.prev_in_stance[sid] = in_s
 
-                ff_speed = min(FEEDFORWARD_CAP, dps * VELOCITY_SCALAR)
+                ff_speed = dps * VELOCITY_SCALAR
                 error = (tp - cur_ph + 180) % 360 - 180
                 if t_leg > self.smooth_duty:
                     if not is_rev and error < -90: error += 360
                     elif is_rev and error > 90: error -= 360
-                correction = error * KP_PHASE if abs(error) >= PHERR_DEADBAND else 0.0
-                directed_ff = -ff_speed if is_rev else ff_speed  # only flip feedforward, not correction
-                raw_speed = directed_ff + correction
+                raw_speed = ff_speed + (error * KP_PHASE)
+                if is_rev: raw_speed = -raw_speed
                 if sid in LEFT_SERVOS: raw_speed = -raw_speed
 
-                final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw_speed)))
+                final_speed = max(-3000, min(3000, int(raw_speed)))
 
                 # V1: check final speed
-                if abs(final_speed) > WALKING_SPEED_CAP:
+                if abs(final_speed) > 3000:
                     self.v1_fail = True
                     if abs(final_speed) > abs(self.v1_worst[1]): self.v1_worst=(sid,int(final_speed),self.tick)
 
@@ -325,7 +259,7 @@ class SimState:
             self.v10_xflips.append(self.sh.x_flip)
 
         # V11 impact slew safety (during slew segments only)
-        if seg in ("Quad obstacle 320/40", "Quad low 325/35", "Wave slope 315/15"):
+        if seg in ("Quad obstacle 345/15", "Quad low 325/35", "Wave slope 315/15"):
             td5 = (self.smooth_imp_start + LEG_SPLAY[5]) % 360
             safe = (td5 >= 340) or (td5 <= 30)
             if not safe:
@@ -340,9 +274,7 @@ class SimState:
             if self.v12_headroom is None or hdrm < self.v12_headroom:
                 self.v12_headroom = hdrm
                 self.v12_pct = hdrm / max_safe * 100 if max_safe > 0 else 0
-            # INFO-only: negative headroom during carve is expected with duty=0.75;
-            # the governor clamps the outer wheel safely. Not a graded failure.
-            # if hdrm < 0: self.v12_fail = True
+            if hdrm < 0: self.v12_fail = True
 
         # V13 Wave pivot
         pivot_speed_settled = abs(self.smooth_speed) < 5.0
@@ -413,8 +345,8 @@ class SimState:
         speed_lr = min(1.0, 4.0 * real_dt)
         worst_frames = 0
         worst_tx = None
-        for (nm, df, dt) in [("Tripod->Wave",0.55,0.75),("Wave->Quad",0.75,0.75),
-                             ("Quad->Tripod",0.75,0.55),("Tripod->Quad",0.55,0.75)]:
+        for (nm, df, dt) in [("Tripod->Wave",0.5,0.75),("Wave->Quad",0.75,0.7),
+                             ("Quad->Tripod",0.7,0.5),("Tripod->Quad",0.5,0.7)]:
             delta = abs(dt - df)
             thresh = 0.01 * dt
             if delta <= thresh:
@@ -447,32 +379,32 @@ class SimState:
 
 def make_schedule():
     s = []
-    s.append((0,   {'gait_id':0,'impact_start':345,'impact_end':15,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
-    s.append((1000, {'speed':400}, 1, "Ph1 forward"))
+    s.append((0,   {'gait_id':0,'impact_start':330,'impact_end':30,'turn_bias':0.0,'speed':0,'x_flip':1,'z_flip':1}, 1, "Ph1 init"))
+    s.append((1000, {'speed':1200}, 1, "Ph1 forward"))
     s.append((800,  {'turn_bias':-0.4}, 1, "Ph1 carve left"))
     s.append((800,  {'turn_bias': 0.4}, 1, "Ph1 carve right"))
     s.append((800,  {'speed':0,'turn_bias':-1.0}, 1, "Ph1 pivot left"))
     s.append((800,  {'turn_bias': 1.0}, 1, "Ph1 pivot right"))
-    s.append((1000, {'turn_bias':0.0,'speed':-400}, 1, "Ph1 reverse"))
-    s.append((0,   {'gait_id':2,'speed':300,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 2, "Quad forward start"))
-    s.append((600,  {'speed':300}, 2, "Quad forward"))
+    s.append((1000, {'turn_bias':0.0,'speed':-1200}, 1, "Ph1 reverse"))
+    s.append((0,   {'gait_id':2,'speed':550,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 2, "Quad forward start"))
+    s.append((600,  {'speed':550}, 2, "Quad forward"))
     s.append((500,  {'turn_bias':-0.3}, 2, "Quad carve left"))
     s.append((500,  {'turn_bias': 0.3}, 2, "Quad carve right"))
     s.append((500,  {'speed':0,'turn_bias':-0.8}, 2, "Quad pivot left"))
     s.append((500,  {'turn_bias': 0.8}, 2, "Quad pivot right"))
-    s.append((600,  {'turn_bias':0.0,'speed':-300}, 2, "Quad reverse"))
+    s.append((600,  {'turn_bias':0.0,'speed':-550}, 2, "Quad reverse"))
     s.append((100,  {'speed':0}, 2, "Quad stop"))
-    s.append((750,  {'speed':300,'impact_start':320,'impact_end':40}, 2, "Quad obstacle 320/40"))
+    s.append((750,  {'speed':500,'impact_start':345,'impact_end':15}, 2, "Quad obstacle 345/15"))
     s.append((750,  {'impact_start':325,'impact_end':35}, 2, "Quad low 325/35"))
-    s.append((0,   {'gait_id':1,'speed':270,'turn_bias':0.0,'impact_start':345,'impact_end':15}, 3, "Wave forward start"))
-    s.append((600,  {'speed':270}, 3, "Wave forward"))
+    s.append((0,   {'gait_id':1,'speed':350,'turn_bias':0.0,'impact_start':330,'impact_end':30}, 3, "Wave forward start"))
+    s.append((600,  {'speed':350}, 3, "Wave forward"))
     s.append((500,  {'turn_bias':-0.12}, 3, "Wave carve left"))
     s.append((500,  {'turn_bias': 0.12}, 3, "Wave carve right"))
     s.append((500,  {'speed':0,'turn_bias':-0.48}, 3, "Wave pivot left"))
     s.append((500,  {'turn_bias': 0.48}, 3, "Wave pivot right"))
-    s.append((600,  {'turn_bias':0.0,'speed':-270}, 3, "Wave reverse"))
+    s.append((600,  {'turn_bias':0.0,'speed':-350}, 3, "Wave reverse"))
     s.append((100,  {'speed':0}, 3, "Wave stop"))
-    s.append((1000, {'speed':270,'impact_start':315,'impact_end':15}, 3, "Wave slope 315/15"))
+    s.append((1000, {'speed':350,'impact_start':315,'impact_end':15}, 3, "Wave slope 315/15"))
     s.append((0,   {'speed':0,'turn_bias':0.0,'gait_id':0}, 4, "Ph4 reset"))
     s.append((150,  {'speed':0}, 4, "Ph4 pause"))
     for i in range(500 // 15):
@@ -609,87 +541,6 @@ def check_V17_overrun_drain():
 
     passed = len(failures) == 0
     return {'passed': passed, 'failures': failures, 'sub_checks': 5}
-
-
-def check_V19_turn_clearance():
-    """
-    Property: The roll-aware clearance governor must remain viable (max_hz > 0)
-    for all gaits at the nav turn bias constants, across standard impact angles.
-
-    Tests:
-      (a) Governor viability: compute_max_clearance_hz(turn_bias) must return
-          a positive Hz for MAX_TURN_BIAS=0.25 and PIVOT_TURN_BIAS=0.28 at
-          their respective impact angles. If 0, the robot cannot move while turning.
-      (b) At-rest positive clearance: with no phase lag (hz=0) and no roll
-          (turn_bias=0), clearance must be > 0mm for all impact configs.
-          (The governor handles the dynamic case; this checks static geometry.)
-      (c) Roll drop bounds: roll_drop must stay below base clearance for the
-          nav turn bias values -- ensures the governor has headroom to work.
-
-    Failure means: The governor cannot protect chassis corners during turns,
-    or the geometry is fundamentally unworkable at these impact angles.
-    """
-    failures = []
-    gait_names = {0: 'Tripod', 1: 'Wave', 2: 'Quad'}
-    # Impact angles used in production: narrow (default cruise) and pivot (turns)
-    # 320/40 (80-deg sweep) is intentionally excluded -- it pushes legs to 40deg
-    # from vertical where r=125mm gives ample clearance. The governor
-    # handles this dynamically by limiting Hz; the V2 governor check covers it.
-    impact_configs = [
-        (320, 40, 'default'),     # 80-deg stance sweep (standard walking)
-        (345, 15, 'pivot'),       # 30-deg stance sweep (pivot turns)
-    ]
-    # Nav turn bias constants to validate (from final_full_gait_test.py)
-    nav_biases = [
-        ('MAX_TURN', 0.20, [(320, 40)]),               # arc/carve turns use walking stance
-        ('PIVOT_TURN', 0.28, [(345, 15)]),              # pivot turns use narrow stance
-    ]
-
-    worst_max_hz = float('inf')
-    worst_info = None
-
-    # (a) Governor viability: nav turn biases must produce positive max_hz
-    for gid, gparams in GAITS.items():
-        duty = gparams['duty']
-        for tb_name, tb_val, valid_impacts in nav_biases:
-            for imp_s, imp_e in valid_impacts:
-                imp_name = f"{imp_s}/{imp_e}"
-                max_hz = compute_max_clearance_hz(
-                    imp_s, imp_e, duty,
-                    min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN,
-                    turn_bias=tb_val)
-                if max_hz <= 0.0:
-                    failures.append(
-                        f"{gait_names[gid]} {imp_name} {tb_name}={tb_val}: "
-                        f"governor max_hz=0 -- no safe speed exists")
-                if max_hz < worst_max_hz:
-                    worst_max_hz = max_hz
-                    worst_info = (gait_names[gid], imp_name, tb_name, tb_val, max_hz)
-
-    # (b) At-rest positive clearance (no roll, no speed)
-    for imp_s, imp_e, imp_name in impact_configs:
-        base_clr = compute_min_clearance(imp_s, imp_e)
-        if base_clr <= 0.0:
-            failures.append(
-                f"At-rest {imp_name}: clearance={base_clr:.1f}mm <= 0 -- "
-                f"geometry cannot support these impact angles at r={LEG_EFFECTIVE_RADIUS}")
-
-    # (c) Roll drop stays within base clearance for nav turn biases
-    for imp_s, imp_e, imp_name in impact_configs:
-        base_clr = compute_min_clearance(imp_s, imp_e)
-        worst_angle = _max_angle_from_vertical(imp_s, imp_e)
-        for gid, gparams in GAITS.items():
-            duty = gparams['duty']
-            for tb_name, tb_val, _ in nav_biases:
-                roll_drop = compute_roll_corner_drop(tb_val, worst_angle, duty)
-                if roll_drop >= base_clr and base_clr > 0:
-                    failures.append(
-                        f"{gait_names[gid]} {imp_name} {tb_name}={tb_val}: "
-                        f"roll_drop={roll_drop:.1f}mm >= base_clr={base_clr:.1f}mm")
-
-    passed = len(failures) == 0
-    return {'passed': passed, 'failures': failures,
-            'worst_max_hz': worst_max_hz, 'worst_info': worst_info}
 
 
 def check_V18_pherr_governor():
@@ -866,7 +717,6 @@ sim = SimState()
 res = sim.run()
 v17 = check_V17_overrun_drain()
 v18 = check_V18_pherr_governor()
-v19 = check_V19_turn_clearance()
 
 def pf(f): return "FAIL" if f else "PASS"
 
@@ -878,7 +728,7 @@ print(f"Total ticks         : {res['ticks']:,}")
 print(f"Wall-clock equiv    : {res['ticks']*real_dt:.1f} s ({res['ticks']*real_dt/60:.1f} min)")
 print()
 print("PASS/FAIL per check:")
-print(f"  V1  Speed limit:         {pf(sim.v1_fail)}  (worst SID={sim.v1_worst[0]} @ {sim.v1_worst[1]} STS tick {sim.v1_worst[2]})" if sim.v1_fail else f"  V1  Speed limit:         {pf(sim.v1_fail)}  (all within +-{WALKING_SPEED_CAP} STS)")
+print(f"  V1  Speed limit:         {pf(sim.v1_fail)}  (worst SID={sim.v1_worst[0]} @ {sim.v1_worst[1]} STS tick {sim.v1_worst[2]})" if sim.v1_fail else f"  V1  Speed limit:         {pf(sim.v1_fail)}  (all within +-3000 STS)")
 print(f"  V2  Governor:            {pf(sim.v2_fail)}  ({len(sim.v2_clamps)} clamp events)" if sim.v2_clamps else f"  V2  Governor:            {pf(sim.v2_fail)}  (no clamping)")
 
 gnames={0:'Tripod',1:'Wave',2:'Quad'}
@@ -923,15 +773,6 @@ print(f"  V18 PhErr governor:      {pf(v18_fail)}  ({v18['sub_checks']} sub-chec
 if v18['failures']:
     for f_msg in v18['failures']:
         print(f"       {f_msg}")
-v19_fail = not v19['passed']
-wi = v19['worst_info']
-if wi:
-    print(f"  V19 Turn clearance:      {pf(v19_fail)}  (worst max_hz={wi[4]:.3f} @ {wi[0]} {wi[1]} {wi[2]}={wi[3]:.2f})")
-else:
-    print(f"  V19 Turn clearance:      {pf(v19_fail)}")
-if v19['failures']:
-    for f_msg in v19['failures'][:5]:
-        print(f"       {f_msg}")
 
 print()
 print("="*60)
@@ -963,18 +804,18 @@ if sim.v7_fail and wt and wt[3] > 150:
     print(f"  duty_lerp_rate = 4.0*real_dt = 0.08 (matches speed lerp rate)")
 
 print()
-graded = [sim.v1_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
-          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v13_fail,
-          v17_fail, v18_fail, v19_fail]
+graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
+          sim.v8_fail,sim.v9_fail,sim.v10_fail,sim.v11_fail,sim.v12_fail,sim.v13_fail,
+          v17_fail, v18_fail]
 n_graded = len(graded)
 n_pass = n_graded - sum(graded)
 overall = any(graded)
 if not overall:
-    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 5 INFO (V2, V3, V12, V14, V15). Cleared for hardware deployment.")
+    print(f"SIMULATION COMPLETE - {n_pass}/{n_graded} graded checks PASS + 3 INFO (V3, V14, V15). Cleared for hardware deployment.")
 else:
-    fails = [n for n,f in [("V1",sim.v1_fail),("V4",sim.v4_fail),
+    fails = [n for n,f in [("V1",sim.v1_fail),("V2",sim.v2_fail),("V4",sim.v4_fail),
              ("V5",sim.v5_fail),("V6",sim.v6_fail),("V7",sim.v7_fail),("V8",sim.v8_fail),("V9",sim.v9_fail),
-             ("V10",sim.v10_fail),("V11",sim.v11_fail),("V13",sim.v13_fail),
-             ("V17",v17_fail),("V18",v18_fail),("V19",v19_fail)] if f]
-    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 5 INFO -- failed: {', '.join(fails)}")
+             ("V10",sim.v10_fail),("V11",sim.v11_fail),("V12",sim.v12_fail),("V13",sim.v13_fail),
+             ("V17",v17_fail),("V18",v18_fail)] if f]
+    print(f"SIMULATION FAILED - {n_pass}/{n_graded} graded + 3 INFO — failed: {', '.join(fails)}")
     print("Resolve the above before hardware deployment.")

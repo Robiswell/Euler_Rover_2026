@@ -26,16 +26,12 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 # =========================================================================
 
 # --- Nav tunable constants ---
-CRUISE_SPEED = 500
+CRUISE_SPEED = 400
+TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
-BACKWARD_SPEED = 300
-BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
-CLIFF_BACKUP_DURATION = 5.0       # seconds of forced backward on front cliff before escape
-OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides DANGER
-MAX_TURN_BIAS = 0.25              # sync: restored for r=125mm roll-aware clearance
-PIVOT_TURN_BIAS = 0.28            # sync: reduced from 0.35 (was 0.5 here) for roll-aware clearance
-PIVOT_IMPACT_START = 345          # narrowed 30 deg stance sweep for safe pivot clearance
-PIVOT_IMPACT_END   = 15           # (default 320/40 = 80 deg too wide during zero-speed turns)
+BACKWARD_SPEED = 200
+MAX_TURN_BIAS = 0.25
+PIVOT_TURN_BIAS = 0.5
 HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
@@ -155,23 +151,55 @@ def classify_distance(cm):
         return DIST_UNKNOWN
     if cm <= 20:
         return DIST_DANGER
-    if cm <= 40:
+    if cm <= 30:
         return DIST_NEAR
-    if cm <= 60:
+    if cm <= 50:
         return DIST_CAUTION
     return DIST_CLEAR
 
 
 def classify_sectors(frame):
-    """Classify front, left, right sectors from frame dict.
-    Returns (front_class, left_class, right_class) as severity levels."""
-    front = max(classify_distance(frame["FDL"]),
-                classify_distance(frame["FCF"]),
-                classify_distance(frame["FDR"]))
-    left = max(classify_distance(frame["FDL"]),
-               classify_distance(frame["RDL"]))
-    right = max(classify_distance(frame["FDR"]),
-                classify_distance(frame["RDR"]))
+    """Classify sectors with majority voting to reject outlier sensors.
+    Front (3 sensors): median severity rejects one outlier.
+    Left/Right (2 sensors): if readings disagree by 2+ levels,
+    downgrade to (max - 1) instead of trusting the worst reading.
+    Blind-zone (-1.0) is hard DANGER -- not outvotable (confirmed by
+    double-ping in firmware, so physically real)."""
+    # Check raw readings for blind-zone before classification
+    front_blind = any(frame[k] == -1 for k in ("FDL", "FCF", "FDR"))
+    left_blind = any(frame[k] == -1 for k in ("FDL", "RDL"))
+    right_blind = any(frame[k] == -1 for k in ("FDR", "RDR"))
+
+    # Classify individual sensors to severity levels
+    fdl = classify_distance(frame["FDL"])
+    fcf = classify_distance(frame["FCF"])
+    fdr = classify_distance(frame["FDR"])
+    rdl = classify_distance(frame["RDL"])
+    rdr = classify_distance(frame["RDR"])
+
+    # Front sector (3 sensors): median rejects one outlier
+    front = sorted([fdl, fcf, fdr])[1]
+    if front_blind:
+        front = DIST_DANGER  # blind zone not outvotable
+
+    # Left sector (2 sensors): downgrade if disagree by 2+ levels
+    left_max = max(fdl, rdl)
+    if left_blind:
+        left = DIST_DANGER
+    elif left_max - min(fdl, rdl) >= 2:
+        left = left_max - 1  # disagreement downgrade
+    else:
+        left = left_max
+
+    # Right sector (2 sensors): downgrade if disagree by 2+ levels
+    right_max = max(fdr, rdr)
+    if right_blind:
+        right = DIST_DANGER
+    elif right_max - min(fdr, rdr) >= 2:
+        right = right_max - 1  # disagreement downgrade
+    else:
+        right = right_max
+
     return front, left, right
 
 
@@ -180,9 +208,9 @@ def speed_scale_from_front(front_class):
     if front_class == DIST_CLEAR:
         return 1.0
     if front_class == DIST_CAUTION:
-        return 0.85
+        return 0.7
     if front_class == DIST_NEAR:
-        return 0.50
+        return 0.45
     if front_class == DIST_DANGER:
         return 0.0
     return 0.7  # UNKNOWN
@@ -222,7 +250,7 @@ class CliffDetector:
 
         if reading is None:
             setattr(self, counter_attr, count + 1)
-            return count + 1 >= 3
+            return count + 1 >= 2
 
         # Update ground EMA with valid low readings (runs during warmup so baseline converges)
         if 0 < reading <= 40:
@@ -237,7 +265,7 @@ class CliffDetector:
 
         if is_candidate:
             setattr(self, counter_attr, count + 1)
-            return count + 1 >= 3
+            return count + 1 >= 2
         else:
             setattr(self, counter_attr, 0)
             return False
@@ -375,9 +403,6 @@ class NavStateMachine:
         self.dwell_start = 0.0
         self.dwell_duration = 0.0
         self.hold_position_count = 0
-        self.backward_entry_time = 0.0
-        self.cliff_backup_until = 0.0   # monotonic deadline for cliff backup lockout
-        self.obstacle_backup_until = 0.0  # monotonic deadline for obstacle backup lockout
         self.consecutive_pivot_count = 0
         self.pivot_direction = -1
         self.stall_start_time = 0.0
@@ -400,13 +425,12 @@ class NavStateMachine:
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
         self.terrain_gait = 2
-        self.terrain_impact_start = 345     # matches production DEFAULT_IMPACT_START
-        self.terrain_impact_end = 15       # matches production DEFAULT_IMPACT_END
+        self.terrain_impact_start = 330
+        self.terrain_impact_end = 30
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0
         self._tick_count = 0
-        self.sensor_ema = {}
 
     def _dwell_active(self):
         return (time.monotonic() - self.dwell_start) < self.dwell_duration
@@ -418,17 +442,6 @@ class NavStateMachine:
     def _refresh_dwell(self, duration):
         self.dwell_start = time.monotonic()
         self.dwell_duration = duration
-
-    def smooth_sensor(self, idx, raw_cm):
-        """EMA smoothing for ultrasonic sensors. alpha=0.3, passthrough for -1/None."""
-        if raw_cm is None or raw_cm == -1:
-            return raw_cm
-        if idx not in self.sensor_ema:
-            self.sensor_ema[idx] = raw_cm
-            return raw_cm
-        alpha = 0.3
-        self.sensor_ema[idx] = alpha * raw_cm + (1.0 - alpha) * self.sensor_ema[idx]
-        return self.sensor_ema[idx]
 
     def _transition(self, new_state):
         if new_state != self.state:
@@ -509,56 +522,15 @@ class NavStateMachine:
         if front_cliff:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
-                self.backward_entry_time = time.monotonic()
-                self.cliff_backup_until = now + CLIFF_BACKUP_DURATION
-                self.obstacle_backup_until = 0.0  # mutual exclusion with obstacle lockout
                 self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
             return self._backward_action(frame)
 
-        # P7: Rear cliff (overrides cliff lockout -- don't back into a drop-off)
+        # P7: Rear cliff
         if rear_cliff:
-            self.cliff_backup_until = 0.0  # clear lockout on rear cliff
-            self.obstacle_backup_until = 0.0  # clear obstacle lockout on rear cliff
             self._transition(NAV_SLOW_FORWARD)
             speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
             return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
-
-        # P6b: Cliff backup lockout -- forced BACKWARD until duration expires, then escape
-        if self.cliff_backup_until > 0.0:
-            if now < self.cliff_backup_until:
-                # Lockout active -- stay BACKWARD regardless of other sensors
-                self._transition(NAV_BACKWARD)
-                return self._backward_action(frame)
-            else:
-                # Lockout expired -- clear and escape toward free side
-                self.cliff_backup_until = 0.0
-                if left_class < DIST_DANGER or right_class < DIST_DANGER:
-                    if left_class != right_class:
-                        escape_dir = -1 if left_class < right_class else 1
-                    else:
-                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
-                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
-                        escape_dir = -1 if l_cm >= r_cm else 1
-                    if escape_dir < 0:
-                        self._transition(NAV_ARC_LEFT)
-                    else:
-                        self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(1.5)
-                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
-                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-                    step = "nav_cliff_escape_L" if escape_dir < 0 else "nav_cliff_escape_R"
-                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
-                    return (state, speed, turn, 1, step)
-                else:
-                    # Both sides blocked -- pivot away from cliff
-                    self._pick_pivot_direction(frame)
-                    self._transition(NAV_PIVOT_TURN)
-                    self._start_dwell(1.5)
-                    self.consecutive_pivot_count += 1
-                    turn = self.pivot_direction * PIVOT_TURN_BIAS
-                    step = "nav_cliff_pivot_L" if self.pivot_direction < 0 else "nav_cliff_pivot_R"
-                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
         # P8: Stall detection
         if avg_load > STALL_LOAD_THRESHOLD_NAV:
@@ -590,96 +562,23 @@ class NavStateMachine:
             self._transition(NAV_PIVOT_TURN)
             self._start_dwell(1.5)
             self.consecutive_pivot_count += 1
-            self.obstacle_backup_until = 0.0  # clear so pivot isn't recaptured by P10b
             turn = self.pivot_direction * PIVOT_TURN_BIAS
             step = "nav_pivot_L" if self.pivot_direction < 0 else "nav_pivot_R"
             return (NAV_PIVOT_TURN, 0, turn, 1, step)
 
-        # P10: Front DANGER (2+ frames) -- escape-route awareness
+        # P10: Front DANGER (2+ frames)
         if self.front_danger_frames >= 2:
-            # Prefer arc escape over backward when a side is clear
-            if left_class < DIST_DANGER or right_class < DIST_DANGER:
-                if left_class != right_class:
-                    escape_dir = -1 if left_class < right_class else 1
-                else:
-                    l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
-                    r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
-                    escape_dir = -1 if l_cm >= r_cm else 1
-                if escape_dir < 0:
-                    self._transition(NAV_ARC_LEFT)
-                else:
-                    self._transition(NAV_ARC_RIGHT)
-                self._start_dwell(1.5)
-                turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
-                speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-                step = "nav_escape_L" if escape_dir < 0 else "nav_escape_R"
-                state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
-                return (state, speed, turn, 1, step)
-            else:
-                # Both sides DANGER -- timed BACKWARD + escape turn
-                if self.state != NAV_BACKWARD:
-                    self.hold_position_count = 0
-                    self.backward_entry_time = time.monotonic()
-                    self.obstacle_backup_until = now + OBSTACLE_BACKUP_DURATION
-                    self._start_dwell(0.8)
-                self._transition(NAV_BACKWARD)
-                return self._backward_action(frame)
-
-        # P10b: Obstacle backup lockout -- forced BACKWARD until duration expires, then escape
-        if self.obstacle_backup_until > 0.0:
-            if now < self.obstacle_backup_until:
-                # Lockout active -- stay BACKWARD regardless of front sensor clearing
-                self._transition(NAV_BACKWARD)
-                return self._backward_action(frame)
-            else:
-                # Lockout expired -- clear and escape toward free side (never straight FORWARD)
-                self.obstacle_backup_until = 0.0
-                if left_class < DIST_DANGER or right_class < DIST_DANGER:
-                    if left_class != right_class:
-                        escape_dir = -1 if left_class < right_class else 1
-                    else:
-                        l_cm = max(frame.get("FDL") or 0, frame.get("RDL") or 0)
-                        r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
-                        escape_dir = -1 if l_cm >= r_cm else 1
-                    if escape_dir < 0:
-                        self._transition(NAV_ARC_LEFT)
-                    else:
-                        self._transition(NAV_ARC_RIGHT)
-                    self._start_dwell(1.5)
-                    turn = escape_dir * abs(turn_intensity) * MAX_TURN_BIAS
-                    speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-                    step = "nav_obs_escape_L" if escape_dir < 0 else "nav_obs_escape_R"
-                    state = NAV_ARC_LEFT if escape_dir < 0 else NAV_ARC_RIGHT
-                    return (state, speed, turn, 1, step)
-                else:
-                    # Both sides still blocked -- pivot away
-                    self._pick_pivot_direction(frame)
-                    self._transition(NAV_PIVOT_TURN)
-                    self._start_dwell(1.5)
-                    self.consecutive_pivot_count += 1
-                    self.terrain_impact_start = PIVOT_IMPACT_START
-                    self.terrain_impact_end = PIVOT_IMPACT_END
-                    turn = self.pivot_direction * PIVOT_TURN_BIAS
-                    step = "nav_obs_pivot_L" if self.pivot_direction < 0 else "nav_obs_pivot_R"
-                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
+            if self.state != NAV_BACKWARD:
+                self.hold_position_count = 0
+                self._start_dwell(0.8)  # Fix 68: only on first transition
+            self._transition(NAV_BACKWARD)
+            return self._backward_action(frame)
 
         # Reset pivot count when front clears
         if front_class < DIST_DANGER:
             self.consecutive_pivot_count = 0
 
         # P11: Lateral obstacle
-        # Arc dwell hold: if already arcing with active dwell, hold the arc.
-        # If obstacle persists, refresh the dwell. If cleared, let dwell expire naturally.
-        if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
-            if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
-                self._refresh_dwell(0.4)
-            elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
-                self._refresh_dwell(0.4)
-            turn = (-1 if self.state == NAV_ARC_LEFT else 1) * abs(turn_intensity) * MAX_TURN_BIAS
-            speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
-            step = "nav_arc_L_hold" if self.state == NAV_ARC_LEFT else "nav_arc_R_hold"
-            return (self.state, speed, turn, 1, step)
-
         if (left_class >= DIST_NEAR or right_class >= DIST_NEAR):
             if left_class != right_class:
                 if left_class < right_class:
@@ -711,10 +610,23 @@ class NavStateMachine:
             return (NAV_SLOW_FORWARD, speed, turn, 1, "nav_slow_fwd")
 
         # P14: All clear
+        # Fix 67: If ARC dwell is still active, hold arc — prevents fall-through to FORWARD
+        if self.state in (NAV_ARC_LEFT, NAV_ARC_RIGHT) and self._dwell_active():
+            if self.state == NAV_ARC_LEFT and left_class >= DIST_NEAR:
+                self._refresh_dwell(0.4)
+            elif self.state == NAV_ARC_RIGHT and right_class >= DIST_NEAR:
+                self._refresh_dwell(0.4)
+            arc_turn = -abs(turn_intensity) * MAX_TURN_BIAS if self.state == NAV_ARC_LEFT else abs(turn_intensity) * MAX_TURN_BIAS
+            arc_speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
+            arc_step = "nav_arc_L" if self.state == NAV_ARC_LEFT else "nav_arc_R"
+            return (self.state, arc_speed, arc_turn, 1, arc_step)
+
         self._transition(NAV_FORWARD)
 
         # FORWARD with heading correction
         base_speed = CRUISE_SPEED
+        if self.terrain_is_tripod:
+            base_speed = TRIPOD_CRUISE_SPEED
         speed_s = speed_scale_from_front(front_class)
         speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
@@ -732,19 +644,16 @@ class NavStateMachine:
         return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
     def _backward_action(self, frame):
-        """Compute backward recovery action with rear safety check and dwell guard."""
+        """Compute backward recovery action with rear safety check."""
         if is_rear_safe(frame):
             self.hold_position_count = 0
             return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
         else:
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
-            backward_elapsed = time.monotonic() - self.backward_entry_time
-            if self.hold_position_count >= 2 and backward_elapsed >= BACKWARD_MIN_DWELL:
+            if self.hold_position_count >= 2:
                 self._pick_pivot_direction(frame)
                 self._transition(NAV_PIVOT_TURN)
-                self.cliff_backup_until = 0.0  # clear lockout so pivot can complete
-                self.obstacle_backup_until = 0.0  # clear obstacle lockout so pivot can complete
                 self._start_dwell(1.5)
                 self.consecutive_pivot_count += 1
                 turn = self.pivot_direction * PIVOT_TURN_BIAS
@@ -784,8 +693,8 @@ class NavStateMachine:
                 self._steep_up_start = now
             if (now - self._steep_up_start) >= 1.0:
                 self.terrain_gait = 1
-                self.terrain_impact_start = 325
-                self.terrain_impact_end = 20
+                self.terrain_impact_start = 315
+                self.terrain_impact_end = 15
                 self.terrain_mult = 0.7
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
@@ -873,8 +782,8 @@ class NavStateMachine:
                 self._light_load_start = now
             if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
                 self.terrain_gait = 0
-                self.terrain_impact_start = 340
-                self.terrain_impact_end = 20
+                self.terrain_impact_start = 330
+                self.terrain_impact_end = 30
                 self.terrain_mult = 1.0
                 self.terrain_is_tripod = True
                 self._apply_gait_transition(prev_gait)
@@ -888,8 +797,8 @@ class NavStateMachine:
 
         # T9: Default quad
         self.terrain_gait = 2
-        self.terrain_impact_start = 340
-        self.terrain_impact_end = 20
+        self.terrain_impact_start = 330
+        self.terrain_impact_end = 30
         self.terrain_mult = 1.0
         self.terrain_is_tripod = False
         self._apply_gait_transition(prev_gait)
@@ -1143,10 +1052,10 @@ def run_n2():
     check(cid, classify_distance(20.1) == DIST_NEAR, "20.1 should be NEAR")
     check(cid, classify_distance(25) == DIST_NEAR, "25 should be NEAR")
     check(cid, classify_distance(30) == DIST_NEAR, "30 should be NEAR")
-    check(cid, classify_distance(30.1) == DIST_NEAR, "30.1 should be NEAR")
-    check(cid, classify_distance(40) == DIST_NEAR, "40 should be NEAR")
-    check(cid, classify_distance(60) == DIST_CAUTION, "60 should be CAUTION")
-    check(cid, classify_distance(60.1) == DIST_CLEAR, "60.1 should be CLEAR")
+    check(cid, classify_distance(30.1) == DIST_CAUTION, "30.1 should be CAUTION")
+    check(cid, classify_distance(40) == DIST_CAUTION, "40 should be CAUTION")
+    check(cid, classify_distance(50) == DIST_CAUTION, "50 should be CAUTION")
+    check(cid, classify_distance(50.1) == DIST_CLEAR, "50.1 should be CLEAR")
     check(cid, classify_distance(100) == DIST_CLEAR, "100 should be CLEAR")
     check(cid, classify_distance(None) == DIST_UNKNOWN, "None should be UNKNOWN")
     check(cid, classify_distance(-5) == DIST_UNKNOWN, "-5 should be UNKNOWN")
@@ -1156,18 +1065,18 @@ def run_n2():
           f"severity ordering wrong: D={DIST_DANGER} N={DIST_NEAR} C={DIST_CAUTION} CL={DIST_CLEAR}")
 
     # Sector classification: front = worst of (FDL, FCF, FDR)
-    f1 = make_frame(fdl=100, fcf=100, fdr=15)  # fdr=15 -> DANGER
+    f1 = make_frame(fdl=100, fcf=15, fdr=15, rdr=15)  # 2/3 front DANGER, right pair agrees
     fc, lc, rc = classify_sectors(f1)
-    check(cid, fc == DIST_DANGER, f"front should be DANGER (one sensor 15cm): got {fc}")
-    check(cid, rc == DIST_DANGER, f"right should include FDR=15: got {rc}")
+    check(cid, fc == DIST_DANGER, f"front should be DANGER (2-of-3 sensors): got {fc}")
+    check(cid, rc == DIST_DANGER, f"right should be DANGER (FDR+RDR agree): got {rc}")
 
     # Left = worst of (FDL, RDL)
-    f2 = make_frame(fdl=25, rdl=100)  # fdl=25 -> NEAR
+    f2 = make_frame(fdl=25, rdl=25)  # both left sensors NEAR
     fc2, lc2, rc2 = classify_sectors(f2)
     check(cid, lc2 == DIST_NEAR, f"left should be NEAR (FDL=25): got {lc2}")
 
     # Right = worst of (FDR, RDR)
-    f3 = make_frame(fdr=100, rdr=25)  # rdr=25 -> NEAR
+    f3 = make_frame(fdr=25, rdr=25)  # both right sensors NEAR
     fc3, lc3, rc3 = classify_sectors(f3)
     check(cid, rc3 == DIST_NEAR, f"right should be NEAR (RDR=25): got {rc3}")
 
@@ -1180,8 +1089,8 @@ def run_n2():
 
     # Speed scale mapping
     check(cid, speed_scale_from_front(DIST_CLEAR) == 1.0, "CLEAR speed scale should be 1.0")
-    check(cid, speed_scale_from_front(DIST_CAUTION) == 0.85, "CAUTION speed scale should be 0.85")
-    check(cid, speed_scale_from_front(DIST_NEAR) == 0.50, "NEAR speed scale should be 0.50")
+    check(cid, speed_scale_from_front(DIST_CAUTION) == 0.7, "CAUTION speed scale should be 0.7")
+    check(cid, speed_scale_from_front(DIST_NEAR) == 0.45, "NEAR speed scale should be 0.45")
     check(cid, speed_scale_from_front(DIST_DANGER) == 0.0, "DANGER speed scale should be 0.0")
 
 
@@ -1222,7 +1131,7 @@ def run_n3():
     nav2._tick_count = NAV_IMU_SETTLE_TICKS  # past settle guard
     imu_spin2 = make_imu(angular_rate=4.0)
     # All-danger frame with rear safe so P9 fires (pivot), not P2 STOP_SAFE
-    frame_deadend2 = make_frame(fdl=10, fcf=10, fdr=10, rdl=100, rdr=100, rcf=100)
+    frame_deadend2 = make_frame(fdl=10, fcf=10, fdr=10, rdl=10, rdr=10, rcf=100)
     state2, _, _, _, step2 = fsm_update_simple(nav2, frame=frame_deadend2, imu=imu_spin2)
     # P9 triggers PIVOT_TURN; P2 is skipped because state is PIVOT_TURN
     check(cid, state2 == NAV_PIVOT_TURN,
@@ -1285,59 +1194,6 @@ def run_n3():
     check(cid, state == NAV_SLOW_FORWARD, f"P7 rear cliff: state={state} expected {NAV_SLOW_FORWARD}")
     check(cid, x_flip == 1, f"P7 rear cliff: x_flip={x_flip} expected 1 (forward)")
 
-    # --- N3.P6b_lockout: Cliff lockout keeps BACKWARD after cliff clears ---
-    nav_p6b = fresh_nav()
-    frame_rear_safe = make_frame(rdl=100, rcf=100, rdr=100)
-    # Trigger cliff to set lockout
-    fsm_update_simple(nav_p6b, frame=frame_rear_safe, front_cliff=True)
-    check(cid, nav_p6b.cliff_backup_until > 0.0,
-          f"N3.P6b_lockout: cliff_backup_until should be set: got {nav_p6b.cliff_backup_until}")
-    # Cliff clears -- lockout should keep BACKWARD (cliff_backup_until still in future)
-    state_p6b, _, _, x_flip_p6b, _ = fsm_update_simple(nav_p6b, frame=frame_rear_safe, front_cliff=False)
-    check(cid, state_p6b == NAV_BACKWARD,
-          f"N3.P6b_lockout: should stay BACKWARD during lockout: got {NAV_STATE_NAMES.get(state_p6b)}")
-    check(cid, x_flip_p6b == -1,
-          f"N3.P6b_lockout: x_flip should be -1 during lockout: got {x_flip_p6b}")
-
-    # --- N3.P6b_escape: After lockout expires, robot escapes (arc toward free side) ---
-    nav_esc = fresh_nav()
-    frame_left_clear = make_frame(fdl=100, fcf=10, fdr=10, rdl=100, rcf=100, rdr=100)
-    # Trigger cliff
-    fsm_update_simple(nav_esc, frame=frame_left_clear, front_cliff=True)
-    # Expire the lockout manually
-    nav_esc.cliff_backup_until = time.monotonic() - 0.1
-    # Update with cliff cleared and left side clear
-    state_esc, _, turn_esc, x_flip_esc, step_esc = fsm_update_simple(
-        nav_esc, frame=frame_left_clear, front_cliff=False)
-    check(cid, state_esc == NAV_ARC_LEFT,
-          f"N3.P6b_escape: should escape left (clear side): got {NAV_STATE_NAMES.get(state_esc)}")
-    check(cid, "cliff_escape" in step_esc,
-          f"N3.P6b_escape: step should be nav_cliff_escape_*: got {step_esc}")
-    check(cid, x_flip_esc == 1,
-          f"N3.P6b_escape: x_flip should be 1 (forward escape): got {x_flip_esc}")
-
-    # --- N3.P6b_override: P7 rear cliff overrides lockout ---
-    nav_ovr = fresh_nav()
-    fsm_update_simple(nav_ovr, frame=frame_rear_safe, front_cliff=True)
-    check(cid, nav_ovr.cliff_backup_until > 0.0, "N3.P6b_override: lockout should be set")
-    # Rear cliff while lockout active -- P7 should win
-    state_ovr, _, _, x_flip_ovr, _ = fsm_update_simple(nav_ovr, rear_cliff=True)
-    check(cid, state_ovr == NAV_SLOW_FORWARD,
-          f"N3.P6b_override: P7 should override lockout: got {NAV_STATE_NAMES.get(state_ovr)}")
-    check(cid, nav_ovr.cliff_backup_until == 0.0,
-          f"N3.P6b_override: lockout should be cleared by P7: got {nav_ovr.cliff_backup_until}")
-
-    # --- N3.P6b_escape_blocked: Both sides blocked -> pivot after lockout ---
-    nav_blk = fresh_nav()
-    frame_boxed = make_frame(fdl=10, fcf=10, fdr=10, rdl=10, rdr=10, rcf=100)
-    fsm_update_simple(nav_blk, frame=frame_boxed, front_cliff=True)
-    nav_blk.cliff_backup_until = time.monotonic() - 0.1  # expire lockout
-    state_blk, _, _, _, step_blk = fsm_update_simple(nav_blk, frame=frame_boxed, front_cliff=False)
-    check(cid, state_blk == NAV_PIVOT_TURN,
-          f"N3.P6b_escape_blocked: both sides blocked should pivot: got {NAV_STATE_NAMES.get(state_blk)}")
-    check(cid, "cliff_pivot" in step_blk,
-          f"N3.P6b_escape_blocked: step should be nav_cliff_pivot_*: got {step_blk}")
-
     # --- P8: Stall detection (sustained load > 500 for STALL_SUSTAIN_S) ---
     nav = fresh_nav()
     # First frame starts the timer
@@ -1367,107 +1223,14 @@ def run_n3():
     check(cid, state3 != NAV_PIVOT_TURN,
           f"P9 should NOT fire without prev_state=BACKWARD: got {state3}")
 
-    # --- P10: Front DANGER (2+ frames) -- escape-route awareness ---
-
-    # P10a: Both sides clear -- escape-arc, not backward
+    # --- P10: Front DANGER (2+ frames) ---
     nav = fresh_nav()
-    frame_front_danger = make_frame(fcf=10, rdl=100, rcf=100, rdr=100)
-    fsm_update_simple(nav, frame=frame_front_danger)  # 1st frame: counter++
-    state, _, _, _, step = fsm_update_simple(nav, frame=frame_front_danger)  # 2nd: P10 fires
-    check(cid, state in (NAV_ARC_LEFT, NAV_ARC_RIGHT),
-          f"N3.P10a: both sides clear should escape-arc: state={NAV_STATE_NAMES.get(state)} step={step}")
-    check(cid, "nav_escape" in step,
-          f"N3.P10a: step should be nav_escape_*: got {step}")
-
-    # P10b: One side clear, other DANGER -- escape toward clear side
-    nav = fresh_nav()
-    frame_right_blocked = make_frame(fcf=10, fdr=10, rdl=100, rdr=10)
-    fsm_update_simple(nav, frame=frame_right_blocked)
-    state, _, turn, _, step = fsm_update_simple(nav, frame=frame_right_blocked)
-    check(cid, state == NAV_ARC_LEFT,
-          f"N3.P10b: right blocked should escape left: state={NAV_STATE_NAMES.get(state)} step={step}")
-    check(cid, turn < 0, f"N3.P10b: escape left turn should be negative: turn={turn}")
-
-    # P10c: Both sides DANGER -- BACKWARD (last resort)
-    nav = fresh_nav()
-    frame_all_danger = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rdr=10, rcf=100)
-    fsm_update_simple(nav, frame=frame_all_danger)
-    state, _, _, _, step = fsm_update_simple(nav, frame=frame_all_danger)
-    check(cid, state == NAV_BACKWARD,
-          f"N3.P10c: both sides blocked should backward: state={NAV_STATE_NAMES.get(state)} step={step}")
-
-    # P10d: Tie-break -- same classification, pick side with more raw cm
-    nav = fresh_nav()
-    frame_tie = make_frame(fcf=10, fdl=35, rdl=35, fdr=45, rdr=45)
-    fsm_update_simple(nav, frame=frame_tie)
-    state, _, turn, _, step = fsm_update_simple(nav, frame=frame_tie)
-    check(cid, state == NAV_ARC_RIGHT,
-          f"N3.P10d: right has more cm should escape right: state={NAV_STATE_NAMES.get(state)} step={step}")
-    check(cid, turn > 0, f"N3.P10d: escape right turn should be positive: turn={turn}")
-
-    # P10e: One side NEAR, other DANGER -- should ARC (NEAR < DANGER, so arc escape available)
-    nav = fresh_nav()
-    frame_near_danger = make_frame(fcf=10, fdl=25, rdl=25, fdr=10, rdr=10, rcf=100)
-    fsm_update_simple(nav, frame=frame_near_danger)  # 1st frame: counter++
-    state, _, _, _, step = fsm_update_simple(nav, frame=frame_near_danger)  # 2nd: P10 fires
-    check(cid, state == NAV_ARC_LEFT,
-          f"N3.P10e: left NEAR (< DANGER) should arc left: state={NAV_STATE_NAMES.get(state)} step={step}")
-
-    # P10f: One side NEAR, other CAUTION -- should arc (one side < NEAR)
-    nav = fresh_nav()
-    frame_near_caution = make_frame(fcf=10, fdl=25, rdl=25, fdr=45, rdr=45, rcf=100)
-    fsm_update_simple(nav, frame=frame_near_caution)
-    state, _, turn, _, step = fsm_update_simple(nav, frame=frame_near_caution)
-    check(cid, state == NAV_ARC_RIGHT,
-          f"N3.P10f: right CAUTION should escape right: state={NAV_STATE_NAMES.get(state)} step={step}")
-    check(cid, turn > 0, f"N3.P10f: escape right turn should be positive: turn={turn}")
-
-    # --- P10b: Obstacle backup lockout (timed BACKWARD + escape turn) ---
-
-    # P10b-1: Lockout holds BACKWARD even when front clears
-    nav = fresh_nav()
-    frame_blocked = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
-    fsm_update_simple(nav, frame=frame_blocked)  # 1st danger frame
-    state, _, _, _, step = fsm_update_simple(nav, frame=frame_blocked)  # 2nd: P10 fires -> BACKWARD
-    check(cid, state == NAV_BACKWARD,
-          f"N3.P10b-1 setup: expected BACKWARD, got {NAV_STATE_NAMES.get(state)}")
-    check(cid, nav.obstacle_backup_until > 0.0,
-          f"N3.P10b-1: obstacle_backup_until should be set, got {nav.obstacle_backup_until}")
-    # Front clears but lockout should hold BACKWARD
-    frame_clear = make_frame(fcf=100, fdl=100, rdl=100, fdr=100, rdr=100, rcf=100)
-    state2, _, _, _, step2 = fsm_update_simple(nav, frame=frame_clear)
-    check(cid, state2 == NAV_BACKWARD,
-          f"N3.P10b-1: lockout should hold BACKWARD even with front clear: got {NAV_STATE_NAMES.get(state2)} step={step2}")
-
-    # P10b-2: Lockout expires -> escape arc (not FORWARD)
-    nav2 = fresh_nav()
-    frame_blocked2 = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
-    fsm_update_simple(nav2, frame=frame_blocked2)
-    fsm_update_simple(nav2, frame=frame_blocked2)  # enters BACKWARD + sets lockout
-    # Expire the lockout manually
-    nav2.obstacle_backup_until = time.monotonic() - 0.1
-    # Right side clear, left NEAR -> should escape right
-    frame_right_clear = make_frame(fcf=100, fdl=25, rdl=25, fdr=100, rdr=100, rcf=100)
-    state3, _, turn3, _, step3 = fsm_update_simple(nav2, frame=frame_right_clear)
-    check(cid, state3 == NAV_ARC_RIGHT,
-          f"N3.P10b-2: expired lockout should escape arc right: got {NAV_STATE_NAMES.get(state3)} step={step3}")
-    check(cid, "nav_obs_escape" in step3,
-          f"N3.P10b-2: step should be nav_obs_escape_*: got {step3}")
-
-    # P10b-3: Lockout expires with all sides blocked -> pivot
-    nav3 = fresh_nav()
-    frame_blocked3 = make_frame(fcf=10, fdl=15, rdl=15, fdr=10, rdr=10, rcf=100)
-    fsm_update_simple(nav3, frame=frame_blocked3)
-    fsm_update_simple(nav3, frame=frame_blocked3)  # enters BACKWARD
-    nav3.obstacle_backup_until = time.monotonic() - 0.1
-    # Front cleared (robot backed up) but both sides still blocked via rear diagonals
-    # FDL/FDR must be clear so front_class = CLEAR; RDL/RDR carry side blocking
-    frame_sides_blocked = make_frame(fcf=100, fdl=100, rdl=10, fdr=100, rdr=10, rcf=100)
-    state4, _, _, _, step4 = fsm_update_simple(nav3, frame=frame_sides_blocked)
-    check(cid, state4 == NAV_PIVOT_TURN,
-          f"N3.P10b-3: expired lockout + sides blocked should pivot: got {NAV_STATE_NAMES.get(state4)} step={step4}")
-    check(cid, "nav_obs_pivot" in step4,
-          f"N3.P10b-3: step should be nav_obs_pivot_*: got {step4}")
+    frame_front_danger = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
+    # First frame increments counter
+    fsm_update_simple(nav, frame=frame_front_danger)
+    # Second frame triggers P10
+    state, _, _, x_flip, _ = fsm_update_simple(nav, frame=frame_front_danger)
+    check(cid, state == NAV_BACKWARD, f"P10 front danger: state={state} expected {NAV_BACKWARD}")
 
     # --- P11: Lateral obstacle (one side NEAR, other freer) ---
     nav = fresh_nav()
@@ -1497,14 +1260,14 @@ def run_n3():
 
     # --- P12: Narrow corridor (both sides DANGER, front clear) ---
     nav = fresh_nav()
-    frame_corridor = make_frame(fdl=10, fdr=10, rdl=10, rdr=10, fcf=100)
+    frame_corridor = make_frame(fdl=25, fdr=25, rdl=10, rdr=10, fcf=100)  # sides DANGER (pairs agree), front NEAR < DANGER
     state, _, _, _, step = fsm_update_simple(nav, frame=frame_corridor)
     check(cid, state == NAV_SLOW_FORWARD,
           f"P12 narrow corridor: state={state} expected {NAV_SLOW_FORWARD}")
 
     # --- P13: Front CAUTION ---
     nav = fresh_nav()
-    frame_caution = make_frame(fcf=40)  # 40cm = CAUTION
+    frame_caution = make_frame(fcf=40, fdl=40)  # 2-of-3 front at CAUTION
     state, speed, turn, _, step = fsm_update_simple(nav, frame=frame_caution)
     check(cid, state == NAV_SLOW_FORWARD,
           f"P13 front caution: state={state} expected {NAV_SLOW_FORWARD}")
@@ -1578,7 +1341,7 @@ def run_n4():
     # Dwell should be active
     check(cid, nav._dwell_active(), "dwell should be active after ARC transition")
 
-    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot (after dwell expires)
+    # BACKWARD escalation: 2+ holds with rear unsafe -> pivot
     nav = fresh_nav()
     frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=10, rdr=10)
     nav.front_danger_frames = 2  # force P10
@@ -1586,16 +1349,8 @@ def run_n4():
     state1, speed1, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state1 == NAV_BACKWARD, f"backward first: state={state1}")
     check(cid, speed1 == 0, f"rear unsafe hold: speed={speed1} expected 0")
-
-    # Dwell guard: premature escalation should be blocked
-    nav.front_danger_frames = 2
-    state_early, _, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
-    check(cid, state_early == NAV_BACKWARD,
-          f"dwell guard: premature escalation blocked: state={NAV_STATE_NAMES.get(state_early)}")
-
-    # Simulate dwell elapsed, then escalate
-    nav.backward_entry_time = time.monotonic() - 1.0  # 1s ago > BACKWARD_MIN_DWELL
-    nav.front_danger_frames = 2
+    # Second update: hold_position_count reaches 2 -> escalate to pivot
+    nav.front_danger_frames = 2  # re-set
     state2, _, _, _, step2 = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state2 == NAV_PIVOT_TURN,
           f"backward escalation to pivot: state={state2} expected {NAV_PIVOT_TURN}")
@@ -1642,12 +1397,9 @@ def run_n5():
     # Frame 1: candidate, not confirmed yet
     fc1, rc1 = cliff.update(35, 15)
     check(cid, fc1 is False, f"single frame should not confirm cliff: got {fc1}")
-    # Frame 2: still not confirmed (need 3 consecutive)
+    # Frame 2: confirmed
     fc2, rc2 = cliff.update(35, 15)
-    check(cid, fc2 is False, f"2nd frame should not yet confirm front cliff: got {fc2}")
-    # Frame 3: confirmed
-    fc3_front, _ = cliff.update(35, 15)
-    check(cid, fc3_front is True, f"3rd frame should confirm front cliff: got {fc3_front}")
+    check(cid, fc2 is True, f"2nd frame should confirm front cliff: got {fc2}")
 
     # FCD == -1 -> NOT a cliff (reset)
     cliff2 = CliffDetector()
@@ -1667,10 +1419,8 @@ def run_n5():
     for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
         cliff4.update(15, 15)
     _, rc1 = cliff4.update(15, 35)  # rear candidate
-    _, rc2 = cliff4.update(15, 35)  # 2nd consecutive -- not yet confirmed
-    check(cid, rc2 is False, f"rear cliff should not confirm after 2 frames: got {rc2}")
-    _, rc3 = cliff4.update(15, 35)  # rear confirmed on 3rd frame
-    check(cid, rc3 is True, f"rear cliff should confirm after 3 frames: got {rc3}")
+    _, rc2 = cliff4.update(15, 35)  # rear confirmed
+    check(cid, rc2 is True, f"rear cliff should confirm after 2 frames: got {rc2}")
 
     # Ground EMA updates from valid readings in (0, 40]
     # update(fcd=20, rcd=15): both are non-candidates (< 30 and < EMA+10)
@@ -1699,11 +1449,9 @@ def run_n5():
     cliff7 = CliffDetector()
     cliff7._ground_ema = 10.0
     cliff7._warmup_frames = CLIFF_WARMUP + 1  # bypass warmup for delta test
-    fc_d1, _ = cliff7.update(45, -1)
-    fc_d2, _ = cliff7.update(45, -1)
-    check(cid, fc_d2 is False, f"delta-based cliff: 2nd frame should not yet confirm: got {fc_d2}")
-    fc_d3, _ = cliff7.update(45, -1)
-    check(cid, fc_d3 is True, f"delta-based cliff should confirm on 3rd frame: reading=45 > EMA(~10)+10")
+    fc_d1, _ = cliff7.update(28, -1)
+    fc_d2, _ = cliff7.update(28, -1)
+    check(cid, fc_d2 is True, f"delta-based cliff should confirm: reading=28 > EMA(~10)+10")
 
     # FCD=-1 sentinel specifically resets front counter
     cliff8 = CliffDetector()
@@ -1729,8 +1477,7 @@ def run_n5():
     # spurious cliff detection before sensor has settled.
     # _warmup_frames increments once per update() call. CLIFF_WARMUP=5.
     # Updates 1-5: suppressed. Update 6: first active (candidate, count=1).
-    # Update 7: second consecutive (count=2), not yet confirmed.
-    # Update 8: confirmed (count=3).
+    # Update 7: confirmed (count=2).
     cliff_b = CliffDetector()
     for i in range(CLIFF_WARMUP):  # updates 1-5: cliff still in warmup
         fc_b, _ = cliff_b.update(50.0, 15)  # fcd=50 > 30 = cliff candidate if active
@@ -1740,14 +1487,10 @@ def run_n5():
     fc_b4, _ = cliff_b.update(50.0, 15)
     check(cid, fc_b4 is False,
           f"N5.B: single active candidate should not confirm cliff: got {fc_b4}")
-    # Update 7: second consecutive active candidate -- still not confirmed (need 3)
+    # Update 5: second consecutive active candidate -- confirmed
     fc_b5, _ = cliff_b.update(50.0, 15)
-    check(cid, fc_b5 is False,
-          f"N5.B: 2nd active candidate should not yet confirm cliff: got {fc_b5}")
-    # Update 8: third consecutive active candidate -- confirmed
-    fc_b6, _ = cliff_b.update(50.0, 15)
-    check(cid, fc_b6 is True,
-          f"N5.B: cliff should confirm after warmup + 3 consecutive frames: got {fc_b6}")
+    check(cid, fc_b5 is True,
+          f"N5.B: cliff should confirm after warmup + 2 consecutive frames: got {fc_b5}")
 
 
 # =========================================================================
@@ -1787,8 +1530,8 @@ def run_n6():
     nav = fresh_nav()
     nav.prev_state = NAV_BACKWARD
     nav.front_danger_frames = 2
-    frame_deadend = make_frame(fdl=10, fcf=10, fdr=10, rdl=100, rdr=10, rcf=100)
-    # RDL=100 > RDR=10 -> pivot_direction = -1 (left)
+    frame_deadend = make_frame(fdl=10, fcf=10, fdr=10, rdl=15, rdr=10, rcf=100)
+    # RDL=15 > RDR=10 -> pivot_direction = -1 (left); both sides DANGER (pairs agree)
     state, speed, turn, _, step = fsm_update_simple(nav, frame=frame_deadend)
     check(cid, state == NAV_PIVOT_TURN, f"pivot setup: state={NAV_STATE_NAMES.get(state)}")
     check(cid, turn == -PIVOT_TURN_BIAS,
@@ -1798,8 +1541,8 @@ def run_n6():
     nav = fresh_nav()
     nav.prev_state = NAV_BACKWARD
     nav.front_danger_frames = 2
-    frame_deadend_r = make_frame(fdl=10, fcf=10, fdr=10, rdl=10, rdr=100, rcf=100)
-    # RDR=100 > RDL=10 -> pivot_direction = +1 (right)
+    frame_deadend_r = make_frame(fdl=10, fcf=10, fdr=10, rdl=10, rdr=15, rcf=100)
+    # RDR=15 > RDL=10 -> pivot_direction = +1 (right); both sides DANGER (pairs agree)
     state, speed, turn, _, step = fsm_update_simple(nav, frame=frame_deadend_r)
     check(cid, state == NAV_PIVOT_TURN, f"pivot right setup: state={NAV_STATE_NAMES.get(state)}")
     check(cid, turn == PIVOT_TURN_BIAS,
@@ -1833,8 +1576,8 @@ def run_n7():
     imu_steep = make_imu(pitch_deg=20)
     nav.update_terrain(imu_steep, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_gait == 1, f"T1: gait={nav.terrain_gait} expected 1 (wave)")
-    check(cid, nav.terrain_impact_start == 325, f"T1: impact_start={nav.terrain_impact_start} expected 325")
-    check(cid, nav.terrain_impact_end == 20, f"T1: impact_end={nav.terrain_impact_end} expected 20")
+    check(cid, nav.terrain_impact_start == 315, f"T1: impact_start={nav.terrain_impact_start} expected 315")
+    check(cid, nav.terrain_impact_end == 15, f"T1: impact_end={nav.terrain_impact_end} expected 15")
     check(cid, abs(nav.terrain_mult - 0.7) < 0.01, f"T1: terrain_mult={nav.terrain_mult} expected 0.7")
 
     # T2: Steep descent (pitch < -15, sustained 1s)
@@ -2065,26 +1808,18 @@ def run_n9():
     cliff = CliffDetector()
     for _ in range(CLIFF_WARMUP):  # warmup past CLIFF_WARMUP
         cliff.update(15, 15)
-    # 3 cliff frames
-    cliff.update(50, 15)  # candidate 1
-    cliff.update(50, 15)  # candidate 2
-    fc, _ = cliff.update(50, 15)  # confirmed on 3rd
+    # 2 cliff frames
+    cliff.update(50, 15)  # candidate
+    fc, _ = cliff.update(50, 15)  # confirmed
     check(cid, fc is True, "cliff scenario: cliff should be confirmed")
     frame_cliff = make_frame(rdl=100, rcf=100, rdr=100)
     state, _, _, x_flip, _ = fsm_update_simple(nav, frame=frame_cliff, front_cliff=True)
     check(cid, state == NAV_BACKWARD, f"cliff scenario: state={NAV_STATE_NAMES.get(state)} expected BACKWARD")
     check(cid, x_flip == -1, f"cliff scenario: x_flip={x_flip} expected -1")
-    # Cliff clears -- lockout keeps BACKWARD
+    # Cliff clears
     state2, _, _, _, _ = fsm_update_simple(nav, front_cliff=False)
-    check(cid, state2 == NAV_BACKWARD,
-          f"cliff clears (lockout active): state={NAV_STATE_NAMES.get(state2)} expected BACKWARD")
-    # After lockout expires -- escape arc away from cliff (not back toward it)
-    nav.cliff_backup_until = time.monotonic() - 0.1  # expire lockout
-    state3, _, _, _, step3 = fsm_update_simple(nav, front_cliff=False)
-    check(cid, state3 in (NAV_ARC_LEFT, NAV_ARC_RIGHT),
-          f"cliff lockout expired: should escape arc, got {NAV_STATE_NAMES.get(state3)}")
-    check(cid, "cliff_escape" in step3,
-          f"cliff lockout expired: step should contain cliff_escape, got {step3}")
+    check(cid, state2 == NAV_FORWARD,
+          f"cliff clears: state={NAV_STATE_NAMES.get(state2)} expected FORWARD")
 
     # Scenario 5: Rear cliff during BACKWARD -> FORWARD @ SLOW_SPEED (P7)
     nav = fresh_nav()
@@ -2103,7 +1838,6 @@ def run_n10():
     cid = "N10"
 
     # BACKWARD checks rear sensors before reversing
-    # Note: fdl=10, fdr=10 ensure both sides DANGER so P10 escape-route falls through to BACKWARD
     nav = fresh_nav()
     frame_rear_safe = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
     nav.front_danger_frames = 2
@@ -2396,7 +2130,6 @@ def run_nc():
 
     # ------------------------------------------------------------------
     # C6: Fix 68 same guard for P10 (front DANGER 2+ frames)
-    # Note: fdl=10, fdr=10 ensure both sides DANGER so P10 escape-route falls through to BACKWARD
     # ------------------------------------------------------------------
     nav = fresh_nav()
     frame_front_danger = make_frame(fcf=10, fdl=10, fdr=10, rdl=100, rcf=100, rdr=100)
