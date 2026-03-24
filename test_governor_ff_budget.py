@@ -18,7 +18,7 @@ import pytest
 # Constants mirrored from final_full_gait_test.py -- if these drift the
 # tests will fail and alert you to sync them.
 # ---------------------------------------------------------------------------
-GOVERNOR_FF_BUDGET = 700.0   # line 109
+GOVERNOR_FF_BUDGET = 575.0   # line 110
 FEEDFORWARD_CAP    = 499.0   # line 108
 VELOCITY_SCALAR    = 1.85    # line 90
 

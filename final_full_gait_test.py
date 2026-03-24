@@ -145,6 +145,9 @@ MIN_STANCE_HZ      = 0.15   # Hz -- absolute floor after PhErr governor; prevent
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
 VOLTAGE_MIN  = 10.5  # 10.5V = 3.5V/cell floor — raised from 10.0 for cold-weather cell protection (no hardware BMS)
+BROWNOUT_VOLTAGE_START = 11.0   # Start throttling governor Hz at this voltage (just above low-battery zone)
+BROWNOUT_SPEED_FLOOR   = 0.5    # Floor multiplier on max_safe_hz at VOLTAGE_MIN (50% speed)
+assert BROWNOUT_VOLTAGE_START > VOLTAGE_MIN, "BROWNOUT_VOLTAGE_START must exceed VOLTAGE_MIN to avoid division by zero"
 LOG_FILE     = "telemetry_log.txt"
 LOG_MAX_SIZE = 10 * 1024 * 1024
 
@@ -559,6 +562,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     telemetry_sid   = ALL_SERVOS[0]   # Which single servo gets full telemetry this tick
     telemetry_index = 0
     voltage_reading = 12.0
+    brownout_scale  = 1.0
     volt_dip_counter   = 0
     temp_spike_counters = {sid: 0 for sid in ALL_SERVOS}  # per-servo overtemp tracking
     temp_per_servo     = {sid: 0 for sid in ALL_SERVOS}   # Last known temp per servo (°C)
@@ -625,6 +629,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"L:{loads_str} | Stall:{stall_ids} | "
                         f"A:{total_amps:.2f} | Loop:{loop_ms:.1f}ms"
                         f"{ghost_tag}{vwarn_tag}{twarn_tag}{phgov_tag}"
+                        f"{'[BROWNOUT]' if brownout_scale < 1.0 else ''}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
                         f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_error_prev:.1f}° PG:{int(pherr_gov_active)}"
                         f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
@@ -1195,6 +1200,18 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 ph_scale = 1.0  # governor inactive -- no throttle
                 pherr_low_scale_start = 0.0
+
+            # Layer 4: Brownout prevention -- throttle Hz when battery sags (Fix 153)
+            # Ramps max_safe_hz from 100% at BROWNOUT_VOLTAGE_START down to BROWNOUT_SPEED_FLOOR at VOLTAGE_MIN.
+            # Reduces servo current draw before shutdown threshold, preventing brownout cascade.
+            # Combined worst case with PhErr: 0.35 * 0.5 = 0.175x nominal, caught by Hz floor below.
+            if voltage_reading < BROWNOUT_VOLTAGE_START:
+                brownout_scale = max(BROWNOUT_SPEED_FLOOR,
+                    BROWNOUT_SPEED_FLOOR + (1.0 - BROWNOUT_SPEED_FLOOR)
+                    * (voltage_reading - VOLTAGE_MIN) / (BROWNOUT_VOLTAGE_START - VOLTAGE_MIN))
+                max_safe_hz *= brownout_scale
+            else:
+                brownout_scale = 1.0
 
             # Hz floor: prevents PhErr positive feedback (low Hz -> low FF -> higher PhErr -> lower Hz)
             # Capped by clearance governor so floor never causes ground scraping
@@ -2408,6 +2425,7 @@ if __name__ == "__main__":
                         r_cm = max(frame.get("FDR") or 0, frame.get("RDR") or 0)
                         pivot_dir = -1 if l_cm >= r_cm else 1
                     self.pivot_direction = pivot_dir
+                    self.consecutive_pivot_count += 1
                     self._transition(NAV_PIVOT_TURN)
                     self._start_dwell(1.5)
                     self.terrain_impact_start = PIVOT_IMPACT_START

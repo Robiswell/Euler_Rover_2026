@@ -53,7 +53,7 @@ GAITS = {
 
 # Overload prevention constants (must match final_full_gait_test.py)
 OVERLOAD_PREVENTION_TIME = 1.5   # seconds: stall duration that triggers TE cycle
-OVERLOAD_MAX_CYCLES      = 10    # max TE cycles per stall event before cap
+OVERLOAD_MAX_CYCLES      = 50    # max TE cycles per stall event before cap
 
 # PhErr governor constants (must match final_full_gait_test.py)
 PHERR_ENGAGE_DEG  = 30.0    # deg: engage governor when max phase error exceeds this
