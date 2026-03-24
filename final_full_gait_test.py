@@ -1663,6 +1663,25 @@ if __name__ == "__main__":
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
+
+    # --- Fix 154: Minimum state dwell ---
+    # The FSM was changing states every 0.1s (one tick).  Servos can't
+    # physically respond that fast, so single-tick commands just shake
+    # the chassis.  This forces the robot to stay in each state for at
+    # least 0.3 s (3 ticks) before it can switch again.
+    # Safety states (STOP_SAFE, BACKWARD) are exempt so cliff and
+    # tipover responses are never delayed.
+    MIN_STATE_DWELL = 0.3  # seconds — 3 ticks at 10 Hz
+
+    # --- Fix 155: Terrain speed LERP ---
+    # terrain_mult controls how much the terrain slows the robot
+    # (1.0 = full speed, 0.5 = half speed).  It used to snap instantly,
+    # which cut speed 30 % in one tick and made legs stumble mid-stride.
+    # Now it glides smoothly toward the target over ~0.5 s.
+    # alpha = 0.45 at 10 Hz → 95 % converged in 5 ticks (0.5 s).
+    # Big drops (target <= 0.5 or jump > 0.3) still snap instantly
+    # because those mean serious terrain and we can't wait.
+    TERRAIN_LERP_ALPHA = 0.45  # per-tick blend factor (0 = no change, 1 = instant)
     CLIFF_BACKUP_DURATION = 10.0      # seconds of forced backward on front cliff before escape
     OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR or worse
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
@@ -2189,10 +2208,14 @@ if __name__ == "__main__":
             self.terrain_gait = 2  # default quad
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
-            self.terrain_mult = 1.0
+            self.terrain_mult = 1.0          # smoothed value (what speed formula reads)
+            self.terrain_mult_target = 1.0   # Fix 155: raw target from update_terrain()
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
             self.sensor_ema = {}  # per-sensor EMA state, keyed by sensor index 0-7
+
+            # Fix 154: track when we entered the current state
+            self.state_entry_time = time.monotonic()
 
         def _dwell_active(self):
             """True if current dwell timer hasn't expired."""
@@ -2207,13 +2230,35 @@ if __name__ == "__main__":
             self.dwell_start = time.monotonic()
             self.dwell_duration = duration
 
-        def _transition(self, new_state):
-            """Record state transition."""
-            if new_state != self.state:
-                self.prev_state = self.state
-                self.state = new_state
-                self.dwell_duration = 0  # Fix 68 (A4): reset stale dwell on state change
-                brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
+        def _transition(self, new_state, force=False):
+            """Change FSM state, with minimum dwell guard (Fix 154).
+
+            The robot must stay in each state for at least MIN_STATE_DWELL
+            seconds so servos have time to respond.  Without this, the FSM
+            can flip states every 0.1 s and the chassis just shakes.
+
+            force=True bypasses the dwell check.  Used only by recovery
+            routines (wiggle, self-right) that manage their own timing.
+
+            Safety-critical targets (STOP_SAFE, BACKWARD) always go
+            through immediately — we never delay cliff or tipover response.
+            """
+            if new_state == self.state:
+                return  # already there, nothing to do
+
+            # --- Fix 154: minimum dwell guard ---
+            # Safety exits are never delayed (cliff, tipover, etc.)
+            safety_targets = (NAV_STOP_SAFE, NAV_BACKWARD)
+            if not force and new_state not in safety_targets:
+                time_in_state = time.monotonic() - self.state_entry_time
+                if time_in_state < MIN_STATE_DWELL:
+                    return  # too soon — hold current state
+
+            self.prev_state = self.state
+            self.state = new_state
+            self.state_entry_time = time.monotonic()  # reset for new state
+            self.dwell_duration = 0  # Fix 68 (A4): reset stale dwell on state change
+            brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
 
         def smooth_sensor(self, idx, raw_cm):
             """EMA smoothing for ultrasonic sensors. alpha=0.3, passthrough for -1/None."""
@@ -2234,6 +2279,21 @@ if __name__ == "__main__":
             Also updates terrain overlay (gait, impact_start, impact_end, terrain_mult)."""
             now = time.monotonic()
             elapsed = now - self.mission_start
+
+            # --- Fix 155: smoothly blend terrain_mult toward its target ---
+            # Instead of jumping from 1.0 to 0.7 in one tick (which makes
+            # the robot stumble mid-stride), we glide there over ~0.5 s.
+            # Big emergency drops still snap instantly (steep descent, etc.)
+            gap = abs(self.terrain_mult_target - self.terrain_mult)
+            if gap > 0.001:  # only blend if there's a meaningful difference
+                if self.terrain_mult_target <= 0.5 or gap > 0.3:
+                    # Emergency: snap instantly (steep hill, heavy sand)
+                    self.terrain_mult = self.terrain_mult_target
+                else:
+                    # Normal: smooth blend each tick
+                    self.terrain_mult += TERRAIN_LERP_ALPHA * (
+                        self.terrain_mult_target - self.terrain_mult
+                    )
 
             # --- Mission timeout ---
             if elapsed >= MISSION_TIMEOUT_S:
@@ -2613,7 +2673,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.8
+                    self.terrain_mult_target = 0.8   # Fix 155: write target, not mult directly
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2628,7 +2688,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.5
+                    self.terrain_mult_target = 0.5   # Fix 155: snaps instantly (<=0.5 bypass)
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2640,7 +2700,7 @@ if __name__ == "__main__":
                 self.terrain_gait = 1  # wave
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult = 0.7
+                self.terrain_mult_target = 0.7   # Fix 155: LERP'd smoothly in update()
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
                 return
@@ -2653,7 +2713,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.6
+                    self.terrain_mult_target = 0.6   # Fix 155: LERP'd smoothly in update()
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2664,7 +2724,7 @@ if __name__ == "__main__":
             if angular_rate > 0.3:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult = 0.7
+                self.terrain_mult_target = 0.7   # Fix 155: LERP'd smoothly in update()
                 self.terrain_is_tripod = False
                 return  # keep current gait
 
@@ -2672,7 +2732,7 @@ if __name__ == "__main__":
             if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult = 0.8
+                self.terrain_mult_target = 0.8   # Fix 155: LERP'd smoothly in update()
                 self.terrain_is_tripod = False
                 return  # keep current gait
 
@@ -2683,7 +2743,7 @@ if __name__ == "__main__":
                 if (now - self._high_vibe_start) >= 0.5:
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 0.8
+                    self.terrain_mult_target = 0.8   # Fix 155: LERP'd smoothly in update()
                     self.terrain_is_tripod = False
                     return  # keep current gait
             else:
@@ -2702,7 +2762,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 0  # tripod
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult = 1.0
+                    self.terrain_mult_target = 1.0   # Fix 155: LERP'd smoothly in update()
                     self.terrain_is_tripod = True
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2719,7 +2779,7 @@ if __name__ == "__main__":
             self.terrain_gait = 2
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
-            self.terrain_mult = 1.0
+            self.terrain_mult_target = 1.0   # Fix 155: LERP'd smoothly in update()
             self.terrain_is_tripod = False
             self._apply_gait_transition(prev_gait)
 
@@ -3188,7 +3248,7 @@ if __name__ == "__main__":
                             if state == NAV_WIGGLE:
                                 if dry_run:
                                     brain_log("[NAV][DRY-RUN] would wiggle")
-                                    nav._transition(NAV_FORWARD)
+                                    nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
                                     continue
                                 # Blocking wiggle recovery
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
@@ -3200,13 +3260,13 @@ if __name__ == "__main__":
                                     nav.terrain_gait = 1
                                     nav.stall_speed_mult = 0.5
                                     brain_log("[NAV] 3 stalls in 30s — wave gait, half speed")
-                                nav._transition(NAV_FORWARD)
+                                nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
                                 continue
 
                             if state == NAV_STOP_SAFE and imu["upright_quality"] < 0.15:
                                 if dry_run:
                                     brain_log("[NAV][DRY-RUN] would self-right")
-                                    nav._transition(NAV_FORWARD)
+                                    nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
                                     continue
                                 # V0.5.01 - add roll attempt counter and limit to prevent infinite loop if self-right fails
                                 if roll_attempts >= MAX_ROLL_ATTEMPTS:
