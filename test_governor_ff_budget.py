@@ -33,7 +33,7 @@ AIR_SWEEP_DEFAULT    = 330.0  # Wave and Quad
 # Per-gait ff_budget values (from GAITS dict)
 FF_BUDGET_TRIPOD = 575.0
 FF_BUDGET_WAVE   = 700.0
-FF_BUDGET_QUAD   = 650.0
+FF_BUDGET_QUAD   = 499.0
 
 
 def governor_max_hz(budget, velocity_scalar, duty, air_sweep):
@@ -82,7 +82,7 @@ def test_governor_budget_geq_feedforward_cap():
 @pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
     ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
     ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
-    ("quadruped", 0.75, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
 def test_governor_hz_positive_all_gaits(gait_name, duty, budget, air_sweep):
     """
@@ -105,7 +105,7 @@ def test_governor_hz_positive_all_gaits(gait_name, duty, budget, air_sweep):
 @pytest.mark.parametrize("gait_name,duty,budget,air_sweep", [
     ("tripod",    0.55, FF_BUDGET_TRIPOD, AIR_SWEEP_TRIPOD),
     ("wave",      0.75, FF_BUDGET_WAVE,   AIR_SWEEP_DEFAULT),
-    ("quadruped", 0.75, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
+    ("quadruped", 0.70, FF_BUDGET_QUAD,   AIR_SWEEP_DEFAULT),
 ])
 def test_feedforward_cap_binds_before_budget(gait_name, duty, budget, air_sweep):
     """

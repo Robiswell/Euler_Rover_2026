@@ -48,7 +48,7 @@ PHERR_DEADBAND = 6.0  # degrees -- no phase correction below this
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
     1: {'duty': 0.75, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.75, 'offsets': {2:0.0, 5:0.0, 1:0.333, 3:0.333, 4:0.666, 6:0.666}, 'ff_budget': 750.0},
+    2: {'duty': 0.70, 'offsets': {2:0.0, 5:0.0, 1:0.333, 3:0.333, 4:0.666, 6:0.666}, 'ff_budget': 499.0},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
@@ -196,8 +196,9 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
     smooth_offsets  = {s: g['offsets'][s] for s in ALL_SERVOS}
     smooth_speed    = speed * 1.0
     smooth_turn     = turn_bias * 1.0
-    imp_start       = 345.0
-    imp_end         = 15.0
+    # Per-gait impact angles (quad uses wider sweep for motor margin)
+    imp_start       = 330.0 if gait_id == 2 else 345.0
+    imp_end         = 30.0  if gait_id == 2 else 15.0
 
     master_L = 0.0; master_R = 0.0
     actual_phases = {s: 0.0 for s in ALL_SERVOS}
@@ -236,6 +237,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
                     if 'gait_id' in sched_params:
                         gait_id = sched_params['gait_id']
                         g = GAITS[gait_id]
+                        imp_start = 330.0 if gait_id == 2 else 345.0
+                        imp_end   = 30.0  if gait_id == 2 else 15.0
                     if 'speed' in sched_params:
                         speed = sched_params['speed']
                     if 'turn_bias' in sched_params:

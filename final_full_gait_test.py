@@ -212,8 +212,8 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.75,
-        'ff_budget': 750.0,  # aggressive -- enough for speed=338 at duty=0.75, 20.9 deg lag
+        'duty': 0.70,
+        'ff_budget': 499.0,  # matches FEEDFORWARD_CAP — STS3215 motor limit at 270 deg/s
         'offsets': {2: 0.0, 5: 0.0,  1: 0.333, 3: 0.333,  4: 0.667, 6: 0.667}
     }
 }
@@ -1642,7 +1642,7 @@ if __name__ == "__main__":
 
     # --- Nav tunable constants ---
     CRUISE_SPEED = 500          # Tripod/Wave cruise — Wave governor-clamped to ~287
-    QUAD_CRUISE_SPEED = 200     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
+    QUAD_CRUISE_SPEED = 190     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
     SLOW_SPEED = 200
     BACKWARD_SPEED = 300
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
