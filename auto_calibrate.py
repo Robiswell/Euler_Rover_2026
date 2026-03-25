@@ -4,7 +4,8 @@ auto_calibrate.py -- Gravity-drop HOME_POSITIONS calibration
 
 For each servo: disables torque so the leg hangs freely under gravity,
 waits for it to settle, reads the encoder position. That position IS
-the vertical home. Repeats 3 times and averages for stability.
+the vertical home. Repeats 4 times (alternating +/- to cancel friction
+bias) and uses circular averaging for stability.
 
 Usage:
     sudo python3 auto_calibrate.py
@@ -12,6 +13,7 @@ Usage:
 Requires: scservo_sdk, /dev/ttyUSB1 accessible, robot elevated so legs swing freely.
 """
 
+import math
 import sys
 import time
 from scservo_sdk import PortHandler, PacketHandler
@@ -43,6 +45,13 @@ SERVO_LABELS = {
     6: "Right Middle",
 }
 
+# Mirror pairs: (left_id, right_id, label) -- for symmetry reporting only
+PAIRS = [
+    (2, 1, "Front"),
+    (3, 6, "Middle"),
+    (4, 5, "Rear"),
+]
+
 # Current HOME_POSITIONS from final_full_gait_test.py
 HOME_POSITIONS = {
     1: 3474, 2: 954, 3: 1423,
@@ -53,7 +62,7 @@ HOME_POSITIONS = {
 SETTLE_TIME    = 3.0   # seconds to wait for leg to stop swinging after release
 NUM_SAMPLES    = 5     # readings to average after settling
 SAMPLE_GAP     = 0.1   # seconds between readings
-NUM_TRIALS     = 3     # repeat drop-and-read this many times, average all
+NUM_TRIALS     = 4     # even count so +/- drops cancel friction bias
 TRIAL_LIFT_DEG = 30    # degrees to lift leg before each drop trial
 MOVE_SPEED     = 200   # raw speed for repositioning
 TORQUE_LIMIT   = 400   # safe torque limit for repositioning
@@ -94,8 +103,20 @@ def release_servo(pkt, port, sid):
     pkt.write1ByteTxRx(port, sid, ADDR_TORQUE_ENABLE, 0)
 
 
+def circular_avg(readings):
+    """Average encoder readings using circular mean (handles 0/4095 wrap)."""
+    angles = [r * 2 * math.pi / ENCODER_RESOLUTION for r in readings]
+    avg_angle = math.atan2(
+        sum(math.sin(a) for a in angles),
+        sum(math.cos(a) for a in angles)
+    )
+    if avg_angle < 0:
+        avg_angle += 2 * math.pi
+    return round(avg_angle * ENCODER_RESOLUTION / (2 * math.pi))
+
+
 def read_settled_position(pkt, port, sid, n_samples=NUM_SAMPLES):
-    """Read position multiple times and return average (filters jitter)."""
+    """Read position multiple times and return circular average (filters jitter + wrap)."""
     readings = []
     for _ in range(n_samples):
         pos = read_position(pkt, port, sid)
@@ -104,7 +125,7 @@ def read_settled_position(pkt, port, sid, n_samples=NUM_SAMPLES):
         time.sleep(SAMPLE_GAP)
     if not readings:
         return None
-    return round(sum(readings) / len(readings))
+    return circular_avg(readings)
 
 
 def calibrate_servo(pkt, port, sid):
@@ -161,8 +182,8 @@ def calibrate_servo(pkt, port, sid):
         print(f"  [ERROR] No valid readings for servo {sid}!")
         return center
 
-    # Average all trials
-    avg_pos = round(sum(all_readings) / len(all_readings))
+    # Average all trials (circular mean handles wrap near 0/4095)
+    avg_pos = circular_avg(all_readings)
     spread = max(all_readings) - min(all_readings)
     spread_deg = spread * 360.0 / ENCODER_RESOLUTION
 
@@ -227,9 +248,27 @@ def run_auto_calibration():
             best_pos = calibrate_servo(pkt, port, sid)
             new_home[sid] = best_pos
 
+        # ---------- Symmetry report (informational only, no correction) ----------
+        # Encoder zero varies per servo -- L+R does NOT need to sum to 4096.
+        # Gravity readings are ground truth. Report deltas for sanity check only.
+        print("\n" + "=" * 60)
+        print("  SYMMETRY REPORT (informational -- no correction applied)")
+        print("=" * 60)
+        for left_id, right_id, name in PAIRS:
+            old_sum = HOME_POSITIONS[left_id] + HOME_POSITIONS[right_id]
+            new_sum = new_home[left_id] + new_home[right_id]
+            delta_l = new_home[left_id] - HOME_POSITIONS[left_id]
+            delta_r = new_home[right_id] - HOME_POSITIONS[right_id]
+            deg_l = delta_l * 360.0 / ENCODER_RESOLUTION
+            deg_r = delta_r * 360.0 / ENCODER_RESOLUTION
+            print(f"  {name:7s}  S{left_id}: {delta_l:+d} ({deg_l:+.1f} deg)  "
+                  f"S{right_id}: {delta_r:+d} ({deg_r:+.1f} deg)")
+            if abs(abs(deg_l) - abs(deg_r)) > 5.0:
+                print(f"           NOTE: asymmetric drift > 5 deg -- inspect mounting")
+
         # ---------- Final summary ----------
         print("\n" + "=" * 60)
-        print("  CALIBRATION COMPLETE")
+        print("  CALIBRATION COMPLETE (gravity-drop, no artificial correction)")
         print("=" * 60)
 
         print("\nComparison (old vs new):")
