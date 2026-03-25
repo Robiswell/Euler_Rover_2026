@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "ssh": {
+      "command": "cmd",
+      "args": [
+        "/c", "npx", "-y", "ssh-mcp", "--",
+        "--host=10.42.0.1",
+        "--user=euler",
+        "--password=euler2026"
+      ]
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
+    },
+    "telemetry": {
+      "command": "python",
+      "args": ["C:/Users/rgane/Downloads/telemetry_mcp_server.py"]
+    }
+  }
+}
