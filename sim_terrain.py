@@ -38,8 +38,9 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 LEG_SPLAY      = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
-KP_PHASE        = 12.0
-STALL_THRESHOLD = 750
+KP_PHASE            = 12.0
+STALL_THRESHOLD     = 750
+WALKING_SPEED_CAP   = 1200   # must match final_full_gait_test.py line 97
 real_dt           = 0.02
 GAITS = {
     0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
@@ -345,8 +346,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
                 if is_rev:       raw = -raw
                 if sid in LEFT_SERVOS: raw = -raw
 
-                # v2: no stall exit ramp, no low-speed deadband
-                final_speed = max(-3000, min(3000, int(raw)))
+                # v2: clamp to WALKING_SPEED_CAP (matches production line 1319)
+                final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw)))
 
             # Metrics
             if abs(final_speed) > speed_max[sid]: speed_max[sid] = abs(final_speed)

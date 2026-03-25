@@ -2288,8 +2288,10 @@ if __name__ == "__main__":
             # Big emergency drops still snap instantly (steep descent, etc.)
             gap = abs(self.terrain_mult_target - self.terrain_mult)
             if gap > 0.001:  # only blend if there's a meaningful difference
-                if self.terrain_mult_target <= 0.5 or gap > 0.3:
-                    # Emergency: snap instantly (steep hill, heavy sand)
+                if (self.terrain_mult_target <= 0.5 or
+                        (gap > 0.3 and self.terrain_mult_target < self.terrain_mult)):
+                    # Emergency snap DOWN only (steep hill, heavy sand).
+                    # Upward recovery always blends to avoid mid-stride jerk.
                     self.terrain_mult = self.terrain_mult_target
                 else:
                     # Normal: smooth blend each tick
@@ -2471,10 +2473,12 @@ if __name__ == "__main__":
             if self.front_danger_frames >= 2:
                 if left_class >= DIST_NEAR and right_class >= DIST_NEAR:
                     # Both sides NEAR or DANGER (<40cm) -- boxed in, backup 8s
+                    # Always refresh lockout timer (even if already BACKWARD from P9)
+                    if self.obstacle_backup_until == 0.0 or now + OBSTACLE_BACKUP_DURATION > self.obstacle_backup_until:
+                        self.obstacle_backup_until = now + OBSTACLE_BACKUP_DURATION
                     if self.state != NAV_BACKWARD:
                         self.hold_position_count = 0
                         self.backward_entry_time = time.monotonic()
-                        self.obstacle_backup_until = now + OBSTACLE_BACKUP_DURATION
                         self._start_dwell(0.8)  # only on fresh entry -- avoid resetting every frame
                     self._transition(NAV_BACKWARD)
                     return self._backward_action(frame)
