@@ -36,6 +36,7 @@ HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
 SLOPE_PITCH_DEG = 12
+SLOPE_ROLL_DEG = 15       # lateral tilt threshold (higher than pitch to clear HOME bias)
 HEAVY_TERRAIN_LOAD = 400
 LIGHT_TERRAIN_LOAD = 200
 TERRAIN_SUSTAIN_S = 2.0
@@ -421,6 +422,7 @@ class NavStateMachine:
         self._heavy_load_start = 0.0
         self._light_load_start = 0.0
         self._roll_sustained_start = 0.0
+        self._roll_tilt_start = 0.0       # T3 roll sustain (1.0s)
         self._asymmetry_start = 0.0
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
@@ -717,8 +719,18 @@ class NavStateMachine:
         else:
             self._steep_down_start = 0.0
 
-        # T3: Moderate slope or tilted
-        if abs(pitch_deg) > SLOPE_PITCH_DEG or (0.15 <= upright <= 0.5):
+        # T3: Moderate slope (uphill or downhill) or lateral tilt
+        # Pitch fires immediately (terrain changes slowly).
+        # Roll uses 1.0s sustain to avoid oscillation from walking dynamics + HOME bias.
+        pitch_triggered = abs(pitch_deg) > SLOPE_PITCH_DEG
+        if abs(roll_deg) > SLOPE_ROLL_DEG:
+            if self._roll_tilt_start == 0.0:
+                self._roll_tilt_start = now
+            roll_triggered = (now - self._roll_tilt_start) >= 1.0
+        else:
+            self._roll_tilt_start = 0.0
+            roll_triggered = False
+        if pitch_triggered or roll_triggered or (0.15 <= upright <= 0.5):
             self.terrain_gait = 1
             self.terrain_impact_start = 325
             self.terrain_impact_end = 35
@@ -1606,6 +1618,31 @@ def run_n7():
     nav.update_terrain(imu_tilt, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_gait == 1, f"T3 tilt: gait={nav.terrain_gait} expected 1 (wave)")
     check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 tilt: terrain_mult={nav.terrain_mult} expected 0.6")
+
+    # T3 via lateral roll (abs(roll) > 15, sustained 1.0s)
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    nav._roll_tilt_start = time.monotonic() - 1.5  # sustained > 1s
+    imu_roll = make_imu(roll_deg=18)  # > 15 (SLOPE_ROLL_DEG)
+    nav.update_terrain(imu_roll, 100, 0.0, 9.81, DIST_CLEAR, 0, 18.0)
+    check(cid, nav.terrain_gait == 1, f"T3 roll: gait={nav.terrain_gait} expected 1 (wave)")
+    check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 roll: terrain_mult={nav.terrain_mult} expected 0.6")
+
+    # T3 roll should NOT fire without sustain (fresh timer)
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    imu_roll2 = make_imu(roll_deg=18)
+    nav.update_terrain(imu_roll2, 100, 0.0, 9.81, DIST_CLEAR, 0, 18.0)
+    # _roll_tilt_start was 0.0, so it just armed — should NOT trigger T3 yet, falls to T9
+    check(cid, nav.terrain_gait == 2, f"T3 roll no-sustain: gait={nav.terrain_gait} expected 2 (quad/T9)")
+
+    # T3 roll should NOT fire at 12 degrees (below SLOPE_ROLL_DEG=15)
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    nav._roll_tilt_start = time.monotonic() - 1.5
+    imu_roll3 = make_imu(roll_deg=12)  # below threshold
+    nav.update_terrain(imu_roll3, 100, 0.0, 9.81, DIST_CLEAR, 0, 12.0)
+    check(cid, nav.terrain_gait == 2, f"T3 roll below-threshold: gait={nav.terrain_gait} expected 2 (quad/T9)")
 
     # T4: Heavy terrain (avg_load > 400, sustained 2s)
     nav = fresh_nav()

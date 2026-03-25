@@ -1692,6 +1692,7 @@ if __name__ == "__main__":
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
     SLOPE_PITCH_DEG = 12
+    SLOPE_ROLL_DEG = 15       # lateral tilt threshold (higher than pitch to clear HOME bias)
     HEAVY_TERRAIN_LOAD = 400
     LIGHT_TERRAIN_LOAD = 200
     TERRAIN_SUSTAIN_S = 2.0
@@ -2201,6 +2202,7 @@ if __name__ == "__main__":
             self._heavy_load_start = 0.0
             self._light_load_start = 0.0
             self._roll_sustained_start = 0.0
+            self._roll_tilt_start = 0.0       # T3 roll sustain (1.0s)
             self._asymmetry_start = 0.0
             self._impact_cooldown_until = 0.0
             self._last_stall_clear_time = time.monotonic()
@@ -2695,8 +2697,18 @@ if __name__ == "__main__":
             else:
                 self._steep_down_start = 0.0
 
-            # T3: Moderate slope (uphill or downhill) or tilted
-            if abs(pitch_deg) > SLOPE_PITCH_DEG or (0.15 <= upright <= 0.5):
+            # T3: Moderate slope (uphill or downhill) or lateral tilt
+            # Pitch fires immediately (terrain changes slowly).
+            # Roll uses 1.0s sustain to avoid oscillation from walking dynamics + HOME bias.
+            pitch_triggered = abs(pitch_deg) > SLOPE_PITCH_DEG
+            if abs(roll_deg) > SLOPE_ROLL_DEG:
+                if self._roll_tilt_start == 0.0:
+                    self._roll_tilt_start = now
+                roll_triggered = (now - self._roll_tilt_start) >= 1.0
+            else:
+                self._roll_tilt_start = 0.0
+                roll_triggered = False
+            if pitch_triggered or roll_triggered or (0.15 <= upright <= 0.5):
                 self.terrain_gait = 1  # wave
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
