@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LEG_EFFECTIVE_RADIUS Measurement Error -- Speed Governor Impact Analysis</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    max-width: 7in;
+    margin: 2em auto;
+    line-height: 1.6;
+    color: #1a1a1a;
+    font-size: 11pt;
+  }
+  h1 { font-size: 1.5em; border-bottom: 3px solid #c0392b; padding-bottom: 0.3em; margin-top: 1.5em; }
+  h2 { font-size: 1.25em; border-bottom: 2px solid #2c3e50; padding-bottom: 0.2em; margin-top: 1.5em; color: #2c3e50; }
+  h3 { font-size: 1.1em; margin-top: 1.2em; color: #34495e; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 10pt; }
+  thead { background: #2c3e50; color: white; }
+  th, td { border: 1px solid #bdc3c7; padding: 6px 10px; text-align: left; }
+  tbody tr:nth-child(even) { background: #f8f9fa; }
+  code { background: #f4f4f4; padding: 1px 4px; border-radius: 3px; font-size: 0.95em; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 9.5pt; line-height: 1.4; }
+  .highlight-box { background: #fef9e7; border-left: 4px solid #f39c12; padding: 12px 16px; margin: 1em 0; }
+  .error-box { background: #fdedec; border-left: 4px solid #c0392b; padding: 12px 16px; margin: 1em 0; }
+  .success-box { background: #eafaf1; border-left: 4px solid #27ae60; padding: 12px 16px; margin: 1em 0; }
+  .diagram-container { background: #f8f9fa; border: 1px solid #ddd; padding: 16px; margin: 1em 0; border-radius: 4px; }
+  .two-col { display: flex; gap: 20px; flex-wrap: wrap; }
+  .two-col > div { flex: 1; min-width: 250px; }
+  .metric { font-size: 1.8em; font-weight: bold; color: #c0392b; }
+  .metric-good { font-size: 1.8em; font-weight: bold; color: #27ae60; }
+</style>
+</head>
+<body>
+
+<div class="print-cover">
+  <h1>LEG_EFFECTIVE_RADIUS Measurement Error</h1>
+  <p>Hexapod Gait Engine Speed Governor Impact Analysis</p>
+  <p>Euler Rover 2026 -- COSGC Competition Platform</p>
+  <p>Prepared 2026-03-19</p>
+</div>
+
+<div class="print-toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>Executive Summary</li>
+    <li>The Error</li>
+    <li>Physical Measurements That Prove It</li>
+    <li>How The Governor Uses This Constant</li>
+    <li>Speed Impact Table</li>
+    <li>Why This Type of Error Can Happen</li>
+    <li>The Fix</li>
+    <li>Downstream Effects</li>
+  </ol>
+</div>
+
+<h1>LEG_EFFECTIVE_RADIUS Measurement Error</h1>
+<p style="color:#555; margin-top:-0.5em;">Hexapod Gait Engine Speed Governor Impact Analysis -- 2026-03-19</p>
+
+<!-- ============================================================ -->
+<h2>1. Executive Summary</h2>
+
+<div class="error-box">
+  <p><strong>Root cause:</strong> <code>LEG_EFFECTIVE_RADIUS</code> was set to <strong>62.5mm</strong> (<code>LEG_DIAMETER/2</code>) when the actual shaft-to-ground functional distance is <strong>125mm</strong>.</p>
+</div>
+
+<p>The robot was running approximately <span class="metric">~65% slower</span> than it should have been across all gait modes. The incorrect geometry constant caused the clearance governor to believe the robot had only 15.5mm of ground clearance when the actual measured clearance is 78mm. This resulted in aggressive speed throttling that clamped commanded speeds well below their intended values.</p>
+
+<p>The error affected every speed-governed operation: forward walking, turning, and gait transitions in Tripod, Quadruped, and Wave modes. <code>CRUISE_SPEED=400</code> was being silently clamped to 324 in Quadruped mode -- the operator had no indication that the governor was intervening.</p>
+
+<!-- ============================================================ -->
+<h2>2. The Error</h2>
+
+<p><code>LEG_EFFECTIVE_RADIUS</code> was defined as:</p>
+<pre>LEG_EFFECTIVE_RADIUS = 62.5   # mm -- shaft center to ground contact (LEG_DIAMETER/2)</pre>
+
+<p>The assumption: since <code>LEG_DIAMETER = 125mm</code>, the radius must be half that, or 62.5mm. This is correct for conventional rotary joints where the shaft sits at the geometric center. But the Euler Rover uses <strong>C-shaped curved legs</strong> (RHex design) where the servo shaft is at one <em>end</em> of the arc, not at the center.</p>
+
+<h3>C-Leg Geometry</h3>
+
+<div class="diagram-container">
+<pre style="font-family: 'Courier New', monospace; line-height: 1.3;">
+    C-SHAPED LEG (RHex / Euler Rover)
+
+    SERVO SHAFT (pivot point)
+         O ---- axis of rotation
+         |
+         |   The leg is a curved C-shape
+         |   that arcs AWAY from the shaft
+          \
+           \
+            \        The "diameter" measurement
+             |       (125mm tip-to-tip) spans from
+             |       the shaft across to the far
+              \      side of the arc...
+               |
+               |     ...but the GROUND CONTACT
+              /      point is directly BELOW the
+             /       shaft when the leg is vertical
+            /
+           /
+          |
+    ------+------  GROUND CONTACT POINT
+          ^
+          |
+     125mm from shaft to here
+     (= functional radius)
+     (= the "diameter" measurement)
+     (NOT diameter / 2)
+</pre>
+</div>
+
+<p>The critical insight: in this C-leg geometry, the distance from the servo shaft to the ground contact point when the leg hangs vertically equals the full 125mm "diameter" measurement -- not half of it. The 125mm measures the <em>reach</em> of the curved leg from its pivot point (the shaft) to the contact point, which is exactly the functional radius.</p>
+
+<div class="highlight-box">
+<p><strong>Key distinction:</strong> "Diameter" in the context of these C-legs refers to the tip-to-tip arc measurement, which happens to equal the shaft-to-ground distance. The shaft is at one <em>endpoint</em> of the arc, not at its center. Dividing by 2 assumed center-mounted geometry that doesn't apply here.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>3. Physical Measurements That Prove It</h2>
+
+<p>Three independent measurements were taken on 2026-03-19 to verify the correct radius:</p>
+
+<table>
+<thead>
+<tr><th>Measurement</th><th>Value</th><th>Method</th></tr>
+</thead>
+<tbody>
+<tr><td>Ground to chassis bottom</td><td>74mm</td><td>Ruler, photo confirmed 2026-03-19</td></tr>
+<tr><td>Shaft center to chassis bottom</td><td>47mm</td><td>Servo mounting block height (<code>SHAFT_TO_CHASSIS_BOTTOM</code> constant)</td></tr>
+<tr><td>Shaft center to ground contact</td><td>125mm</td><td>Direct measurement on robot, 2026-03-19</td></tr>
+</tbody>
+</table>
+
+<h3>Cross-Verification Math</h3>
+
+<div class="success-box">
+<p><strong>Theoretical clearance:</strong> 125mm (shaft to ground) - 47mm (shaft to chassis) = <strong>78mm</strong></p>
+<p><strong>Measured clearance:</strong> <strong>74mm</strong> (ground to chassis bottom)</p>
+<p><strong>Discrepancy:</strong> 4mm -- within measurement tolerance (ruler placement precision, legs not perfectly vertical at home position)</p>
+</div>
+
+<p>All three measurements are mutually consistent and confirm <code>r = 125mm</code>.</p>
+
+<p>For comparison, with the old value:</p>
+<div class="error-box">
+<p><strong>Old theoretical clearance:</strong> 62.5mm - 47mm = <strong>15.5mm</strong></p>
+<p>This would mean the chassis sits barely above the ground -- obviously inconsistent with the measured 74mm clearance.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>4. How The Governor Uses This Constant</h2>
+
+<p>The function <code>compute_max_clearance_hz()</code> determines the maximum safe gait cycle frequency. It uses <code>LEG_EFFECTIVE_RADIUS</code> in the core physics equation:</p>
+
+<h3>Physics Model</h3>
+<pre>h(theta) = r * cos(theta)     # chassis height above ground at leg angle theta
+clearance = h(theta) - SHAFT_TO_CHASSIS_BOTTOM
+clearance must stay >= MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN</pre>
+
+<p>The governor finds the maximum cycle frequency (Hz) where phase lag from feedforward cap clipping doesn't reduce clearance below the minimum safety floor.</p>
+
+<h3>Governor Budget Comparison</h3>
+
+<div class="two-col">
+<div class="error-box">
+<h3>With r = 62.5mm (WRONG)</h3>
+<p>Max clearance at rest:<br><code>62.5 - 47 = 15.5mm</code></p>
+<p>Governor budget:<br><code>15.5 - 5 - 3 = 7.5mm</code></p>
+<p>Only 7.5mm of headroom before the governor must intervene. Very tight -- governor throttles aggressively to keep clearance above the floor.</p>
+</div>
+<div class="success-box">
+<h3>With r = 125mm (CORRECT)</h3>
+<p>Max clearance at rest:<br><code>125 - 47 = 78mm</code></p>
+<p>Governor budget:<br><code>78 - 5 - 3 = 70mm</code></p>
+<p><strong>9.3x more headroom.</strong> Governor can allow much higher speeds before clearance becomes a concern.</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>5. Speed Impact Table</h2>
+
+<p>All calculations use stance angles 345deg/15deg (30deg sweep), which is the default configuration.</p>
+
+<h3>Full Derivation: Quadruped (duty = 0.7)</h3>
+
+<details open>
+<summary><strong>With r = 62.5mm</strong></summary>
+<pre>stance_sweep   = 30deg
+air_sweep      = 330deg
+worst_angle    = 15deg  (max deviation from vertical at stance endpoints)
+ratio          = (47 + 5 + 3) / 62.5 = 55 / 62.5 = 0.880
+max_total_angle = acos(0.880) = 28.4deg
+max_lag        = 28.4 - 15 = 13.4deg
+max_ff         = 499 + 13.4 * 12 = 659.8 STS units
+max_deg_per_sec = 659.8 / 1.85 = 356.6 deg/s
+max_hz         = 356.6 * (1 - 0.7) / 330 = 0.324 Hz
+max_speed      = int(0.324 * 1000) = <strong>324</strong></pre>
+</details>
+
+<details open>
+<summary><strong>With r = 125.0mm</strong></summary>
+<pre>stance_sweep   = 30deg
+air_sweep      = 330deg
+worst_angle    = 15deg  (same)
+ratio          = 55 / 125 = 0.440
+max_total_angle = acos(0.440) = 63.9deg
+max_lag        = 63.9 - 15 = 48.9deg
+max_ff         = 499 + 48.9 * 12 = 1085.8 STS units
+max_deg_per_sec = 1085.8 / 1.85 = 587.0 deg/s
+max_hz         = 587.0 * 0.3 / 330 = 0.534 Hz
+max_speed      = int(0.534 * 1000) = <strong>534</strong></pre>
+</details>
+
+<h3>Summary: All Gaits</h3>
+
+<table>
+<thead>
+<tr><th>Gait</th><th>Duty</th><th>r = 62.5mm (old)</th><th>r = 125mm (corrected)</th><th>Improvement</th></tr>
+</thead>
+<tbody>
+<tr><td>Tripod</td><td>0.50</td><td>540</td><td>890</td><td style="color:#27ae60; font-weight:bold;">+65%</td></tr>
+<tr><td>Quadruped</td><td>0.70</td><td>324</td><td>534</td><td style="color:#27ae60; font-weight:bold;">+65%</td></tr>
+<tr><td>Wave</td><td>0.75</td><td>270</td><td>445</td><td style="color:#27ae60; font-weight:bold;">+65%</td></tr>
+</tbody>
+</table>
+
+<div class="highlight-box">
+<p><strong>Practical impact:</strong> <code>CRUISE_SPEED = 400</code> was being clamped to 324 in Quadruped mode. With the corrected radius, 400 is within the governor limit (534), so the commanded speed passes through unclamped. The operator gets the speed they asked for.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>6. Why This Type of Error Can Happen</h2>
+
+<p>The error stems from applying a formula that's correct for one geometry to a fundamentally different geometry:</p>
+
+<div class="two-col">
+<div class="diagram-container">
+<h3>Conventional Rotary Joint</h3>
+<pre style="font-size: 9pt; line-height: 1.2;">
+        tip
+         |
+         |  radius = r
+         |
+    -----O-----  SHAFT (center)
+         |
+         |  radius = r
+         |
+        tip
+
+  "diameter" = tip-to-tip = 2r
+  radius = diameter / 2  CORRECT
+</pre>
+<p>Shaft at geometric center. Radius is half the diameter. The standard formula applies.</p>
+</div>
+<div class="diagram-container">
+<h3>C-Shaped Curved Leg (Euler Rover)</h3>
+<pre style="font-size: 9pt; line-height: 1.2;">
+    SHAFT O----------.
+    (end  |           \
+     of    \           |
+     arc)   \          |
+             |     "diameter"
+             |     measurement
+              \    = 125mm
+               \       |
+                \      |
+                 '-----+
+              GROUND CONTACT
+
+  functional radius = shaft to
+  ground = 125mm = "diameter"
+  radius = diameter  NOT /2
+</pre>
+<p>Shaft at arc endpoint. The measured "diameter" equals the functional radius. Dividing by 2 is wrong.</p>
+</div>
+</div>
+
+<p>The original code comment explicitly documents the assumption:</p>
+<pre>LEG_EFFECTIVE_RADIUS = 62.5   # mm -- shaft center to ground contact (LEG_DIAMETER/2)</pre>
+<p>The comment "<code>LEG_DIAMETER/2</code>" shows the reasoning was explicit and seemed reasonable -- but it was wrong for this leg geometry. The division by 2 assumed the shaft was at the <em>center</em> of the arc, when it is actually at the <em>edge</em>.</p>
+
+<!-- ============================================================ -->
+<h2>7. The Fix</h2>
+
+<p>Single-line change in <code>final_full_gait_test.py</code>:</p>
+
+<div class="error-box">
+<p><strong>BEFORE:</strong></p>
+<pre style="margin:0;">LEG_EFFECTIVE_RADIUS = 62.5   # mm -- shaft center to ground contact (LEG_DIAMETER/2)</pre>
+</div>
+
+<div class="success-box">
+<p><strong>AFTER:</strong></p>
+<pre style="margin:0;">LEG_EFFECTIVE_RADIUS = 125.0  # mm -- shaft center to ground contact (directly measured)</pre>
+</div>
+
+<p>All downstream functions use <code>LEG_EFFECTIVE_RADIUS</code> by name. No other code changes are needed -- the corrected constant propagates automatically.</p>
+
+<!-- ============================================================ -->
+<h2>8. Downstream Effects</h2>
+
+<table>
+<thead>
+<tr><th>Function / Constant</th><th>Uses LEG_EFFECTIVE_RADIUS?</th><th>Effect of Fix</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>compute_min_clearance()</code></td>
+  <td>Yes</td>
+  <td>Static clearance at stance extremes increases from 7.1mm to 73.7mm at 15deg. Governor is no longer near the safety floor.</td>
+</tr>
+<tr>
+  <td><code>compute_max_clearance_hz()</code></td>
+  <td>Yes</td>
+  <td>Max safe Hz increases ~65% for all gaits. Governor becomes appropriately permissive instead of aggressively throttling.</td>
+</tr>
+<tr>
+  <td><code>compute_roll_corner_drop()</code></td>
+  <td>Yes</td>
+  <td>Roll-induced clearance loss during turns is now computed against correct geometry. Turn governor becomes less restrictive.</td>
+</tr>
+<tr>
+  <td>PhErr governor (<code>PHERR_*</code> constants)</td>
+  <td>No</td>
+  <td>Unaffected. Phase error feedback is independent of leg geometry.</td>
+</tr>
+<tr>
+  <td>Feedforward cap (<code>FEEDFORWARD_CAP = 499</code>)</td>
+  <td>No</td>
+  <td>Unaffected. Cap is a servo speed limit, not geometry-derived.</td>
+</tr>
+<tr>
+  <td><code>SERVO_SPEED_GOVERNOR_CAP</code> (499)</td>
+  <td>No</td>
+  <td>Unaffected. Independent absolute speed limit.</td>
+</tr>
+</tbody>
+</table>
+
+<div class="success-box">
+<p><strong>Net result:</strong> With the corrected constant, the speed governor correctly reflects the robot's actual ground clearance. The rover can operate at its intended speeds without false throttling, while still maintaining genuine safety protection against ground contact.</p>
+</div>
+
+</body>
+</html>
