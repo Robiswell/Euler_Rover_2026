@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
 .config-owner
+.pytest_cache/
+
+# Local config with credentials
+
+# Generated artifacts -- don't bloat git with binaries
+*.pdf
+*.html
+gait_viz_output/
+
+# Session state
+compaction-state.md

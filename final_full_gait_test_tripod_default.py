@@ -40,7 +40,7 @@ import math
 import collections
 import socket
 import threading
-import unittest
+
 
 # --- OPTIONAL: pyserial for autonomous nav (Arduino sensor hub) ---
 try:
@@ -2876,7 +2876,7 @@ if __name__ == "__main__":
         # --- C2: Orientation guard ---
         # Switch to wave gait for reliable upright detection (5 legs in stance vs tripod's 3)
         saved_gait_for_check = shared_gait_id.value
-        #shared_gait_id.value = 1   # WAVE — duty 0.85, 5 legs in stance
+        #shared_gait_id.value = 1   # WAVE — duty 0.75, 5 legs in stance (old comment)
         # V0.5.01
         shared_gait_id.value = 1   # WAVE — duty 0.70, max legs in stance for load detection
         shared_speed.value = 0
@@ -3281,7 +3281,7 @@ if __name__ == "__main__":
                                 nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
                                 continue
 
-                            if state == NAV_STOP_SAFE and imu["upright_quality"] < 0.15:
+                            if state == NAV_STOP_SAFE and imu_ready and imu["upright_quality"] < 0.15:
                                 if dry_run:
                                     brain_log("[NAV][DRY-RUN] would self-right")
                                     nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
@@ -3811,7 +3811,8 @@ if __name__ == "__main__":
     finally:
         is_running.value = False
         try:
-            brain_udp_sock.close()
+            if 'brain_udp_sock' in locals():
+                brain_udp_sock.close()
         except Exception:
             pass  # may not exist if competition nav wasn't entered
         gait_process.join(timeout=5)

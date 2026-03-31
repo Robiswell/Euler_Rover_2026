@@ -44,7 +44,7 @@ def run_calibration():
     print("\n========================================================")
     print("CALIBRATION RESULTS:")
     print("========================================================")
-    print("Copy and paste this EXACT block into your gait_test_pro.py")
+    print("Copy and paste this EXACT block into your final_full_gait_test.py")
     print("replacing the old 'HOME_POSITION = 2048' line:\n")
     
     print("HOME_POSITIONS = {")

@@ -282,7 +282,7 @@ def run_auto_calibration():
             print(f"  {sid:<8} {SERVO_LABELS[sid]:<15} {old:>6} {new:>6} {delta:>+7} {deg:>+7.1f} deg")
 
         print("\n" + "-" * 60)
-        print("Copy this block into final_full_gait_test.py (lines 164-167):")
+        print("Copy this block into final_full_gait_test.py (lines ~171-174):")
         print("-" * 60)
         print("HOME_POSITIONS = {")
         row1 = [f"{sid}: {new_home[sid]}" for sid in [1, 2, 3]]
