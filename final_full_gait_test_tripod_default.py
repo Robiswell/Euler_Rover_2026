@@ -1684,7 +1684,7 @@ if __name__ == "__main__":
     # Big drops (target <= 0.5 or jump > 0.3) still snap instantly
     # because those mean serious terrain and we can't wait.
     TERRAIN_LERP_ALPHA = 0.45  # per-tick blend factor (0 = no change, 1 = instant)
-    CLIFF_BACKUP_DURATION = 10.0      # seconds of forced backward on front cliff before escape
+    CLIFF_BACKUP_DURATION = 8.0      # seconds of forced backward on front cliff before escape
     OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR or worse
     MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
@@ -1707,8 +1707,8 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
-    CLIFF_DETECTION_ENABLED = False  # disable for competition -- soft surfaces cause false positives
-    CLIFF_CONFIRM_FRAMES = 3    # consecutive candidate frames before cliff confirmed (raised from 2 for false-positive filtering)
+    CLIFF_DETECTION_ENABLED = True  # re-enabled with tuned thresholds for competition
+    CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (raised for sand tolerance)
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -2009,7 +2009,7 @@ if __name__ == "__main__":
                 return False
 
             # Cliff candidate: absolute > 30 OR delta > EMA + 10
-            is_candidate = (reading > 30) or (reading > self._ground_ema + 10)
+            is_candidate = (reading > 45) or (reading > self._ground_ema + 18)
 
             if is_candidate:
                 setattr(self, counter_attr, count + 1)
