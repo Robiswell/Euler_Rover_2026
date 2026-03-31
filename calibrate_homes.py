@@ -119,7 +119,7 @@ def main():
     print("\n" + "=" * 50)
     print("COMPARISON WITH CURRENT HOMES:")
     print("=" * 50)
-    current = {1: 3474, 2: 954, 3: 1423, 4: 1613, 5: 3238, 6: 3201}
+    current = {1: 1727, 2: 2769, 3: 1431, 4: 2899, 5: 1188, 6: 3200}
     for sid in SERVO_IDS:
         diff = positions[sid] - current[sid]
         deg = diff / 4096.0 * 360.0

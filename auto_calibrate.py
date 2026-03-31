@@ -54,8 +54,8 @@ PAIRS = [
 
 # Current HOME_POSITIONS from final_full_gait_test.py
 HOME_POSITIONS = {
-    1: 3474, 2: 954, 3: 1423,
-    4: 1613, 5: 3238, 6: 3201,
+    1: 1727, 2: 2769, 3: 1431,
+    4: 2899, 5: 1188, 6: 3200,
 }
 
 # ---------- Calibration parameters ----------

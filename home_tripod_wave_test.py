@@ -26,12 +26,12 @@ RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS = LEFT_SERVOS + RIGHT_SERVOS
 
 HOME_POSITIONS = {
-    1: 3474,
-    2: 954,
-    3: 1423,
-    4: 1613,
-    5: 3238,
-    6: 3201,
+    1: 1727,
+    2: 2769,
+    3: 1431,
+    4: 2899,
+    5: 1188,
+    6: 3200,
 }
 
 KP_PHASE = 12.0 # Slightly lowered as Feed-Forward is now highly accurate

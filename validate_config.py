@@ -11,7 +11,7 @@ import sys, re, pathlib
 TARGET = pathlib.Path(__file__).parent / "full_gait_test.py"
 
 # -- Expected HOME_POSITIONS (from MEMORY.md — verified against hardware) ------
-EXPECTED_HOME = {1: 3474, 2: 954, 3: 1423, 4: 1613, 5: 3238, 6: 3201}
+EXPECTED_HOME = {1: 1727, 2: 2769, 3: 1431, 4: 2899, 5: 1188, 6: 3200}
 
 # -- Parameter specification --------------------------------------------------
 # Each entry: (name, required_value_or_range, source_description)

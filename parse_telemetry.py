@@ -356,7 +356,7 @@ VOLTAGE_MIN = 10.5
 
 # DUPLICATED FROM final_full_gait_test.py -- update both files when changing
 ENCODER_RESOLUTION = 4096.0
-HOME_POSITIONS = {1: 3447, 2: 955, 3: 1420, 4: 1569, 5: 3197, 6: 3175}
+HOME_POSITIONS = {1: 1727, 2: 2769, 3: 1431, 4: 2899, 5: 1188, 6: 3200}
 DIRECTION_MAP = {1: 1, 2: -1, 3: -1, 4: -1, 5: 1, 6: 1}
 LEG_SPLAY = {1: 35.0, 2: 35.0, 3: 0.0, 4: 0.0, 5: -35.0, 6: -35.0}  # degrees
 GAITS = {
