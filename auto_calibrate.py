@@ -86,10 +86,10 @@ def move_to(pkt, port, sid, target):
     pkt.write1ByteTxRx(port, sid, ADDR_ACCEL, ACCEL_PROFILE)
     pkt.write2ByteTxRx(port, sid, ADDR_TORQUE_LIMIT, TORQUE_LIMIT)
     pkt.write2ByteTxRx(port, sid, ADDR_GOAL_SPEED, MOVE_SPEED)
-    pkt.write1ByteTxRx(port, sid, ADDR_TORQUE_ENABLE, 1)
     pkt.write2ByteTxRx(port, sid, ADDR_GOAL_POSITION, target)
+    pkt.write1ByteTxRx(port, sid, ADDR_TORQUE_ENABLE, 1)
     # Wait for arrival
-    deadline = time.time() + 3.0
+    deadline = time.time() + 5.0
     while time.time() < deadline:
         time.sleep(0.05)
         pos = read_position(pkt, port, sid)
@@ -231,6 +231,8 @@ def run_auto_calibration():
         port.closePort()
         sys.exit(0)
 
+    calibration_ok = False
+
     try:
         # Verify all servos respond
         print("\nPinging servos...")
@@ -292,18 +294,27 @@ def run_auto_calibration():
         print("}")
         print("-" * 60)
 
-        # Move all servos to new home
-        print("\nMoving all servos to new HOME positions...")
+        # Move all servos to new home (straight down) and hold them there
+        print("\nMoving all servos to new HOME (straight down)...")
         for sid in ALL_SERVOS:
             move_to(pkt, port, sid, new_home[sid])
         time.sleep(1.0)
+        print("Legs are held at vertical HOME. Press Ctrl+C to release and exit.")
+        calibration_ok = True
 
     except KeyboardInterrupt:
         print("\n\nAborted.")
     except Exception as e:
         print(f"\n[ERROR] Unexpected error: {e}")
     finally:
-        # Always disable torque and close port
+        if calibration_ok:
+            # Hold legs at vertical -- wait for user to release
+            try:
+                while True:
+                    time.sleep(1.0)
+            except KeyboardInterrupt:
+                pass
+        # Disable torque and close port
         print("\nDisabling all servos...")
         for sid in ALL_SERVOS:
             try:
@@ -311,7 +322,7 @@ def run_auto_calibration():
             except Exception:
                 pass
         port.closePort()
-        print("Servos are limp. Port closed. Power off safely.")
+        print("Servos released. Port closed. Done.")
 
 
 if __name__ == "__main__":

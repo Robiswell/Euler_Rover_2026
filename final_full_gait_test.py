@@ -3188,6 +3188,7 @@ if __name__ == "__main__":
                                 front_cliff, rear_cliff, turn_intensity, avg_load,
                                 load_asymmetry, imu["angular_rate"], imu["accel_mag"],
                                 voltage, flicker_count)
+                            imu_ready = (time.monotonic() - nav._nav_start) >= nav.IMU_GRACE_PERIOD_S
 
                             # --- Apply Layer 2 modifiers ---
                             pre_mod_speed = speed  # capture before modifiers for [BN] telemetry
