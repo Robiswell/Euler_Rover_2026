@@ -2192,6 +2192,7 @@ if __name__ == "__main__":
             self.stall_speed_mult = 1.0
             self.mission_start = time.monotonic()
             self._nav_start = time.monotonic()  # for IMU grace period
+            self.imu_ready = False
             self.initial_yaw = None
             self.finished = False
             self.finish_wall_start = 0.0
@@ -2342,6 +2343,7 @@ if __name__ == "__main__":
             # compute_imu() maps to upright_quality=0.0.  Skipping IMU-dependent
             # safety checks (P1/P2/P5) avoids a false STOP_SAFE on startup.
             imu_ready = (now - self._nav_start) >= self.IMU_GRACE_PERIOD_S
+            self.imu_ready = imu_ready  # expose for Brain loop STOP_SAFE check
 
             # P1: Tipover (skip during IMU grace period)
             if imu_ready and upright < 0.15:
@@ -2876,9 +2878,7 @@ if __name__ == "__main__":
         # --- C2: Orientation guard ---
         # Switch to wave gait for reliable upright detection (5 legs in stance vs tripod's 3)
         saved_gait_for_check = shared_gait_id.value
-        #shared_gait_id.value = 1   # WAVE — duty 0.75, 5 legs in stance (old comment)
-        # V0.5.01
-        shared_gait_id.value = 1   # WAVE — duty 0.70, max legs in stance for load detection
+        shared_gait_id.value = 1   # WAVE — duty 0.75, max legs in stance for load detection
         shared_speed.value = 0
         tsleep(1.5)                 # Wait for LERP convergence to wave offsets (tsleep detects Heart crash)
 
@@ -3191,7 +3191,7 @@ if __name__ == "__main__":
                                 front_cliff, rear_cliff, turn_intensity, avg_load,
                                 load_asymmetry, imu["angular_rate"], imu["accel_mag"],
                                 voltage, flicker_count)
-                            imu_ready = (time.monotonic() - nav._nav_start) >= nav.IMU_GRACE_PERIOD_S
+                            imu_ready = nav.imu_ready
 
                             # --- Apply Layer 2 modifiers ---
                             pre_mod_speed = speed  # capture before modifiers for [BN] telemetry
