@@ -46,16 +46,16 @@ KP_PHASE = 12.0
 LEG_SPLAY = {1: -35, 2: -35, 6: 0, 3: 0, 5: 35, 4: 35}
 
 GAITS = {
-    0: {'name': 'Tripod',    'duty': 0.5,
+    0: {'name': 'Tripod',    'duty': 0.55,  # Fix H9: was 0.5
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave',      'duty': 0.75,
-        'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
+    1: {'name': 'Wave',      'duty': 0.80,
+        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}},  # Fix H9: offsets synced
     2: {'name': 'Quadruped', 'duty': 0.7,
-        'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
+        'offsets': {2: 0.0, 6: 0.0, 4: 0.333, 1: 0.333, 3: 0.666, 5: 0.666}},  # Fix H9: offsets synced
 }
 
-DEFAULT_IMPACT_START = 320.0
-DEFAULT_IMPACT_END = 40.0
+DEFAULT_IMPACT_START = 345.0  # Fix H9: was 320, synced with production (Fix 120)
+DEFAULT_IMPACT_END = 15.0    # Fix H9: was 40, synced with production (Fix 120)
 
 # CPG transition
 KAPPA_TRANSITION = 8.0

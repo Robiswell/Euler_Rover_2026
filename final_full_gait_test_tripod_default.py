@@ -79,6 +79,7 @@ ADDR_PRESENT_SPEED    = 58
 ADDR_PRESENT_LOAD     = 60
 ADDR_PRESENT_VOLTAGE  = 62
 ADDR_PRESENT_TEMP     = 63
+ADDR_HARDWARE_ERROR   = 65  # S5: 6 error flags in 1 byte (overvoltage, sensor, overtemp, overcurrent, angle, overload)
 ADDR_PRESENT_CURRENT  = 69
 LEN_GOAL_SPEED        = 2
 LEN_PRESENT_POSITION  = 2
@@ -150,6 +151,12 @@ VOLTAGE_MIN  = 10.5  # 10.5V = 3.5V/cell floor — raised from 10.0 for cold-wea
 BROWNOUT_VOLTAGE_START = 11.0   # Start throttling governor Hz at this voltage (just above low-battery zone)
 BROWNOUT_SPEED_FLOOR   = 0.5    # Floor multiplier on max_safe_hz at VOLTAGE_MIN (50% speed)
 assert BROWNOUT_VOLTAGE_START > VOLTAGE_MIN, "BROWNOUT_VOLTAGE_START must exceed VOLTAGE_MIN to avoid division by zero"
+# Current budget governor — throttle Hz when total fleet current approaches BEC limit
+# STS3215 stall current ~2.1A/servo; 6 servos at full load = 12.6A; BEC typically 8-10A
+CURRENT_BUDGET_WARN_MA  = 6000   # 6A total — start throttling (80% of ~7.5A typical BEC)
+CURRENT_BUDGET_HARD_MA  = 9000   # 9A total — hard floor (stall territory, brownout risk)
+CURRENT_BUDGET_FLOOR    = 0.5    # floor multiplier at hard limit (mirrors brownout floor)
+assert CURRENT_BUDGET_HARD_MA > CURRENT_BUDGET_WARN_MA, "CURRENT_BUDGET_HARD_MA must exceed WARN to avoid division by zero"
 LOG_FILE     = "telemetry_log.txt"
 LOG_MAX_SIZE = 10 * 1024 * 1024
 
@@ -180,7 +187,7 @@ SERVO_LOAD_INDEX = {sid: i for i, sid in enumerate(ALL_SERVOS)}
 
 # Feedback Gains
 KP_PHASE        = 12.0
-STALL_THRESHOLD = 750  # raised from 600 for wet sand operation — tune from telemetry after first run
+STALL_THRESHOLD = 800  # raised from 750 — wet sand+stones reach 700-750 normally; 800 still below 818 hw cutoff
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
 OVERLOAD_MAX_CYCLES = 50  # max TE cycles per servo per session — raised from 10 for competition sand (EEPROM rated 100k writes)
@@ -199,7 +206,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
-        'duty': 0.75,
+        'duty': 0.80,  # raised from 0.75 — reduces double-swing from 16.7% to 3.3% of cycle
         # Lift order: 5(RR)→3(LM)→1(RF)→4(LR)→6(RM)→2(LF)
         # Each consecutive pair in the air is on OPPOSITE sides AND different
         # columns, guaranteeing the support polygon always spans the full body.
@@ -569,6 +576,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     temp_spike_counters = {sid: 0 for sid in ALL_SERVOS}  # per-servo overtemp tracking
     temp_per_servo     = {sid: 0 for sid in ALL_SERVOS}   # Last known temp per servo (°C)
     current_per_servo  = {sid: 0 for sid in ALL_SERVOS}   # Last known current per servo (raw mA units)
+    hw_error_per_servo = {sid: 0 for sid in ALL_SERVOS}  # S5: hardware error flags per servo (addr 65)
     parent_pid     = os.getppid()
     # UDP telemetry broadcast (fire-and-forget, non-blocking)
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -625,6 +633,10 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         sd = time.perf_counter() - stall_entry_time[s]
                         stall_dur_parts.append(f"s{s}={sd:.1f}s")
                 stall_dur_str = ",".join(stall_dur_parts) if stall_dur_parts else "none"
+                # S4: per-servo position error (commanded vs actual) for post-run diagnostics
+                pos_errs = {sid: abs(target_angles.get(sid, 0) - actual_phases.get(sid, 0)) for sid in ALL_SERVOS}
+                pos_errs = {sid: min(e, 360 - e) for sid, e in pos_errs.items()}  # wrap to [0,180]
+                max_pos_err = max(pos_errs.values()) if pos_errs else 0.0
                 _hb_line = (f"[{ts}] G:{gait_name} Spd:{fsm_speed} Trn:{fsm_turn:.2f} | "
                         f"V:{volt:.2f}V Vc:{volt_dip_ctr:03d} | "
                         f"T:{temps_str} Tc:{temp_spike_ctr:02d} | "
@@ -634,7 +646,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         f"{'[BROWNOUT]' if brownout_scale < 1.0 else ''}"
                         f" | Pdelta:{pos_delta_accum} Jit:{jit_max:.1f}/{jit_std:.1f}ms"
                         f" Gov:{gov_pct:02d}% TE:{te_str} PhErr:{ref_phase_error:+.1f}° MaxPhErr:{max_phase_error_prev:.1f}° PG:{int(pherr_gov_active)}"
-                        f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str}\n")
+                        f" Comm:{comm_fail_streak:02d} StDur:{stall_dur_str} PosErr:{max_pos_err:.1f}°"
+                        f"{' HwErr:' + ','.join(f's{sid}={hw_error_per_servo[sid]:02x}' for sid in ALL_SERVOS if hw_error_per_servo[sid]) if any(hw_error_per_servo.values()) else ''}\n")
                 f.write(_hb_line)
                 # UDP broadcast heartbeat (fire-and-forget for live analyst)
                 try:
@@ -872,6 +885,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     if servo_comm_fails[sid] == 50:
                         print(f"[heart] servo {sid} unresponsive for 1s — zeroing speed")
                         servo_disabled[sid] = True
+                        current_per_servo[sid] = 0  # S3: don't let phantom current pollute governor
 
             # Bus disconnect detection — if no servo responds for 10 consecutive
             # ticks (200ms at 50Hz), the USB link is dead.  STS3215 servos in
@@ -1006,6 +1020,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             amps, res_a, _ = packet_handler.read2ByteTxRx(port_handler, telemetry_sid, ADDR_PRESENT_CURRENT)
             if res_a == 0:
                 current_per_servo[telemetry_sid] = amps & 0x7FFF
+
+            # S5: hardware error register — 6 flags in 1 byte (diagnostic, no control action)
+            hw_err, res_h, _ = packet_handler.read1ByteTxRx(port_handler, telemetry_sid, ADDR_HARDWARE_ERROR)
+            if res_h == 0:
+                hw_error_per_servo[telemetry_sid] = hw_err
 
             # ----------------------------------------------------------
             # Safety Guards
@@ -1214,6 +1233,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 max_safe_hz *= brownout_scale
             else:
                 brownout_scale = 1.0
+
+            # Layer 5: Current budget governor — throttle when fleet current approaches BEC limit
+            fleet_current_ma = sum(current_per_servo.values())
+            if fleet_current_ma > CURRENT_BUDGET_WARN_MA:
+                current_scale = max(CURRENT_BUDGET_FLOOR,
+                    CURRENT_BUDGET_FLOOR + (1.0 - CURRENT_BUDGET_FLOOR)
+                    * (CURRENT_BUDGET_HARD_MA - fleet_current_ma)
+                    / (CURRENT_BUDGET_HARD_MA - CURRENT_BUDGET_WARN_MA))
+                max_safe_hz *= current_scale
 
             # Hz floor: prevents PhErr positive feedback (low Hz -> low FF -> higher PhErr -> lower Hz)
             # Capped by clearance governor so floor never causes ground scraping
@@ -1955,9 +1983,9 @@ if __name__ == "__main__":
         if front_class == DIST_CLEAR:
             return 1.0
         if front_class == DIST_CAUTION:
-            return 0.85
+            return 0.90   # raised from 0.85
         if front_class == DIST_NEAR:
-            return 0.50
+            return 0.55   # raised from 0.50
         if front_class == DIST_DANGER:
             return 0.0
         return 0.7  # UNKNOWN
@@ -1972,9 +2000,11 @@ if __name__ == "__main__":
             self._consecutive_rear = 0
             self._warmup_frames = 0       # Fix 72: skip detection during sensor settle
 
-        def update(self, fcd, rcd):
+        def update(self, fcd, rcd, pitch_deg=0.0):
             """Update cliff detection with new FCD and RCD readings.
             Returns (front_cliff, rear_cliff) booleans."""
+            if pitch_deg > 10:
+                self._consecutive_front = 0; self._consecutive_rear = 0; return False, False
             self._warmup_frames += 1
             front_cliff = self._check_cliff(fcd, is_front=True)
             rear_cliff = self._check_cliff(rcd, is_front=False)
@@ -2218,6 +2248,10 @@ if __name__ == "__main__":
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
             self.sensor_ema = {}  # per-sensor EMA state, keyed by sensor index 0-7
+            self.sensor_median_buf = {i: collections.deque(maxlen=3) for i in range(8)}
+            # U1: ground distance variance — rolling window for FCD/RCD (indices 2, 6)
+            self.ground_var_buf = {2: collections.deque(maxlen=15), 6: collections.deque(maxlen=15)}
+            self.ground_variance = 99.0  # unknown until 5+ samples — blocks T8 tripod sprint on startup
 
             # Fix 154: track when we entered the current state
             self.state_entry_time = time.monotonic()
@@ -2266,15 +2300,40 @@ if __name__ == "__main__":
             brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
 
         def smooth_sensor(self, idx, raw_cm):
-            """EMA smoothing for ultrasonic sensors. alpha=0.3, passthrough for -1/None."""
-            if raw_cm is None or raw_cm == -1:
+            """3-sample median + EMA smoothing for ultrasonic sensors.
+            Median kills single-frame outliers (sand scatter, multipath).
+            EMA (alpha=0.4) smooths residual jitter. Passthrough for -1/-2/None."""
+            if raw_cm is None or raw_cm < 0:
+                # Clear stale buffer so recovery starts fresh after fault
+                self.sensor_median_buf[idx].clear()
+                self.sensor_ema.pop(idx, None)
                 return raw_cm
+            # Stage 1: running median of 3 — rejects impulse noise
+            buf = self.sensor_median_buf[idx]
+            buf.append(raw_cm)
+            filtered = sorted(buf)[len(buf) // 2] if len(buf) >= 3 else raw_cm
+            # Stage 2: EMA on median output
             if idx not in self.sensor_ema:
-                self.sensor_ema[idx] = raw_cm
-                return raw_cm
-            alpha = 0.3
-            self.sensor_ema[idx] = alpha * raw_cm + (1.0 - alpha) * self.sensor_ema[idx]
+                self.sensor_ema[idx] = filtered
+                return filtered
+            alpha = 0.4  # raised from 0.3 — median handles outliers, EMA can track faster
+            self.sensor_ema[idx] = alpha * filtered + (1.0 - alpha) * self.sensor_ema[idx]
             return self.sensor_ema[idx]
+
+        def update_ground_variance(self, frame):
+            """U1: Track FCD/RCD reading variance over 15-frame window.
+            High variance = sand/loose surface. Low variance = hard floor.
+            Uses raw (pre-EMA) values; -1/-2/None are excluded from the window."""
+            for sensor_idx, key in ((2, "FCD"), (6, "RCD")):
+                val = frame.get(key)
+                if val is not None and val > 0:
+                    self.ground_var_buf[sensor_idx].append(val)
+            # Combined variance from both downward sensors
+            all_vals = list(self.ground_var_buf[2]) + list(self.ground_var_buf[6])
+            if len(all_vals) >= 5:
+                mean = sum(all_vals) / len(all_vals)
+                self.ground_variance = sum((v - mean) ** 2 for v in all_vals) / len(all_vals)
+            # else: keep previous value until enough samples accumulate
 
         def update(self, frame, imu, front_class, left_class, right_class,
                    front_cliff, rear_cliff, turn_intensity, avg_load,
@@ -2291,7 +2350,7 @@ if __name__ == "__main__":
             # Big emergency drops still snap instantly (steep descent, etc.)
             gap = abs(self.terrain_mult_target - self.terrain_mult)
             if gap > 0.001:  # only blend if there's a meaningful difference
-                if (self.terrain_mult_target <= 0.5 or
+                if (self.terrain_mult_target <= 0.6 or  # raised from 0.5 — T2 now uses 0.6
                         (gap > 0.3 and self.terrain_mult_target < self.terrain_mult)):
                     # Emergency snap DOWN only (steep hill, heavy sand).
                     # Upward recovery always blends to avoid mid-stride jerk.
@@ -2393,6 +2452,7 @@ if __name__ == "__main__":
                 self.cliff_backup_until = 0.0  # clear lockout on rear cliff
                 self.obstacle_backup_until = 0.0  # clear obstacle lockout on rear cliff
                 self._transition(NAV_SLOW_FORWARD)
+                self._start_dwell(0.6)  # Fix C1: prevent BACKWARD↔SLOW_FORWARD oscillation on rear cliff
                 speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
                 return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
 
@@ -2451,6 +2511,7 @@ if __name__ == "__main__":
             if self.stall_count_30s > 0 and (now - self.last_stall_time) > 60:
                 self.stall_count_30s = 0
                 self.stall_speed_mult = 1.0
+                self.terrain_gait = 2  # Fix H4: restore default quad
                 self._last_stall_clear_time = now
 
             # P9: Dead end (front DANGER + both sides DANGER + came from BACKWARD)
@@ -2683,7 +2744,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.8   # Fix 155: write target, not mult directly
+                    self.terrain_mult_target = 0.9   # T1: raised from 0.8 — governor-clamped for wave anyway
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2698,7 +2759,7 @@ if __name__ == "__main__":
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.5   # Fix 155: snaps instantly (<=0.5 bypass)
+                    self.terrain_mult_target = 0.6   # T2: raised from 0.5 — snap threshold adjusted to <=0.6
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2720,20 +2781,22 @@ if __name__ == "__main__":
                 self.terrain_gait = 1  # wave
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.7   # Fix 155: LERP'd smoothly in update()
+                self.terrain_mult_target = 0.85  # T3: raised from 0.7 — governor-clamped for wave
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
                 return
 
             # T4: Heavy terrain (soft sand)
-            if avg_load > HEAVY_TERRAIN_LOAD:
+            # U1: high ground variance corroborates sand — lower the load threshold
+            heavy_load_thresh = HEAVY_TERRAIN_LOAD - 50 if self.ground_variance > 5.0 else HEAVY_TERRAIN_LOAD
+            if avg_load > heavy_load_thresh:
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
                 if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.6   # Fix 155: LERP'd smoothly in update()
+                    self.terrain_mult_target = 0.75  # T4: raised from 0.6 — biggest competition impact (sand course)
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2744,7 +2807,7 @@ if __name__ == "__main__":
             if angular_rate > 0.3:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.7   # Fix 155: LERP'd smoothly in update()
+                self.terrain_mult_target = 0.8   # T5: raised from 0.7
                 self.terrain_is_tripod = False
                 return  # keep current gait
 
@@ -2752,7 +2815,7 @@ if __name__ == "__main__":
             if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.8   # Fix 155: LERP'd smoothly in update()
+                self.terrain_mult_target = 0.9   # T6: raised from 0.8
                 self.terrain_is_tripod = False
                 return  # keep current gait
 
@@ -2763,7 +2826,7 @@ if __name__ == "__main__":
                 if (now - self._high_vibe_start) >= 0.5:
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.8   # Fix 155: LERP'd smoothly in update()
+                    self.terrain_mult_target = 0.9   # T7: raised from 0.8
                     self.terrain_is_tripod = False
                     return  # keep current gait
             else:
@@ -2775,7 +2838,8 @@ if __name__ == "__main__":
                     and front_class == DIST_CLEAR
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
-                    and no_recent_stalls):
+                    and no_recent_stalls
+                    and self.ground_variance < 2.0):
                 if self._light_load_start == 0.0:
                     self._light_load_start = now
                 if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
@@ -3149,6 +3213,8 @@ if __name__ == "__main__":
                             # 3-4 frames of latency to cliff detection (safety concern).
                             raw_fcd = frame.get("FCD")
                             raw_rcd = frame.get("RCD")
+                            # U1: update ground variance BEFORE smoothing (uses raw readings)
+                            nav.update_ground_variance(frame)
                             # EMA smooth all 8 ultrasonic readings before classification
                             # (-1 and None pass through unmodified; alpha=0.3)
                             _sensor_keys = NAV_SENSOR_KEYS
@@ -3156,7 +3222,7 @@ if __name__ == "__main__":
                             for _si, _sk in enumerate(_sensor_keys):
                                 frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
                             front_class, left_class, right_class = classify_sectors_voted(frame)
-                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd)
+                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd, pitch_deg=imu.get("pitch_deg", 0.0))
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
 
@@ -3273,14 +3339,30 @@ if __name__ == "__main__":
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
                                                step_name="nav_pre_wiggle")
                                 state_recovery_wiggle()
-                                nav.stall_speed_mult *= 0.75
+                                nav.stall_speed_mult *= 0.80  # raised from 0.75
                                 if nav.stall_count_30s >= 3:
-                                    # Switch to wave gait, halve speed
+                                    # Switch to wave gait, reduced speed
                                     nav.terrain_gait = 1
-                                    nav.stall_speed_mult = 0.5
+                                    nav.stall_speed_mult = 0.55  # raised from 0.5
                                     brain_log("[NAV] 3 stalls in 30s — wave gait, half speed")
                                 nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
                                 continue
+
+                            # Fix C2: STOP_SAFE recovery — if conditions that triggered it have cleared
+                            # for 3s, resume FORWARD instead of staying frozen for 90s.
+                            if state == NAV_STOP_SAFE and imu_ready and imu["upright_quality"] >= 0.15:
+                                angular_rate = imu.get("angular_rate", 0.0)
+                                voltage_ok = shared_voltage.value >= VOLTAGE_MIN
+                                if angular_rate < 1.0 and voltage_ok:
+                                    if not hasattr(nav, '_stop_safe_clear_start'):
+                                        nav._stop_safe_clear_start = time.monotonic()
+                                    elif time.monotonic() - nav._stop_safe_clear_start >= 3.0:
+                                        brain_log("[NAV] STOP_SAFE conditions cleared for 3s — resuming FORWARD")
+                                        nav._transition(NAV_FORWARD, force=True)
+                                        nav._stop_safe_clear_start = None
+                                        continue
+                                else:
+                                    nav._stop_safe_clear_start = None
 
                             if state == NAV_STOP_SAFE and imu_ready and imu["upright_quality"] < 0.15:
                                 if dry_run:

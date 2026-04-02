@@ -146,7 +146,7 @@ def test_wave_duty_075_hz_exceeds_minimum_walking_threshold():
     rover completes one full gait cycle in 5 seconds -- below that the robot
     moves too slowly to be useful on a competition course.
     """
-    WAVE_DUTY = 0.75
+    WAVE_DUTY = 0.80
     MIN_WALKING_HZ = 0.2
 
     hz = governor_max_hz(GOVERNOR_FF_BUDGET, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
