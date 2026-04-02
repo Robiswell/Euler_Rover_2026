@@ -1738,7 +1738,7 @@ if __name__ == "__main__":
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
     CLIFF_DETECTION_ENABLED = True   # enabled: thresholds raised (45/+18) to reject soft-surface false positives
-    CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (raised from 3 for false-positive filtering)
+    CLIFF_CONFIRM_FRAMES = 8    # consecutive candidate frames before cliff confirmed (raised from 5 — FCD scatter spikes can burst 5+ frames)
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -3120,6 +3120,8 @@ if __name__ == "__main__":
                         # --- Initialize nav components ---
                         nav = NavStateMachine()
                         cliff = CliffDetector()
+                        cliff_median_fcd = collections.deque(maxlen=3)  # median filter for cliff FCD input
+                        cliff_median_rcd = collections.deque(maxlen=3)  # median filter for cliff RCD input
                         flicker = FlickerTracker()
                         # V0.5.01
                         # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
@@ -3215,11 +3217,22 @@ if __name__ == "__main__":
 
                             # --- Sensor processing ---
                             imu = compute_imu(frame)
-                            # Save raw cliff sensor readings BEFORE EMA -- cliff detector has
-                            # its own 2-frame confirmation and ground EMA; double-smoothing adds
-                            # 3-4 frames of latency to cliff detection (safety concern).
+                            # Save cliff sensor readings with median filter only (no EMA).
+                            # Median rejects single-frame scatter spikes (e.g., 164cm on 34cm floor)
+                            # while adding only 1 frame of latency. Cliff detector's own EMA +
+                            # CLIFF_CONFIRM_FRAMES=8 provide the remaining noise rejection.
                             raw_fcd = frame.get("FCD")
                             raw_rcd = frame.get("RCD")
+                            if raw_fcd is not None and raw_fcd > 0:
+                                cliff_median_fcd.append(raw_fcd)
+                                raw_fcd = sorted(cliff_median_fcd)[len(cliff_median_fcd) // 2] if len(cliff_median_fcd) >= 3 else raw_fcd
+                            else:
+                                cliff_median_fcd.clear()
+                            if raw_rcd is not None and raw_rcd > 0:
+                                cliff_median_rcd.append(raw_rcd)
+                                raw_rcd = sorted(cliff_median_rcd)[len(cliff_median_rcd) // 2] if len(cliff_median_rcd) >= 3 else raw_rcd
+                            else:
+                                cliff_median_rcd.clear()
                             # U1: update ground variance BEFORE smoothing (uses raw readings)
                             nav.update_ground_variance(frame)
                             # EMA smooth all 8 ultrasonic readings before classification
