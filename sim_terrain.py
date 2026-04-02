@@ -519,7 +519,7 @@ def run_t13_overload_timing():
     current_time = 0.0
     for tick in range(total_frames):
         phase_in_cycle = tick % cycle_period_frames
-        load = 800 if phase_in_cycle < stall_frames else 200  # deterministic
+        load = 850 if phase_in_cycle < stall_frames else 200  # deterministic (must exceed STALL_THRESHOLD=800)
 
         # Overload prevention timer -- direct threshold check, no hysteresis (matches production)
         if load > STALL_THRESHOLD:
