@@ -823,7 +823,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     pherr_gov_active     = False # True when governor is engaged (hysteresis)
     pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor -- stuck timeout
     pherr_stuck_cooldown_until = 0.0  # monotonic time: suppress re-trigger for 30s after firing
-    pherr_gov_suppress_until = 0.0   # monotonic time: suppress PhGov after gait switch (2s settle)
+    pherr_gov_suppress_until = time.monotonic() + 3.0  # suppress PhGov 3s at startup (same pattern as gait switch)
     ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
     prev_z_flip          = 1     # track z_flip transitions (roll entry/exit)
 
