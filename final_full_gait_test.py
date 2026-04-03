@@ -150,9 +150,9 @@ BROWNOUT_SPEED_FLOOR   = 0.5    # Floor multiplier on max_safe_hz at VOLTAGE_MIN
 assert BROWNOUT_VOLTAGE_START > VOLTAGE_MIN, "BROWNOUT_VOLTAGE_START must exceed VOLTAGE_MIN to avoid division by zero"
 # Current budget governor — throttle Hz when total fleet current approaches BEC limit
 # STS3215 stall current ~2.1A/servo; 6 servos at full load = 12.6A; BEC typically 8-10A
-CURRENT_BUDGET_WARN_MA  = 8000   # 8A total — start throttling (raised from 6000 to avoid false triggers)
+CURRENT_BUDGET_WARN_MA  = 8000   # 8A total — start throttling (~1.3A/servo avg)
 CURRENT_BUDGET_HARD_MA  = 10500  # 10.5A total — hard floor (1.75A/servo avg, 12.5% below 2A overcurrent trip)
-CURRENT_BUDGET_FLOOR    = 0.65   # floor multiplier at hard limit (raised from 0.5; Layer 5 skipped when PhErr active)
+CURRENT_BUDGET_FLOOR    = 0.65   # floor multiplier — skipped when PhErr active (mutual exclusion)
 assert CURRENT_BUDGET_HARD_MA > CURRENT_BUDGET_WARN_MA, "CURRENT_BUDGET_HARD_MA must exceed WARN to avoid division by zero"
 LOG_FILE     = "telemetry_log.txt"
 LOG_MAX_SIZE = 10 * 1024 * 1024
@@ -1236,8 +1236,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 brownout_scale = 1.0
 
-            # Layer 5: Current budget governor — re-enabled with tuned params
-            # WARN 6000→8000, HARD 9000→12000, FLOOR 0.5→0.65
+            # Layer 5: Current budget governor
             # Mutual exclusion with PhErr (ph_scale<1.0) prevents cascade
             fleet_current_ma = sum(current_per_servo.values())
             if fleet_current_ma > CURRENT_BUDGET_WARN_MA and ph_scale >= 1.0:
