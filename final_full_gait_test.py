@@ -203,7 +203,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
-        'duty': 0.80,  # raised from 0.75 — reduces double-swing from 16.7% to 3.3% of cycle
+        'duty': 0.75,  # reverted from 0.80 — 0.80 caused 92% motor demand in air, servos couldn't keep up
         # Lift order: 5(RR)→3(LM)→1(RF)→4(LR)→6(RM)→2(LF)
         # Each consecutive pair in the air is on OPPOSITE sides AND different
         # columns, guaranteeing the support polygon always spans the full body.
@@ -1236,14 +1236,15 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 brownout_scale = 1.0
 
-            # Layer 5: Current budget governor — throttle when fleet current approaches BEC limit
-            fleet_current_ma = sum(current_per_servo.values())
-            if fleet_current_ma > CURRENT_BUDGET_WARN_MA:
-                current_scale = max(CURRENT_BUDGET_FLOOR,
-                    CURRENT_BUDGET_FLOOR + (1.0 - CURRENT_BUDGET_FLOOR)
-                    * (CURRENT_BUDGET_HARD_MA - fleet_current_ma)
-                    / (CURRENT_BUDGET_HARD_MA - CURRENT_BUDGET_WARN_MA))
-                max_safe_hz *= current_scale
+            # Layer 5: Current budget governor — DISABLED for testing
+            # Was throttling Hz when fleet current >6A, possibly causing phase error cascade
+            # fleet_current_ma = sum(current_per_servo.values())
+            # if fleet_current_ma > CURRENT_BUDGET_WARN_MA:
+            #     current_scale = max(CURRENT_BUDGET_FLOOR,
+            #         CURRENT_BUDGET_FLOOR + (1.0 - CURRENT_BUDGET_FLOOR)
+            #         * (CURRENT_BUDGET_HARD_MA - fleet_current_ma)
+            #         / (CURRENT_BUDGET_HARD_MA - CURRENT_BUDGET_WARN_MA))
+            #     max_safe_hz *= current_scale
 
             # Hz floor: prevents PhErr positive feedback (low Hz -> low FF -> higher PhErr -> lower Hz)
             # Capped by clearance governor so floor never causes ground scraping
