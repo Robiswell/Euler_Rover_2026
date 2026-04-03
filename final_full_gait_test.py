@@ -150,9 +150,9 @@ BROWNOUT_SPEED_FLOOR   = 0.5    # Floor multiplier on max_safe_hz at VOLTAGE_MIN
 assert BROWNOUT_VOLTAGE_START > VOLTAGE_MIN, "BROWNOUT_VOLTAGE_START must exceed VOLTAGE_MIN to avoid division by zero"
 # Current budget governor — throttle Hz when total fleet current approaches BEC limit
 # STS3215 stall current ~2.1A/servo; 6 servos at full load = 12.6A; BEC typically 8-10A
-CURRENT_BUDGET_WARN_MA  = 6000   # 6A total — start throttling (80% of ~7.5A typical BEC)
-CURRENT_BUDGET_HARD_MA  = 9000   # 9A total — hard floor (stall territory, brownout risk)
-CURRENT_BUDGET_FLOOR    = 0.5    # floor multiplier at hard limit (mirrors brownout floor)
+CURRENT_BUDGET_WARN_MA  = 8000   # 8A total — start throttling (raised from 6000 to avoid false triggers)
+CURRENT_BUDGET_HARD_MA  = 10500  # 10.5A total — hard floor (1.75A/servo avg, 12.5% below 2A overcurrent trip)
+CURRENT_BUDGET_FLOOR    = 0.65   # floor multiplier at hard limit (raised from 0.5; Layer 5 skipped when PhErr active)
 assert CURRENT_BUDGET_HARD_MA > CURRENT_BUDGET_WARN_MA, "CURRENT_BUDGET_HARD_MA must exceed WARN to avoid division by zero"
 LOG_FILE     = "telemetry_log.txt"
 LOG_MAX_SIZE = 10 * 1024 * 1024
@@ -560,7 +560,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     stall_counters = {sid: 0     for sid in ALL_SERVOS}
     stall_sustained_start = {sid: 0.0 for sid in ALL_SERVOS}  # timestamp of sustained stall onset (0.0 = not timing)
     overload_cycle_count = {sid: 0 for sid in ALL_SERVOS}
-    overload_last_decay  = {sid: 0.0 for sid in ALL_SERVOS}  # timestamp of last decay tick
+    overload_last_decay  = {sid: time.perf_counter() for sid in ALL_SERVOS}  # timestamp of last decay tick
     overload_lifetime    = {sid: 0 for sid in ALL_SERVOS}     # total TE cycles ever (for EEPROM tracking)
     te_dwell_remaining = {sid: 0 for sid in ALL_SERVOS}
     last_actual_phases = {sid: 0.0 for sid in ALL_SERVOS}
@@ -1236,15 +1236,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             else:
                 brownout_scale = 1.0
 
-            # Layer 5: Current budget governor — DISABLED for testing
-            # Was throttling Hz when fleet current >6A, possibly causing phase error cascade
-            # fleet_current_ma = sum(current_per_servo.values())
-            # if fleet_current_ma > CURRENT_BUDGET_WARN_MA:
-            #     current_scale = max(CURRENT_BUDGET_FLOOR,
-            #         CURRENT_BUDGET_FLOOR + (1.0 - CURRENT_BUDGET_FLOOR)
-            #         * (CURRENT_BUDGET_HARD_MA - fleet_current_ma)
-            #         / (CURRENT_BUDGET_HARD_MA - CURRENT_BUDGET_WARN_MA))
-            #     max_safe_hz *= current_scale
+            # Layer 5: Current budget governor — re-enabled with tuned params
+            # WARN 6000→8000, HARD 9000→12000, FLOOR 0.5→0.65
+            # Mutual exclusion with PhErr (ph_scale<1.0) prevents cascade
+            fleet_current_ma = sum(current_per_servo.values())
+            if fleet_current_ma > CURRENT_BUDGET_WARN_MA and ph_scale >= 1.0:
+                current_scale = max(CURRENT_BUDGET_FLOOR,
+                    CURRENT_BUDGET_FLOOR + (1.0 - CURRENT_BUDGET_FLOOR)
+                    * (CURRENT_BUDGET_HARD_MA - fleet_current_ma)
+                    / (CURRENT_BUDGET_HARD_MA - CURRENT_BUDGET_WARN_MA))
+                max_safe_hz *= current_scale
 
             # Hz floor: prevents PhErr positive feedback (low Hz -> low FF -> higher PhErr -> lower Hz)
             # Capped by clearance governor so floor never causes ground scraping
@@ -2950,7 +2951,7 @@ if __name__ == "__main__":
         # --- C2: Orientation guard ---
         # Switch to wave gait for reliable upright detection (5 legs in stance vs tripod's 3)
         saved_gait_for_check = shared_gait_id.value
-        shared_gait_id.value = 1   # WAVE — duty 0.80, max legs in stance for load detection
+        shared_gait_id.value = 1   # WAVE — duty 0.75, max legs in stance for load detection
         shared_speed.value = 0
         tsleep(1.5)                 # Wait for LERP convergence to wave offsets (tsleep detects Heart crash)
 
@@ -3534,12 +3535,12 @@ if __name__ == "__main__":
         elif "--test-wave" in sys.argv:
             # === TEST: Wave phase only ===
             # Clearance analysis:
-            #   Wave duty=0.80 → air phase is 20% of cycle → higher ff demand.
+            #   Wave duty=0.75 → air phase is 25% of cycle → higher ff demand.
             #   345/15 (30° sweep): clearance at 15° = 73.7mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             wave_impact_start = DEFAULT_IMPACT_START  # 30° sweep
             wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
-            wave_duty = GAITS[1]['duty']  # 0.80
+            wave_duty = GAITS[1]['duty']  # 0.75
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
             max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
