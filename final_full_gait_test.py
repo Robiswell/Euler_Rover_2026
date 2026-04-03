@@ -141,6 +141,9 @@ PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near thresh
 PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
 KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
 MIN_STANCE_HZ      = 0.15   # Hz -- absolute floor after PhErr governor; prevents positive feedback loop
+KAPPA_STARTUP      = 1.5    # offset ramp rate at cold start (95% in 2.0s — prevents phase death spiral)
+KAPPA_GAIT_SWITCH  = 3.0    # offset ramp rate during gait transitions (95% in 1.0s)
+OFFSET_CONVERGE_THRESH = 0.02  # offset convergence threshold (7.2 deg) — ramp done when all offsets within this
 
 # Industrial Safety Parameters
 TEMP_MAX     = 65  # lowered from 70 — altitude reduces convective cooling ~25%
@@ -814,16 +817,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     smooth_imp_end   = float(shared_impact_end.value)
     smooth_duty      = 0.55
     smooth_ff_budget = GAITS[0].get('ff_budget', GOVERNOR_FF_BUDGET)
-    # Seed offsets from default gait (TRIPOD) so legs are correctly phased
-    # from tick 1 - avoids all-6-legs-in-phase condition during cold start.
-    smooth_offsets   = dict(GAITS[0]['offsets'])
+    # Seed offsets at ZERO — all legs start in-phase (matching physical home position).
+    # The CPG ramp gradually opens offsets to gait targets over ~2s, preventing the
+    # phase death spiral where 100-170° initial error triggers the PhErr governor.
+    smooth_offsets   = {sid: 0.0 for sid in ALL_SERVOS}
+    startup_ramp_active = True   # True until all offsets converge to gait targets
+    gait_switch_ramp_active = False  # True during gait-switch offset ramp
 
     # PhErr governor state (CPG paper Eqs. 20-21 exponential ramp)
     max_phase_error_prev = 0.0   # worst-case servo phase error from previous tick (degrees)
     pherr_gov_active     = False # True when governor is engaged (hysteresis)
     pherr_low_scale_start = 0.0  # monotonic time when governor first hit floor -- stuck timeout
     pherr_stuck_cooldown_until = 0.0  # monotonic time: suppress re-trigger for 30s after firing
-    pherr_gov_suppress_until = time.monotonic() + 3.0  # suppress PhGov 3s at startup (same pattern as gait switch)
+    pherr_gov_suppress_until = time.monotonic() + 5.0  # suppress PhGov during startup ramp
     ph_scale             = 1.0   # current governor throttle (1.0 = no throttle)
     prev_z_flip          = 1     # track z_flip transitions (roll entry/exit)
 
@@ -1149,18 +1155,16 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Phase offsets target (needed by both snap block and CPG ramp below)
             t_offsets = gait_params['offsets']
 
-            # Fix 65: Snap phase offsets on gait switch to avoid CPG ramp lag
-            # KAPPA=8 takes ~0.6s to converge; during nav tripod→quad the phase
-            # error hits 100-170°. Snap eliminates this instantly. Servos don't
-            # see the offset snap because feedforward+KP_PHASE smooth it mechanically.
+            # Gait switch: ramp offsets gradually instead of snapping (replaces Fix 65 snap).
+            # Snap caused 100-170° phase error because servos can't teleport. Ramp at
+            # KAPPA_GAIT_SWITCH=3.0 converges in ~1.0s with phase error staying below 30°.
             if current_gait_id != prev_gait_id:
                 smooth_duty = t_duty
                 smooth_ff_budget = t_ff_budget
-                for sid in ALL_SERVOS:
-                    smooth_offsets[sid] = t_offsets[sid]
+                # Offsets are NOT snapped — the CPG ramp below handles them gradually
+                gait_switch_ramp_active = True
                 prev_gait_id = current_gait_id
-                # Suppress PhGov for 2s -- gait switch causes instant phase offset
-                # that would trigger governor before servos can settle
+                # Suppress PhGov during gait-switch ramp
                 pherr_gov_active = False
                 ph_scale = 1.0
                 max_phase_error_prev = 0.0
@@ -1173,9 +1177,29 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             smooth_ff_budget = cpg_exp_ramp(smooth_ff_budget, t_ff_budget, KAPPA_TRANSITION, real_dt)
 
             # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
+            # Use slower kappa during startup/gait-switch to prevent phase death spiral
+            if startup_ramp_active:
+                offset_kappa = KAPPA_STARTUP
+            elif gait_switch_ramp_active:
+                offset_kappa = KAPPA_GAIT_SWITCH
+            else:
+                offset_kappa = KAPPA_TRANSITION
             for sid in ALL_SERVOS:
                 smooth_offsets[sid] = cpg_exp_ramp_circular(
-                    smooth_offsets[sid], t_offsets[sid], KAPPA_TRANSITION, real_dt)
+                    smooth_offsets[sid], t_offsets[sid], offset_kappa, real_dt)
+            # Check convergence — all offsets within threshold of targets
+            if startup_ramp_active or gait_switch_ramp_active:
+                max_offset_err = max(
+                    abs((smooth_offsets[sid] - t_offsets[sid] + 0.5) % 1.0 - 0.5)
+                    for sid in ALL_SERVOS)
+                if max_offset_err < OFFSET_CONVERGE_THRESH:
+                    if startup_ramp_active:
+                        startup_ramp_active = False
+                    if gait_switch_ramp_active:
+                        gait_switch_ramp_active = False
+                    # 1s extra grace after ramp completes before governor can engage
+                    pherr_gov_suppress_until = max(pherr_gov_suppress_until,
+                                                   time.monotonic() + 1.0)
 
             # ----------------------------------------------------------
             # 3. DRIVE CALCULATIONS & SAFETY GOVERNOR
@@ -1200,7 +1224,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             # PhErr governor: throttle Hz when servos can't track commanded phase
             # Exponential ramp (CPG paper Eqs. 20-21) — gentle near threshold, aggressive at high error
-            if time.monotonic() > pherr_gov_suppress_until and max_phase_error_prev >= PHERR_ENGAGE_DEG:
+            # Suppressed during offset ramps (startup/gait-switch) to prevent death spiral
+            ramp_active = startup_ramp_active or gait_switch_ramp_active
+            if not ramp_active and time.monotonic() > pherr_gov_suppress_until and max_phase_error_prev >= PHERR_ENGAGE_DEG:
                 pherr_gov_active = True
             elif max_phase_error_prev < PHERR_RELEASE_DEG:
                 pherr_gov_active = False
