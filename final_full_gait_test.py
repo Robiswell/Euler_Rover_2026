@@ -2921,7 +2921,7 @@ if __name__ == "__main__":
                 self._high_vibe_start = 0.0
 
             # T8: Hard flat ground — sprint with tripod
-            # U1: low ground variance (<2.0 cm²) confirms hard surface; skip tripod on sand
+            # U1: low ground variance (<4.0 cm²) confirms hard/damp surface; skip tripod on deep sand
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
             if (eff_load < 250
                     and front_class == DIST_CLEAR
