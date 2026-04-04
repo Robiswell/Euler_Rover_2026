@@ -81,6 +81,7 @@ ADDR_PRESENT_CURRENT  = 69
 LEN_GOAL_SPEED        = 2
 LEN_PRESENT_POSITION  = 2
 LEN_PRESENT_LOAD      = 2
+LEN_PRESENT_SPEED     = 2
 LEN_PRESENT_TEMP      = 1
 LEN_PRESENT_VOLTAGE   = 1
 LEN_PRESENT_CURRENT   = 2
@@ -202,7 +203,7 @@ GAITS = {
     0: {  # TRIPOD — do NOT use on slopes >10°: peak servo torque exceeds rated 10 kg·cm.
         #         Use Wave with COG shift for ramps (see Phase 3 hill climb).
         'duty': 0.55,
-        'ff_budget': 650.0,  # moderate — 12.6 deg lag, 60mm clearance
+        'ff_budget': 475.0,  # lowered — matches 250 deg/s loaded speed (carpet); PhErr governor adapts for heavier terrain
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0,  1: 0.5, 3: 0.5, 5: 0.5}
     },
     1: {  # WAVE — metachronal wave, rear-to-front, alternating sides (R-L-R-L-R-L)
@@ -220,12 +221,12 @@ GAITS = {
         # New pattern interleaves columns: rear->middle->front per side.
         # Spacing 0.167; with duty=0.80, same-column legs are >=0.5 apart
         # (air=0.20), so no same-column overlap is possible.
-        'ff_budget': 700.0,  # aggressive — competition gait, max speed, 52mm clearance (37mm margin)
+        'ff_budget': 465.0,  # lowered — matches 250 deg/s loaded speed (carpet); PhErr governor adapts for heavier terrain
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
         'duty': 0.70,
-        'ff_budget': 499.0,  # matches FEEDFORWARD_CAP — STS3215 motor limit at 270 deg/s
+        'ff_budget': 465.0,  # lowered — matches 250 deg/s loaded speed (carpet); PhErr governor adapts for heavier terrain
         'offsets': {2: 0.0, 5: 0.0,  1: 0.333, 3: 0.333,  4: 0.667, 6: 0.667}
     }
 }
@@ -514,8 +515,8 @@ def cpg_check_adjacent_swing(smooth_offsets, smooth_duty, master_time_L, master_
 # PROCESS 2: THE HEART (REAL-TIME ENGINE)
 # =================================================================
 def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, shared_gait_id,
-                shared_impact_start, shared_impact_end, shared_servo_loads, shared_heartbeat,
-                shared_stall_override, shared_roll_mode, shared_voltage, is_running):
+                shared_impact_start, shared_impact_end, shared_servo_loads, shared_servo_speeds,
+                shared_heartbeat, shared_stall_override, shared_roll_mode, shared_voltage, is_running):
     """
     50Hz kinematics loop. Runs as a separate process.
     GroupSyncRead for position and load every tick. Temp/voltage/current
@@ -551,6 +552,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
     # Sync read: load - all servos every tick (required for stall detection)
     gsread_load = GroupSyncRead(port_handler, packet_handler, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD)
+
+    # Sync read: present speed - all servos every tick (for terrain speed_error)
+    gsread_speed = GroupSyncRead(port_handler, packet_handler, ADDR_PRESENT_SPEED, LEN_PRESENT_SPEED)
 
     # Temp / voltage / current use individual reads on the single rotating telemetry_sid.
     # GroupSyncRead for these would register all 6 servos and fire a 6-servo transaction
@@ -770,6 +774,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
         for sid in ALL_SERVOS:
             gsread_pos.addParam(sid)
             gsread_load.addParam(sid)
+            gsread_speed.addParam(sid)
 
     # --- DIAGNOSTIC LOGGING INFRASTRUCTURE (Tier 1 + accumulators) ---
     heart_start_mono = time.monotonic()
@@ -921,6 +926,13 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                     load  = gsread_load.getData(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD)
                     l_mag = load & 0x3FF
                     shared_servo_loads[SERVO_LOAD_INDEX[sid]] = l_mag
+
+            # S2: Read present speed each tick
+            gsread_speed.txRxPacket()
+            for sid in ALL_SERVOS:
+                if gsread_speed.isAvailable(sid, ADDR_PRESENT_SPEED, LEN_PRESENT_SPEED):
+                    spd_raw = gsread_speed.getData(sid, ADDR_PRESENT_SPEED, LEN_PRESENT_SPEED)
+                    shared_servo_speeds[SERVO_LOAD_INDEX[sid]] = spd_raw & 0x3FF
                     if stall_active:
                         # Latching stall logic — symmetric 3-frame entry AND exit.
                         # Wet sand produces brief stance-phase load spikes from sand
@@ -1543,6 +1555,7 @@ if __name__ == "__main__":
     shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 345/15 = 30° sweep
     shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
+    shared_servo_speeds = mp.Array('i', len(ALL_SERVOS))
     shared_heartbeat    = mp.Value('i', 0)
     shared_stall_override = mp.Value('b', False)  # When True, stall detection is suppressed.
                                                    # Used during inverted roll to allow legs to
@@ -1559,7 +1572,7 @@ if __name__ == "__main__":
     gait_process = mp.Process(target=gait_worker, args=(
         shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias,
         shared_gait_id, shared_impact_start, shared_impact_end,
-        shared_servo_loads, shared_heartbeat, shared_stall_override,
+        shared_servo_loads, shared_servo_speeds, shared_heartbeat, shared_stall_override,
         shared_roll_mode, shared_voltage, is_running
     ))
     gait_process.start()
@@ -1717,11 +1730,17 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 500          # Tripod/Wave cruise — Wave governor-clamped to ~287
-    QUAD_CRUISE_SPEED = 190     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
-    SLOW_SPEED = 200
-    BACKWARD_SPEED = 300
+    CRUISE_SPEED = 400          # Tripod/Wave cruise — aligned with governor ceiling to reduce clamping
+    QUAD_CRUISE_SPEED = 250     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
+    SLOW_SPEED = 180
+    BACKWARD_SPEED = 250
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
+    REAR_UNSAFE_DEBOUNCE = 4          # C2: consecutive rear-unsafe frames before declaring truly unsafe
+    LOAD_WINDOW_SIZE = 25
+    ROCKY_VARIANCE_THRESH = 5000
+    SINKING_TREND_THRESH = 30    # S1: load trend threshold (not yet used in terrain rules)
+    SINKING_LOAD_THRESH  = 400   # U3: load above this + low accel = sinkage
+    SINKING_ACCEL_THRESH = 2.0   # U3: forward accel below this m/s^2 = not moving
 
     # --- Fix 154: Minimum state dwell ---
     # The FSM was changing states every 0.1s (one tick).  Servos can't
@@ -2129,6 +2148,7 @@ if __name__ == "__main__":
             "upright_quality": upright_quality,
             "accel_mag": accel_mag,
             "angular_rate": angular_rate,
+            "forward_accel": frame.get("ax", 0.0),
         }
 
     def compute_turn_intensity(frame):
@@ -2220,18 +2240,26 @@ if __name__ == "__main__":
 
     def is_rear_safe(frame):
         """Check if rear is clear enough for reversing.
-        Returns False if any rear sensor < 20cm, == -1, or rear cliff detected."""
+        Returns False if any rear sensor < 20cm. Blind zone (-1) = no data, not obstacle."""
         if frame is None:
             return False
         rcf = frame["RCF"]
         rdl = frame["RDL"]
         rdr = frame["RDR"]
         for v in (rcf, rdl, rdr):
-            if v is None or v == -1:
+            if v is None:
                 return False
+            if v == -1:
+                continue  # C2: blind zone = no echo, not confirmed obstacle
             if v < 20:
                 return False
         return True
+
+    def is_rear_blind(frame):
+        """True if any rear sensor reports -1 (blind zone / no echo)."""
+        if frame is None:
+            return False
+        return any(frame[k] == -1 for k in ("RCF", "RDL", "RDR"))
 
     class NavStateMachine:
         """8-state FSM for autonomous obstacle course navigation."""
@@ -2260,6 +2288,7 @@ if __name__ == "__main__":
             self.finished = False
             self.finish_wall_start = 0.0
             self.front_danger_frames = 0
+            self.rear_unsafe_frames = 0   # C2: debounce counter for rear sensor
             # Sustained condition trackers
             self._freefall_start = 0.0
             self._high_vibe_start = 0.0
@@ -2285,6 +2314,8 @@ if __name__ == "__main__":
             self.ground_var_buf = {2: collections.deque(maxlen=15), 6: collections.deque(maxlen=15)}
             self.ground_variance = 99.0  # unknown until 5+ samples — blocks T8 tripod sprint on startup
             self.sensor_median_buf = {i: collections.deque(maxlen=3) for i in range(8)}
+            self.load_history = collections.deque(maxlen=LOAD_WINDOW_SIZE)
+            self._sinking_start = 0.0  # U3: sinkage sustain timer
 
             # Fix 154: track when we entered the current state
             self.state_entry_time = time.monotonic()
@@ -2330,6 +2361,7 @@ if __name__ == "__main__":
             self.state = new_state
             self.state_entry_time = time.monotonic()  # reset for new state
             self.dwell_duration = 0  # Fix 68 (A4): reset stale dwell on state change
+            self.rear_unsafe_frames = 0  # C2: reset rear debounce on state change
             brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
 
         def smooth_sensor(self, idx, raw_cm):
@@ -2717,8 +2749,13 @@ if __name__ == "__main__":
             """Compute backward recovery action with rear safety check and dwell guard."""
             if is_rear_safe(frame):
                 self.hold_position_count = 0
+                self.rear_unsafe_frames = 0
                 return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
             else:
+                self.rear_unsafe_frames += 1
+                if self.rear_unsafe_frames < REAR_UNSAFE_DEBOUNCE:
+                    self.hold_position_count = 0
+                    return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
                 self.hold_position_count += 1
                 brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
                 backward_elapsed = time.monotonic() - self.backward_entry_time
@@ -2753,9 +2790,12 @@ if __name__ == "__main__":
                 self.pivot_direction = 1   # right
 
         def update_terrain(self, imu, avg_load, angular_rate, accel_mag,
-                           front_class, flicker_count, roll_deg):
+                           front_class, flicker_count, roll_deg,
+                           load_variance=0.0, load_rolling_avg=None,
+                           speed_error=0.0, forward_accel=0.0):
             """Unified Terrain Decision Table — updates terrain_gait, terrain_impact_start/end, terrain_mult.
             Only applies in FORWARD or SLOW_FORWARD states."""
+            eff_load = load_rolling_avg if load_rolling_avg is not None else avg_load
             now = time.monotonic()
             pitch_deg = imu["pitch_deg"]
             upright = imu["upright_quality"]
@@ -2822,7 +2862,7 @@ if __name__ == "__main__":
             # T4: Heavy terrain (soft sand)
             # U1: high ground variance corroborates sand — lower the load threshold
             heavy_load_thresh = HEAVY_TERRAIN_LOAD - 50 if self.ground_variance > 5.0 else HEAVY_TERRAIN_LOAD  # 5.0 cm² = sand/gravel
-            if avg_load > heavy_load_thresh:
+            if eff_load > heavy_load_thresh:
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
                 if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
@@ -2836,6 +2876,21 @@ if __name__ == "__main__":
             else:
                 self._heavy_load_start = 0.0
 
+            # T4b: Sinkage detection (U3) — high load + low forward acceleration
+            if eff_load > SINKING_LOAD_THRESH and abs(forward_accel) < SINKING_ACCEL_THRESH:
+                if self._sinking_start == 0.0:
+                    self._sinking_start = now
+                if (now - self._sinking_start) >= TERRAIN_SUSTAIN_S:
+                    self.terrain_gait = 1  # wave — max ground contact
+                    self.terrain_impact_start = DEFAULT_IMPACT_START
+                    self.terrain_impact_end = DEFAULT_IMPACT_END
+                    self.terrain_mult_target = 0.6  # T4b: aggressive slowdown for sinkage
+                    self.terrain_is_tripod = False
+                    self._apply_gait_transition(prev_gait)
+                    return
+            else:
+                self._sinking_start = 0.0
+
             # T5: Excessive wobble
             if angular_rate > 0.3:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
@@ -2845,7 +2900,7 @@ if __name__ == "__main__":
                 return  # keep current gait
 
             # T6: Rocky terrain (flicker + moderate load)
-            if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300:
+            if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300 and load_variance > ROCKY_VARIANCE_THRESH:
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
                 self.terrain_mult_target = 0.9   # T6: raised from 0.8
@@ -2868,7 +2923,7 @@ if __name__ == "__main__":
             # T8: Hard flat ground — sprint with tripod
             # U1: low ground variance (<2.0 cm²) confirms hard surface; skip tripod on sand
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-            if (avg_load < LIGHT_TERRAIN_LOAD
+            if (eff_load < LIGHT_TERRAIN_LOAD
                     and front_class == DIST_CLEAR
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
@@ -3290,13 +3345,33 @@ if __name__ == "__main__":
                             avg_load = load_info["avg_load"]
                             load_asymmetry = load_info["load_asymmetry"]
 
+                            # S1: Rolling load window — derived signals
+                            nav.load_history.append(avg_load)
+                            if len(nav.load_history) >= 5:
+                                load_rolling_avg = sum(nav.load_history) / len(nav.load_history)
+                                load_mean = load_rolling_avg
+                                load_vals = list(nav.load_history)
+                                load_variance = sum((v - load_mean)**2 for v in load_vals) / len(load_vals)
+                            else:
+                                load_rolling_avg = avg_load
+                                load_variance = 0.0
+
+                            # S2: Present speed error
+                            actual_speeds = list(shared_servo_speeds)
+                            actual_speed_avg = sum(actual_speeds) / max(len(actual_speeds), 1)
+                            speed_error = abs(speed - actual_speed_avg)
+
                             # Voltage
                             voltage = shared_voltage.value
 
                             # --- Update terrain overlay (FORWARD/SLOW only) ---
                             nav.update_terrain(imu, avg_load, imu["angular_rate"],
                                                imu["accel_mag"], front_class,
-                                               flicker_count, imu["roll_deg"])
+                                               flicker_count, imu["roll_deg"],
+                                               load_variance=load_variance,
+                                               load_rolling_avg=load_rolling_avg,
+                                               speed_error=speed_error,
+                                               forward_accel=imu.get("forward_accel", 0.0))
 
                             # --- FSM update ---
                             state, speed, turn, x_flip, step_name = nav.update(

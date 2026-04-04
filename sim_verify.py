@@ -8,14 +8,14 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 DIRECTION_MAP = {1:1, 2:-1, 3:-1, 4:-1, 5:1, 6:1}
-HOME_POSITIONS = {1:1727, 2:2769, 3:1431, 4:2899, 5:1188, 6:3200}
+HOME_POSITIONS = {1:3447, 2:955, 3:1420, 4:1569, 5:3197, 6:3175}
 KP_PHASE        = 12.0
 STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 GAITS = {
-    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},  # Fix C4: was 0.5
-    1: {'duty': 0.80, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}},  # Fix C4: offsets synced with production
-    2: {'duty': 0.7,  'offsets': {2:0.0, 6:0.0, 4:0.333, 1:0.333, 3:0.666, 5:0.666}},  # Fix C4: offsets synced with production
+    0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
+    1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
+    2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 real_dt           = 0.02
 
@@ -345,8 +345,8 @@ class SimState:
         speed_lr = min(1.0, 4.0 * real_dt)
         worst_frames = 0
         worst_tx = None
-        for (nm, df, dt) in [("Tripod->Wave",0.55,0.80),("Wave->Quad",0.80,0.7),
-                             ("Quad->Tripod",0.7,0.55),("Tripod->Quad",0.55,0.7)]:
+        for (nm, df, dt) in [("Tripod->Wave",0.5,0.75),("Wave->Quad",0.75,0.7),
+                             ("Quad->Tripod",0.7,0.5),("Tripod->Quad",0.5,0.7)]:
             delta = abs(dt - df)
             thresh = 0.01 * dt
             if delta <= thresh:

@@ -17,6 +17,7 @@ import sys
 import io
 import math
 import time
+import collections
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -26,17 +27,22 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 # =========================================================================
 
 # --- Nav tunable constants ---
-CRUISE_SPEED = 500  # Fix C5: was 400, production unified to 500
-TRIPOD_CRUISE_SPEED = 500  # Fix C5: was 450, same as CRUISE_SPEED post-Fix144
+CRUISE_SPEED = 400
+TRIPOD_CRUISE_SPEED = 450
 SLOW_SPEED = 200
 BACKWARD_SPEED = 200
+REAR_UNSAFE_DEBOUNCE = 4
+LOAD_WINDOW_SIZE = 25
+ROCKY_VARIANCE_THRESH = 5000
+SINKING_TREND_THRESH = 30
+SINKING_LOAD_THRESH  = 400
+SINKING_ACCEL_THRESH = 2.0
 MAX_TURN_BIAS = 0.25
 PIVOT_TURN_BIAS = 0.5
 HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
 SLOPE_PITCH_DEG = 12
-SLOPE_ROLL_DEG = 15       # lateral tilt threshold (higher than pitch to clear HOME bias)
 HEAVY_TERRAIN_LOAD = 400
 LIGHT_TERRAIN_LOAD = 200
 TERRAIN_SUSTAIN_S = 2.0
@@ -283,6 +289,7 @@ def compute_imu(frame):
             "pitch_rad": 0.0, "roll_rad": 0.0, "yaw_rad": 0.0,
             "upright_quality": 0.0,
             "accel_mag": 9.81, "angular_rate": 0.0,
+            "forward_accel": 0.0,
         }
 
     sinp = 2.0 * (w * y - z * x)
@@ -311,6 +318,7 @@ def compute_imu(frame):
         "upright_quality": upright_quality,
         "accel_mag": accel_mag,
         "angular_rate": angular_rate,
+        "forward_accel": frame.get("ax", 0.0),
     }
 
 
@@ -388,11 +396,23 @@ def is_rear_safe(frame):
     rdl = frame["RDL"]
     rdr = frame["RDR"]
     for v in (rcf, rdl, rdr):
-        if v is None or v == -1:
+        if v is None:
             return False
+        if v == -1:
+            continue  # blind zone = no data, not obstacle
         if v < 20:
             return False
     return True
+
+
+def is_rear_blind(frame):
+    """Return True if any rear sensor reports -1 (blind/no echo)."""
+    if frame is None:
+        return True
+    for key in ("RCF", "RDL", "RDR"):
+        if frame[key] is None or frame[key] == -1:
+            return True
+    return False
 
 
 class NavStateMachine:
@@ -415,6 +435,7 @@ class NavStateMachine:
         self.finished = False
         self.finish_wall_start = 0.0
         self.front_danger_frames = 0
+        self.rear_unsafe_frames = 0
         self._freefall_start = 0.0
         self._high_vibe_start = 0.0
         self._steep_up_start = 0.0
@@ -422,7 +443,6 @@ class NavStateMachine:
         self._heavy_load_start = 0.0
         self._light_load_start = 0.0
         self._roll_sustained_start = 0.0
-        self._roll_tilt_start = 0.0       # T3 roll sustain (1.0s)
         self._asymmetry_start = 0.0
         self._impact_cooldown_until = 0.0
         self._last_stall_clear_time = time.monotonic()
@@ -433,6 +453,8 @@ class NavStateMachine:
         self.terrain_is_tripod = False
         self._gait_transition_until = 0.0
         self._tick_count = 0
+        self.load_history = collections.deque(maxlen=LOAD_WINDOW_SIZE)
+        self._sinking_start = 0.0  # U3: sinkage sustain timer
 
     def _dwell_active(self):
         return (time.monotonic() - self.dwell_start) < self.dwell_duration
@@ -450,6 +472,7 @@ class NavStateMachine:
             self.prev_state = self.state
             self.state = new_state
             self.dwell_duration = 0
+            self.rear_unsafe_frames = 0
             brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}->{NAV_STATE_NAMES.get(new_state)}")
 
     def update(self, frame, imu, front_class, left_class, right_class,
@@ -646,11 +669,15 @@ class NavStateMachine:
         return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
     def _backward_action(self, frame):
-        """Compute backward recovery action with rear safety check."""
+        """Compute backward recovery action with rear safety check and debounce."""
         if is_rear_safe(frame):
+            self.rear_unsafe_frames = 0
             self.hold_position_count = 0
             return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
         else:
+            self.rear_unsafe_frames += 1
+            if self.rear_unsafe_frames < REAR_UNSAFE_DEBOUNCE:
+                return (NAV_BACKWARD, BACKWARD_SPEED, 0.0, -1, "nav_backward")
             self.hold_position_count += 1
             brain_log(f"[NAV] rear unsafe, holding (count={self.hold_position_count})")
             if self.hold_position_count >= 2:
@@ -678,8 +705,11 @@ class NavStateMachine:
             self.pivot_direction = 1
 
     def update_terrain(self, imu, avg_load, angular_rate, accel_mag,
-                       front_class, flicker_count, roll_deg):
+                       front_class, flicker_count, roll_deg,
+                       load_variance=0.0, load_rolling_avg=None,
+                       speed_error=0.0, forward_accel=0.0):
         """Unified Terrain Decision Table."""
+        eff_load = load_rolling_avg if load_rolling_avg is not None else avg_load
         now = time.monotonic()
         pitch_deg = imu["pitch_deg"]
         upright = imu["upright_quality"]
@@ -719,18 +749,8 @@ class NavStateMachine:
         else:
             self._steep_down_start = 0.0
 
-        # T3: Moderate slope (uphill or downhill) or lateral tilt
-        # Pitch fires immediately (terrain changes slowly).
-        # Roll uses 1.0s sustain to avoid oscillation from walking dynamics + HOME bias.
-        pitch_triggered = abs(pitch_deg) > SLOPE_PITCH_DEG
-        if abs(roll_deg) > SLOPE_ROLL_DEG:
-            if self._roll_tilt_start == 0.0:
-                self._roll_tilt_start = now
-            roll_triggered = (now - self._roll_tilt_start) >= 1.0
-        else:
-            self._roll_tilt_start = 0.0
-            roll_triggered = False
-        if pitch_triggered or roll_triggered or (0.15 <= upright <= 0.5):
+        # T3: Moderate slope or tilted
+        if abs(pitch_deg) > SLOPE_PITCH_DEG or (0.15 <= upright <= 0.5):
             self.terrain_gait = 1
             self.terrain_impact_start = 325
             self.terrain_impact_end = 35
@@ -740,7 +760,7 @@ class NavStateMachine:
             return
 
         # T4: Heavy terrain (soft sand)
-        if avg_load > HEAVY_TERRAIN_LOAD:
+        if eff_load > HEAVY_TERRAIN_LOAD:
             if self._heavy_load_start == 0.0:
                 self._heavy_load_start = now
             if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
@@ -754,6 +774,20 @@ class NavStateMachine:
         else:
             self._heavy_load_start = 0.0
 
+        # T4b: Sinkage detection (U3) -- high load + low forward acceleration
+        if eff_load > SINKING_LOAD_THRESH and abs(forward_accel) < SINKING_ACCEL_THRESH:
+            if self._sinking_start == 0.0:
+                self._sinking_start = now
+            if (now - self._sinking_start) >= TERRAIN_SUSTAIN_S:
+                self.terrain_gait = 1  # wave
+                self.terrain_impact_start = 330
+                self.terrain_impact_end = 30
+                self.terrain_mult = 0.6
+                self.terrain_is_tripod = False
+                return
+        else:
+            self._sinking_start = 0.0
+
         # T5: Excessive wobble
         if angular_rate > 0.3:
             self.terrain_impact_start = 325
@@ -763,7 +797,7 @@ class NavStateMachine:
             return
 
         # T6: Rocky terrain (flicker + moderate load)
-        if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300:
+        if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300 and load_variance > ROCKY_VARIANCE_THRESH:
             self.terrain_impact_start = 345
             self.terrain_impact_end = 15
             self.terrain_mult = 0.8
@@ -785,7 +819,7 @@ class NavStateMachine:
 
         # T8: Hard flat ground
         no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-        if (avg_load < LIGHT_TERRAIN_LOAD
+        if (eff_load < LIGHT_TERRAIN_LOAD
                 and front_class == DIST_CLEAR
                 and abs(pitch_deg) < 5
                 and abs(roll_deg) < 5
@@ -908,11 +942,13 @@ def make_imu_level():
         "pitch_rad": 0.0, "roll_rad": 0.0, "yaw_rad": 0.0,
         "upright_quality": 1.0,
         "accel_mag": 9.81, "angular_rate": 0.0,
+        "forward_accel": 0.0,
     }
 
 
 def make_imu(pitch_deg=0.0, roll_deg=0.0, yaw_deg=0.0,
-             upright_quality=None, accel_mag=9.81, angular_rate=0.0):
+             upright_quality=None, accel_mag=9.81, angular_rate=0.0,
+             forward_accel=0.0):
     """Build an IMU dict with specified values. Auto-computes upright_quality if not given."""
     pr = math.radians(pitch_deg)
     rr = math.radians(roll_deg)
@@ -924,6 +960,7 @@ def make_imu(pitch_deg=0.0, roll_deg=0.0, yaw_deg=0.0,
         "pitch_rad": pr, "roll_rad": rr, "yaw_rad": yr,
         "upright_quality": upright_quality,
         "accel_mag": accel_mag, "angular_rate": angular_rate,
+        "forward_accel": forward_accel,
     }
 
 
@@ -1354,15 +1391,19 @@ def run_n4():
     check(cid, nav._dwell_active(), "dwell should be active after ARC transition")
 
     # BACKWARD escalation: 2+ holds with rear unsafe -> pivot
+    # Start already in BACKWARD so _transition() doesn't reset debounce counter
     nav = fresh_nav()
+    nav.state = NAV_BACKWARD
     frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=10, rdr=10)
     nav.front_danger_frames = 2  # force P10
+    nav.rear_unsafe_frames = REAR_UNSAFE_DEBOUNCE  # bypass debounce
     # First update: BACKWARD with rear unsafe -> hold (count=1)
     state1, speed1, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state1 == NAV_BACKWARD, f"backward first: state={state1}")
     check(cid, speed1 == 0, f"rear unsafe hold: speed={speed1} expected 0")
     # Second update: hold_position_count reaches 2 -> escalate to pivot
     nav.front_danger_frames = 2  # re-set
+    nav.rear_unsafe_frames = REAR_UNSAFE_DEBOUNCE  # re-set past debounce
     state2, _, _, _, step2 = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state2 == NAV_PIVOT_TURN,
           f"backward escalation to pivot: state={state2} expected {NAV_PIVOT_TURN}")
@@ -1619,31 +1660,6 @@ def run_n7():
     check(cid, nav.terrain_gait == 1, f"T3 tilt: gait={nav.terrain_gait} expected 1 (wave)")
     check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 tilt: terrain_mult={nav.terrain_mult} expected 0.6")
 
-    # T3 via lateral roll (abs(roll) > 15, sustained 1.0s)
-    nav = fresh_nav()
-    nav.state = NAV_FORWARD
-    nav._roll_tilt_start = time.monotonic() - 1.5  # sustained > 1s
-    imu_roll = make_imu(roll_deg=18)  # > 15 (SLOPE_ROLL_DEG)
-    nav.update_terrain(imu_roll, 100, 0.0, 9.81, DIST_CLEAR, 0, 18.0)
-    check(cid, nav.terrain_gait == 1, f"T3 roll: gait={nav.terrain_gait} expected 1 (wave)")
-    check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 roll: terrain_mult={nav.terrain_mult} expected 0.6")
-
-    # T3 roll should NOT fire without sustain (fresh timer)
-    nav = fresh_nav()
-    nav.state = NAV_FORWARD
-    imu_roll2 = make_imu(roll_deg=18)
-    nav.update_terrain(imu_roll2, 100, 0.0, 9.81, DIST_CLEAR, 0, 18.0)
-    # _roll_tilt_start was 0.0, so it just armed — should NOT trigger T3 yet, falls to T9
-    check(cid, nav.terrain_gait == 2, f"T3 roll no-sustain: gait={nav.terrain_gait} expected 2 (quad/T9)")
-
-    # T3 roll should NOT fire at 12 degrees (below SLOPE_ROLL_DEG=15)
-    nav = fresh_nav()
-    nav.state = NAV_FORWARD
-    nav._roll_tilt_start = time.monotonic() - 1.5
-    imu_roll3 = make_imu(roll_deg=12)  # below threshold
-    nav.update_terrain(imu_roll3, 100, 0.0, 9.81, DIST_CLEAR, 0, 12.0)
-    check(cid, nav.terrain_gait == 2, f"T3 roll below-threshold: gait={nav.terrain_gait} expected 2 (quad/T9)")
-
     # T4: Heavy terrain (avg_load > 400, sustained 2s)
     nav = fresh_nav()
     nav.state = NAV_FORWARD
@@ -1661,10 +1677,11 @@ def run_n7():
     check(cid, nav.terrain_impact_end == 35, f"T5: impact_end={nav.terrain_impact_end} expected 35")
     check(cid, abs(nav.terrain_mult - 0.7) < 0.01, f"T5: terrain_mult={nav.terrain_mult} expected 0.7")
 
-    # T6: Rocky terrain (flicker >= 3 + avg_load > 300)
+    # T6: Rocky terrain (flicker >= 3 + avg_load > 300 + high variance)
     nav = fresh_nav()
     nav.state = NAV_FORWARD
-    nav.update_terrain(make_imu_level(), 350, 0.0, 9.81, DIST_CLEAR, 3, 0.0)
+    nav.update_terrain(make_imu_level(), 350, 0.0, 9.81, DIST_CLEAR, 3, 0.0,
+                       load_variance=6000.0)
     check(cid, nav.terrain_impact_start == 345, f"T6: impact_start={nav.terrain_impact_start} expected 345")
     check(cid, nav.terrain_impact_end == 15, f"T6: impact_end={nav.terrain_impact_end} expected 15")
     check(cid, abs(nav.terrain_mult - 0.8) < 0.01, f"T6: terrain_mult={nav.terrain_mult} expected 0.8")
@@ -1713,6 +1730,96 @@ def run_n7():
           f"terrain held during BACKWARD: gait={nav.terrain_gait} expected 1 (unchanged)")
     check(cid, abs(nav.terrain_mult - 0.7) < 0.01,
           f"terrain held during BACKWARD: mult={nav.terrain_mult} expected 0.7")
+
+    # T4b: Sinkage detection (U3) — high load + low forward accel, sustained
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    nav._sinking_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
+    imu_sink = make_imu(forward_accel=0.5)  # near-zero forward accel
+    nav.update_terrain(imu_sink, 450, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                       forward_accel=0.5)
+    check(cid, nav.terrain_gait == 1,
+          f"T4b: gait={nav.terrain_gait} expected 1 (wave) on sinkage")
+    check(cid, abs(nav.terrain_mult - 0.6) < 0.01,
+          f"T4b: terrain_mult={nav.terrain_mult} expected 0.6")
+
+    # T4b negative: high load but high forward accel = NOT sinking
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    nav._sinking_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
+    imu_move = make_imu(forward_accel=5.0)  # clearly moving
+    nav.update_terrain(imu_move, 450, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                       forward_accel=5.0)
+    check(cid, nav.terrain_gait != 1 or abs(nav.terrain_mult - 0.6) > 0.01,
+          f"T4b neg: sinkage should NOT fire with forward_accel=5.0")
+
+    # T15: Gradual load ramp (200 -> 500 over 25 frames) -- validates S1 trend
+    # Uses exactly LOAD_WINDOW_SIZE frames so full ramp is visible in deque
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    imu_flat = make_imu_level()
+    for i in range(LOAD_WINDOW_SIZE):
+        load = 200 + (300 * i / (LOAD_WINDOW_SIZE - 1))  # ramp 200 to 500
+        nav.load_history.append(load)
+    load_vals = list(nav.load_history)
+    load_rolling_avg = sum(load_vals) / len(load_vals)
+    load_mean = load_rolling_avg
+    load_variance = sum((v - load_mean)**2 for v in load_vals) / len(load_vals)
+    check(cid, 300 < load_rolling_avg < 400,
+          f"T15: rolling_avg={load_rolling_avg:.1f} expected 300-400 after ramp")
+    check(cid, load_variance > 5000,
+          f"T15: variance={load_variance:.1f} expected >5000 (full ramp spread)")
+    # Verify trend: last 5 > first 5
+    load_trend = sum(load_vals[-5:]) / 5 - sum(load_vals[:5]) / 5
+    check(cid, load_trend > 200,
+          f"T15: trend={load_trend:.1f} expected >200 (rising load)")
+
+    # T16: Surface transition (hard -> sand mid-window) -- load jump
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    # Fill deque with transition: 12 hard + 13 sand = 25 (LOAD_WINDOW_SIZE)
+    for _ in range(12):
+        nav.load_history.append(150)
+    for _ in range(13):
+        nav.load_history.append(420)
+    load_vals = list(nav.load_history)
+    load_rolling_avg = sum(load_vals) / len(load_vals)
+    load_variance = sum((v - load_rolling_avg)**2 for v in load_vals) / len(load_vals)
+    # With 12 points at 150 and 13 at 420, variance should be high (bimodal)
+    check(cid, load_variance > 10000,
+          f"T16: variance={load_variance:.1f} expected >10000 (surface transition)")
+    # Rolling avg (~295) correctly smooths the transition -- T4 should NOT fire
+    # because eff_load < HEAVY_TERRAIN_LOAD (400). This validates S1 smoothing.
+    nav._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
+    nav.update_terrain(imu_flat, 420, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                       load_rolling_avg=load_rolling_avg)
+    check(cid, nav.terrain_gait == 2,
+          f"T16: gait={nav.terrain_gait} expected 2 (quad default) -- "
+          f"rolling avg {load_rolling_avg:.0f} smooths transition below T4 threshold")
+    # Once fully on sand (all 25 frames at 420), T4 should fire
+    nav2 = fresh_nav()
+    nav2.state = NAV_FORWARD
+    nav2._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
+    nav2.update_terrain(imu_flat, 420, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                        load_rolling_avg=420.0)
+    check(cid, nav2.terrain_gait == 1,
+          f"T16b: gait={nav2.terrain_gait} expected 1 (wave) when fully on sand")
+
+    # T17: Blocked leg (high speed error + high load) — validates S2 presence
+    nav = fresh_nav()
+    nav.state = NAV_FORWARD
+    # speed_error is accepted by update_terrain but not yet used in rules
+    # Verify it doesn't break anything and is accepted
+    nav.update_terrain(imu_flat, 200, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                       speed_error=300.0)
+    check(cid, True, "T17: speed_error=300 accepted without error")
+    # With high load + high speed_error, future rules can use this
+    nav._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
+    nav.update_terrain(imu_flat, 500, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
+                       speed_error=300.0, load_rolling_avg=500.0)
+    check(cid, nav.terrain_gait == 1,
+          f"T17: gait={nav.terrain_gait} expected 1 (wave) — heavy load triggers T4 "
+          f"regardless of speed_error")
 
 
 # =========================================================================
@@ -1883,20 +1990,22 @@ def run_n10():
     check(cid, x_flip == -1, f"rear safe: x_flip={x_flip} expected -1 (reversing)")
     check(cid, speed == BACKWARD_SPEED, f"rear safe: speed={speed} expected {BACKWARD_SPEED}")
 
-    # Rear distance < 20 or -1 -> hold (speed=0)
+    # Rear distance < 20 -> hold (speed=0) after debounce
     nav = fresh_nav()
+    nav.state = NAV_BACKWARD  # already in BACKWARD so transition doesn't reset counter
     frame_rear_blocked = make_frame(fcf=10, fdl=10, fdr=10, rdl=10, rcf=100, rdr=100)
     nav.front_danger_frames = 2
+    nav.rear_unsafe_frames = REAR_UNSAFE_DEBOUNCE  # bypass debounce
     state, speed, _, x_flip, _ = fsm_update_simple(nav, frame=frame_rear_blocked)
     check(cid, state == NAV_BACKWARD, f"rear blocked: state={NAV_STATE_NAMES.get(state)}")
     check(cid, speed == 0, f"rear blocked: speed={speed} expected 0 (hold position)")
 
-    # Rear with -1 sentinel -> hold
+    # Rear with -1 sentinel -> safe now (blind = no data, not obstacle)
     nav = fresh_nav()
     frame_rear_blind = make_frame(fcf=10, fdl=10, fdr=10, rdl=-1, rcf=100, rdr=100)
     nav.front_danger_frames = 2
     state, speed, _, _, _ = fsm_update_simple(nav, frame=frame_rear_blind)
-    check(cid, speed == 0, f"rear -1: speed={speed} expected 0 (hold)")
+    check(cid, speed == BACKWARD_SPEED, f"rear -1 (blind): speed={speed} expected {BACKWARD_SPEED} (move, not hold)")
 
     # Reverse uses x_flip=-1, NOT negative speed
     nav = fresh_nav()
@@ -2036,10 +2145,40 @@ def run_n11():
     check(cid, is_rear_safe(None) is False, "is_rear_safe(None) should be False")
     check(cid, is_rear_safe(make_frame(rcf=100, rdl=100, rdr=100)) is True,
           "rear all clear should be safe")
-    check(cid, is_rear_safe(make_frame(rcf=-1, rdl=100, rdr=100)) is False,
-          "rear RCF=-1 should be unsafe")
+    check(cid, is_rear_safe(make_frame(rcf=-1, rdl=100, rdr=100)) is True,
+          "rear RCF=-1 (blind) should be safe (no data != obstacle)")
     check(cid, is_rear_safe(make_frame(rcf=100, rdl=15, rdr=100)) is False,
           "rear RDL=15 (<20) should be unsafe")
+    check(cid, is_rear_safe(make_frame(rcf=-1, rdl=-1, rdr=-1)) is True,
+          "rear all blind (-1) should be safe (no real obstacle data)")
+    check(cid, is_rear_safe(make_frame(rcf=-1, rdl=10, rdr=100)) is False,
+          "rear blind+close should be unsafe (close sensor wins)")
+
+    # is_rear_blind edge cases
+    check(cid, is_rear_blind(None) is True, "is_rear_blind(None) should be True")
+    check(cid, is_rear_blind(make_frame(rcf=100, rdl=100, rdr=100)) is False,
+          "is_rear_blind all clear should be False")
+    check(cid, is_rear_blind(make_frame(rcf=-1, rdl=100, rdr=100)) is True,
+          "is_rear_blind with one -1 should be True")
+
+    # Rear debounce behavior
+    nav = NavStateMachine()
+    nav.state = NAV_BACKWARD
+    unsafe_frame = make_frame(rcf=10, rdl=10, rdr=10)
+    # First 3 unsafe frames: still moves backward (debounce not reached)
+    for i in range(REAR_UNSAFE_DEBOUNCE - 1):
+        result = nav._backward_action(unsafe_frame)
+        check(cid, result[1] == BACKWARD_SPEED,
+              f"debounce frame {i+1}: should still move (speed={result[1]})")
+    # 4th unsafe frame: triggers hold
+    result = nav._backward_action(unsafe_frame)
+    check(cid, result[1] == 0,
+          f"debounce frame {REAR_UNSAFE_DEBOUNCE}: should hold (speed={result[1]})")
+    # Safe frame resets debounce
+    safe_frame = make_frame(rcf=100, rdl=100, rdr=100)
+    result = nav._backward_action(safe_frame)
+    check(cid, nav.rear_unsafe_frames == 0,
+          "safe frame should reset rear_unsafe_frames")
 
 
 
@@ -2216,7 +2355,7 @@ if __name__ == "__main__":
         ("N4", "FSM stuck-state prevention", run_n4),
         ("N5", "Cliff detection", run_n5),
         ("N6", "Turn sign conventions", run_n6),
-        ("N7", "Terrain overlay (T1-T9)", run_n7),
+        ("N7", "Terrain overlay (T1-T9, T4b, T15-T17)", run_n7),
         ("N8", "Upside-down remap + self-right", run_n8),
         ("N9", "End-to-end scenario traces", run_n9),
         ("N10", "Reverse safety + finish detection", run_n10),

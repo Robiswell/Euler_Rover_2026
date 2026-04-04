@@ -38,19 +38,18 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 LEG_SPLAY      = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
-KP_PHASE            = 12.0
-STALL_THRESHOLD     = 800  # synced with production (H6: raised from 750)
-WALKING_SPEED_CAP   = 1200   # must match final_full_gait_test.py line 97
+KP_PHASE        = 12.0
+STALL_THRESHOLD = 750
 real_dt           = 0.02
 GAITS = {
-    0: {'duty': 0.55, 'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}, 'ff_budget': 650.0},
-    1: {'duty': 0.80, 'offsets': {2:0.0, 6:0.167, 4:0.333, 1:0.5, 3:0.667, 5:0.833}, 'ff_budget': 700.0},
-    2: {'duty': 0.70, 'offsets': {2:0.0, 5:0.0, 1:0.333, 3:0.333, 4:0.666, 6:0.666}, 'ff_budget': 499.0},
+    0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
+    1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
+    2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
 
 # Overload prevention constants (must match final_full_gait_test.py)
 OVERLOAD_PREVENTION_TIME = 1.5   # seconds: stall duration that triggers TE cycle
-OVERLOAD_MAX_CYCLES      = 50    # max TE cycles per stall event before cap
+OVERLOAD_MAX_CYCLES      = 10    # max TE cycles per stall event before cap
 
 # PhErr governor constants (must match final_full_gait_test.py)
 PHERR_ENGAGE_DEG  = 30.0    # deg: engage governor when max phase error exceeds this
@@ -193,9 +192,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
     smooth_offsets  = {s: g['offsets'][s] for s in ALL_SERVOS}
     smooth_speed    = speed * 1.0
     smooth_turn     = turn_bias * 1.0
-    # Per-gait impact angles (quad uses wider sweep for motor margin)
-    imp_start       = 330.0 if gait_id == 2 else 345.0
-    imp_end         = 30.0  if gait_id == 2 else 15.0
+    imp_start       = 330.0
+    imp_end         = 30.0
 
     master_L = 0.0; master_R = 0.0
     actual_phases = {s: 0.0 for s in ALL_SERVOS}
@@ -234,8 +232,6 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
                     if 'gait_id' in sched_params:
                         gait_id = sched_params['gait_id']
                         g = GAITS[gait_id]
-                        imp_start = 330.0 if gait_id == 2 else 345.0
-                        imp_end   = 30.0  if gait_id == 2 else 15.0
                     if 'speed' in sched_params:
                         speed = sched_params['speed']
                     if 'turn_bias' in sched_params:
@@ -346,8 +342,8 @@ def run_scenario(name, gait_id, speed, turn_bias, frames,
                 if is_rev:       raw = -raw
                 if sid in LEFT_SERVOS: raw = -raw
 
-                # v2: clamp to WALKING_SPEED_CAP (matches production line 1319)
-                final_speed = max(-WALKING_SPEED_CAP, min(WALKING_SPEED_CAP, int(raw)))
+                # v2: no stall exit ramp, no low-speed deadband
+                final_speed = max(-3000, min(3000, int(raw)))
 
             # Metrics
             if abs(final_speed) > speed_max[sid]: speed_max[sid] = abs(final_speed)
@@ -519,7 +515,7 @@ def run_t13_overload_timing():
     current_time = 0.0
     for tick in range(total_frames):
         phase_in_cycle = tick % cycle_period_frames
-        load = 850 if phase_in_cycle < stall_frames else 200  # deterministic (must exceed STALL_THRESHOLD=800)
+        load = 800 if phase_in_cycle < stall_frames else 200  # deterministic
 
         # Overload prevention timer -- direct threshold check, no hysteresis (matches production)
         if load > STALL_THRESHOLD:
@@ -816,10 +812,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7->0.80, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.80 - 0.7)
-        thresh = 0.01 * 0.80
+        delta = abs(0.75 - 0.7)
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -833,10 +829,10 @@ def evaluate(r):
             fails.append(f"EXIT SNAP ({r['max_exit_snap']:.0f} STS, limit 2000)")
         if r.get('max_ff_jump', 0) > 300:
             fails.append(f"FF DISCONTINUITY ({r.get('max_ff_jump', 0):.1f} deg/s, limit 300)")
-        # LERP convergence: analytical (duty 0.7->0.80, lr=0.08)
+        # LERP convergence: analytical (duty 0.7->0.75, lr=0.08)
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.80 - 0.7)
-        thresh = 0.01 * 0.80
+        delta = abs(0.75 - 0.7)
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         if lerp_frames > 150:
             fails.append(f"LERP TOO SLOW ({lerp_frames} frames, limit 150)")
@@ -964,15 +960,15 @@ def main():
     t11 = next((r for r in all_results if r['name'].startswith('T11')), None)
     if t11:
         lr = min(1.0, 4.0 * real_dt)
-        delta = abs(0.80 - 0.7)
-        thresh = 0.01 * 0.80
+        delta = abs(0.75 - 0.7)
+        thresh = 0.01 * 0.75
         lerp_frames = int(math.ceil(math.log(thresh / delta) / math.log(1.0 - lr)))
         print(f"\nT11 Gait transition under load (Quad@400 -> Wave@350 at frame 500):")
         print(f"    Governor headroom: {t11['gov_headroom_hz']:+.4f} Hz")
         print(f"    Stalls: {t11['total_stalls']} | max_dur: {t11['max_stall_dur']} frames")
         print(f"    Max exit snap: {t11['max_exit_snap']:.0f} STS (limit 2000)")
         print(f"    Max FF jump: {t11.get('max_ff_jump', 0):.1f} deg/s (limit 300)")
-        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7->0.80, limit 150)")
+        print(f"    LERP convergence: {lerp_frames} frames (duty 0.7->0.75, limit 150)")
 
     # T12 timed fallback
     t12 = next((r for r in all_results if r['name'].startswith('T12')), None)
