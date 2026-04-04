@@ -3265,6 +3265,7 @@ if __name__ == "__main__":
                             bn_buffer.clear()
 
                         # === MAIN NAV LOOP (~10 Hz) ===
+                        speed = 0  # init for S2 speed_error on first iteration (set by nav.update() each tick)
                         while is_running.value and not nav.finished:
                             loop_start = time.monotonic()
 
