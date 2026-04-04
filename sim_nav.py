@@ -751,7 +751,7 @@ class NavStateMachine:
 
         # T3: Moderate slope or tilted
         if abs(pitch_deg) > SLOPE_PITCH_DEG or (0.15 <= upright <= 0.5):
-            self.terrain_gait = 1
+            self.terrain_gait = 2  # quadruped
             self.terrain_impact_start = 325
             self.terrain_impact_end = 35
             self.terrain_mult = 0.6
@@ -764,10 +764,10 @@ class NavStateMachine:
             if self._heavy_load_start == 0.0:
                 self._heavy_load_start = now
             if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
-                self.terrain_gait = 1
+                self.terrain_gait = 2  # quadruped
                 self.terrain_impact_start = 330
                 self.terrain_impact_end = 30
-                self.terrain_mult = 0.5
+                self.terrain_mult = 0.80
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
                 return
@@ -819,7 +819,7 @@ class NavStateMachine:
 
         # T8: Hard flat ground
         no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-        if (eff_load < LIGHT_TERRAIN_LOAD
+        if (eff_load < 250
                 and front_class == DIST_CLEAR
                 and abs(pitch_deg) < 5
                 and abs(roll_deg) < 5
@@ -1649,7 +1649,7 @@ def run_n7():
     nav.state = NAV_FORWARD
     imu_mod = make_imu(pitch_deg=14)  # > 12 but <= 15 (T1 won't fire)
     nav.update_terrain(imu_mod, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
-    check(cid, nav.terrain_gait == 1, f"T3 pitch: gait={nav.terrain_gait} expected 1 (wave)")
+    check(cid, nav.terrain_gait == 2, f"T3 pitch: gait={nav.terrain_gait} expected 2 (quad)")
     check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 pitch: terrain_mult={nav.terrain_mult} expected 0.6")
 
     # T3 via upright_quality (0.15-0.5)
@@ -1657,7 +1657,7 @@ def run_n7():
     nav.state = NAV_FORWARD
     imu_tilt = make_imu(upright_quality=0.3)
     nav.update_terrain(imu_tilt, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
-    check(cid, nav.terrain_gait == 1, f"T3 tilt: gait={nav.terrain_gait} expected 1 (wave)")
+    check(cid, nav.terrain_gait == 2, f"T3 tilt: gait={nav.terrain_gait} expected 2 (quad)")
     check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 tilt: terrain_mult={nav.terrain_mult} expected 0.6")
 
     # T4: Heavy terrain (avg_load > 400, sustained 2s)
@@ -1666,8 +1666,8 @@ def run_n7():
     nav._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
     imu_level = make_imu_level()
     nav.update_terrain(imu_level, 500, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
-    check(cid, nav.terrain_gait == 1, f"T4: gait={nav.terrain_gait} expected 1 (wave)")
-    check(cid, abs(nav.terrain_mult - 0.5) < 0.01, f"T4: terrain_mult={nav.terrain_mult} expected 0.5")
+    check(cid, nav.terrain_gait == 2, f"T4: gait={nav.terrain_gait} expected 2 (quad)")
+    check(cid, abs(nav.terrain_mult - 0.80) < 0.01, f"T4: terrain_mult={nav.terrain_mult} expected 0.80")
 
     # T5: Excessive wobble (angular_rate > 0.3)
     nav = fresh_nav()
@@ -1802,8 +1802,8 @@ def run_n7():
     nav2._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
     nav2.update_terrain(imu_flat, 420, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
                         load_rolling_avg=420.0)
-    check(cid, nav2.terrain_gait == 1,
-          f"T16b: gait={nav2.terrain_gait} expected 1 (wave) when fully on sand")
+    check(cid, nav2.terrain_gait == 2,
+          f"T16b: gait={nav2.terrain_gait} expected 2 (quad) when fully on sand")
 
     # T17: Blocked leg (high speed error + high load) — validates S2 presence
     nav = fresh_nav()
@@ -1817,8 +1817,8 @@ def run_n7():
     nav._heavy_load_start = time.monotonic() - TERRAIN_SUSTAIN_S - 0.5
     nav.update_terrain(imu_flat, 500, 0.0, 9.81, DIST_CLEAR, 0, 0.0,
                        speed_error=300.0, load_rolling_avg=500.0)
-    check(cid, nav.terrain_gait == 1,
-          f"T17: gait={nav.terrain_gait} expected 1 (wave) — heavy load triggers T4 "
+    check(cid, nav.terrain_gait == 2,
+          f"T17: gait={nav.terrain_gait} expected 2 (quad) — heavy load triggers T4 "
           f"regardless of speed_error")
 
 

@@ -2851,7 +2851,7 @@ if __name__ == "__main__":
                 self._roll_tilt_start = 0.0
                 roll_triggered = False
             if pitch_triggered or roll_triggered or (0.15 <= upright <= 0.5):
-                self.terrain_gait = 1  # wave
+                self.terrain_gait = 2  # quadruped — faster than wave, still stable
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
                 self.terrain_mult_target = 0.85  # T3: raised from 0.7 — governor-clamped for wave
@@ -2866,10 +2866,10 @@ if __name__ == "__main__":
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
                 if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
-                    self.terrain_gait = 1  # wave
+                    self.terrain_gait = 2  # quadruped — 4 legs grounded, faster than wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.75  # T4: raised from 0.6 — biggest competition impact (sand course)
+                    self.terrain_mult_target = 0.80  # T4: quadruped on sand, slightly higher than wave was
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2923,12 +2923,12 @@ if __name__ == "__main__":
             # T8: Hard flat ground — sprint with tripod
             # U1: low ground variance (<2.0 cm²) confirms hard surface; skip tripod on sand
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-            if (eff_load < LIGHT_TERRAIN_LOAD
+            if (eff_load < 250
                     and front_class == DIST_CLEAR
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
                     and no_recent_stalls
-                    and self.ground_variance < 2.0):  # 2.0 cm² = hard floor confirmed
+                    and self.ground_variance < 4.0):  # 4.0 cm² = loosened from 2.0 to allow sprint on damp sand
                 if self._light_load_start == 0.0:
                     self._light_load_start = now
                 if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
