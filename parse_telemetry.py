@@ -356,12 +356,12 @@ VOLTAGE_MIN = 10.5
 
 # DUPLICATED FROM final_full_gait_test.py -- update both files when changing
 ENCODER_RESOLUTION = 4096.0
-HOME_POSITIONS = {1: 1727, 2: 2769, 3: 1431, 4: 2899, 5: 1188, 6: 3200}
+HOME_POSITIONS = {1: 3447, 2: 955, 3: 1420, 4: 1569, 5: 3197, 6: 3175}
 DIRECTION_MAP = {1: 1, 2: -1, 3: -1, 4: -1, 5: 1, 6: 1}
 LEG_SPLAY = {1: 35.0, 2: 35.0, 3: 0.0, 4: 0.0, 5: -35.0, 6: -35.0}  # degrees
 GAITS = {
     0: {'name': 'Tripod', 'duty': 0.5, 'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave', 'duty': 0.80, 'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
+    1: {'name': 'Wave', 'duty': 0.75, 'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
     2: {'name': 'Quadruped', 'duty': 0.7, 'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
 }
 ALL_SERVOS = [2, 3, 4, 1, 6, 5]

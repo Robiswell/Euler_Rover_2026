@@ -24,10 +24,10 @@ import subprocess
 import shutil
 from pathlib import Path
 
-GAIT_FILE = Path(r"C:\Users\rgane\Downloads\final_full_gait_test.py")
-SIM_VERIFY = Path(r"C:\Users\rgane\Downloads\sim_verify.py")
-SIM_TERRAIN = Path(r"C:\Users\rgane\Downloads\sim_terrain.py")
-SIM_NAV = Path(r"C:\Users\rgane\Downloads\sim_nav.py")
+GAIT_FILE = Path(r"C:\Users\YOUR_USERNAME\Downloads\final_full_gait_test.py")
+SIM_VERIFY = Path(r"C:\Users\YOUR_USERNAME\Downloads\sim_verify.py")
+SIM_TERRAIN = Path(r"C:\Users\YOUR_USERNAME\Downloads\sim_terrain.py")
+SIM_NAV = Path(r"C:\Users\YOUR_USERNAME\Downloads\sim_nav.py")
 BACKUP_SUFFIX = ".sweep_backup"
 
 

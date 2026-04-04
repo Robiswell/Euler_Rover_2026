@@ -41,21 +41,21 @@ LEFT_SERVOS = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS = [1, 2, 3, 4, 5, 6]
 DIRECTION_MAP = {1: 1, 2: -1, 3: -1, 4: -1, 5: 1, 6: 1}
-HOME_POSITIONS = {1: 1727, 2: 2769, 3: 1431, 4: 2899, 5: 1188, 6: 3200}
+HOME_POSITIONS = {1: 3447, 2: 955, 3: 1420, 4: 1569, 5: 3197, 6: 3175}
 KP_PHASE = 12.0
 LEG_SPLAY = {1: -35, 2: -35, 6: 0, 3: 0, 5: 35, 4: 35}
 
 GAITS = {
-    0: {'name': 'Tripod',    'duty': 0.55,  # Fix H9: was 0.5
+    0: {'name': 'Tripod',    'duty': 0.5,
         'offsets': {2: 0.0, 6: 0.0, 4: 0.0, 1: 0.5, 3: 0.5, 5: 0.5}},
-    1: {'name': 'Wave',      'duty': 0.80,
-        'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}},  # Fix H9: offsets synced
+    1: {'name': 'Wave',      'duty': 0.75,
+        'offsets': {4: 0.833, 3: 0.666, 2: 0.5, 5: 0.333, 6: 0.166, 1: 0.0}},
     2: {'name': 'Quadruped', 'duty': 0.7,
-        'offsets': {2: 0.0, 6: 0.0, 4: 0.333, 1: 0.333, 3: 0.666, 5: 0.666}},  # Fix H9: offsets synced
+        'offsets': {2: 0.0, 5: 0.0, 3: 0.333, 6: 0.333, 4: 0.666, 1: 0.666}},
 }
 
-DEFAULT_IMPACT_START = 345.0  # Fix H9: was 320, synced with production (Fix 120)
-DEFAULT_IMPACT_END = 15.0    # Fix H9: was 40, synced with production (Fix 120)
+DEFAULT_IMPACT_START = 320.0
+DEFAULT_IMPACT_END = 40.0
 
 # CPG transition
 KAPPA_TRANSITION = 8.0
