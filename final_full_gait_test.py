@@ -2926,8 +2926,7 @@ if __name__ == "__main__":
             if (eff_load < 330
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
-                    and no_recent_stalls
-                    and self.ground_variance < 4.0):  # 4.0 cm² = loosened from 2.0 to allow sprint on damp sand; load 250→330 for hardware load oscillation
+                    and no_recent_stalls):  # load 250→330 for hardware oscillation; ground_variance gate removed (FCD scatter + RCD dead)
                 if self._light_load_start == 0.0:
                     self._light_load_start = now
                 if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
