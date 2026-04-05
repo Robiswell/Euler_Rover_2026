@@ -2924,7 +2924,6 @@ if __name__ == "__main__":
             # U1: low ground variance (<4.0 cm²) confirms hard/damp surface; skip tripod on deep sand
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
             if (eff_load < 250
-                    and front_class == DIST_CLEAR
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
                     and no_recent_stalls
@@ -3477,7 +3476,7 @@ if __name__ == "__main__":
                                 angular_rate = imu.get("angular_rate", 0.0)
                                 voltage_ok = shared_voltage.value >= VOLTAGE_MIN
                                 if angular_rate < 1.0 and voltage_ok:
-                                    if not hasattr(nav, '_stop_safe_clear_start'):
+                                    if getattr(nav, '_stop_safe_clear_start', None) is None:
                                         nav._stop_safe_clear_start = time.monotonic()
                                     elif time.monotonic() - nav._stop_safe_clear_start >= 3.0:
                                         brain_log("[NAV] STOP_SAFE conditions cleared for 3s — resuming FORWARD")

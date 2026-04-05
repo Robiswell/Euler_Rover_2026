@@ -820,7 +820,6 @@ class NavStateMachine:
         # T8: Hard flat ground
         no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
         if (eff_load < 250
-                and front_class == DIST_CLEAR
                 and abs(pitch_deg) < 5
                 and abs(roll_deg) < 5
                 and no_recent_stalls):
