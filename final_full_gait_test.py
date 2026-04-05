@@ -1750,6 +1750,7 @@ if __name__ == "__main__":
     # Safety states (STOP_SAFE, BACKWARD) are exempt so cliff and
     # tipover responses are never delayed.
     MIN_STATE_DWELL = 0.3  # seconds — 3 ticks at 10 Hz
+    MIN_GAIT_DWELL_S = 2.5  # min seconds between terrain_gait changes — filters classifier flip-flop on marginal thresholds
 
     # --- Fix 155: Terrain speed LERP ---
     # terrain_mult controls how much the terrain slows the robot
@@ -1783,7 +1784,7 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
-    CLIFF_DETECTION_ENABLED = True   # enabled: thresholds raised (45/+18) to reject soft-surface false positives
+    CLIFF_DETECTION_ENABLED = False  # DISABLED for indoor/carpet testing -- re-enable for outdoor terrain (FCD false positives on carpet)
     CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (lowered 8→5 with IMU accelerator as safety)
     CLIFF_IMU_ANGULAR_RATE = 3.5   # rad/s — matches RAPID_ROTATION_THRESHOLD; cliff IMU accelerator
     CLIFF_IMU_ACCEL_FALL = 7.0     # m/s² — below tipover (8.0); signals free-fall / severe tip
@@ -2327,6 +2328,7 @@ if __name__ == "__main__":
             self._tripod_exit_start = 0.0     # T8 hysteresis: grace timer for load-only failures
             self._roll_sustained_start = 0.0
             self._roll_tilt_start = 0.0       # T3 roll sustain (1.0s)
+            self._pitch_tilt_start = 0.0      # T3 pitch sustain (0.5s) — filters walking-dynamics noise
             self._asymmetry_start = 0.0
             self._impact_cooldown_until = 0.0
             self._last_stall_clear_time = time.monotonic()
@@ -2338,6 +2340,7 @@ if __name__ == "__main__":
             self.terrain_mult_target = 1.0   # Fix 155: raw target from update_terrain()
             self.terrain_is_tripod = False
             self._gait_transition_until = 0.0
+            self._last_gait_change_time = 0.0  # for MIN_GAIT_DWELL_S flip-flop filter
             self.sensor_ema = {}  # per-sensor EMA state, keyed by sensor index 0-7
             # U1: ground distance variance — rolling window for FCD/RCD (indices 2, 6)
             self.ground_var_buf = {2: collections.deque(maxlen=15), 6: collections.deque(maxlen=15)}
@@ -2833,13 +2836,21 @@ if __name__ == "__main__":
             if self.state not in (NAV_FORWARD, NAV_SLOW_FORWARD):
                 return
 
+            # Startup lockout: don't classify until IMU is proven good.
+            # Requires BOTH: grace period elapsed AND upright_quality indicates valid orientation.
+            # This prevents false T1/T2/T8 transitions from uncalibrated IMU during startup.
+            if (now - self._nav_start) < 6.0:
+                return
+            if upright < 0.5:
+                return  # IMU orientation unreliable — skip classification this tick
+
             prev_gait = self.terrain_gait
 
             # T1: Steep climb — symmetric narrow sweep (345°/15°)
             # 30° total sweep, centered on vertical.
             # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
             # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
-            if pitch_deg > 20:  # T1: raised from 15 — real course climbs are 20-30°, filters gait-transition wobble
+            if pitch_deg > 30:  # T1: WAVE above 30° (0-15 TRIPOD, 15-30 QUAD, >30 WAVE)
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
                 if (now - self._steep_up_start) >= 1.0:
@@ -2854,7 +2865,7 @@ if __name__ == "__main__":
                 self._steep_up_start = 0.0
 
             # T2: Steep descent
-            if pitch_deg < -20:  # T2: raised from -15 — real course descents are 20-30°, filters gait-transition wobble
+            if pitch_deg < -30:  # T2: WAVE below -30° (0-15 TRIPOD, 15-30 QUAD, >30 WAVE)
                 if self._steep_down_start == 0.0:
                     self._steep_down_start = now
                 if (now - self._steep_down_start) >= 1.0:
@@ -2869,9 +2880,15 @@ if __name__ == "__main__":
                 self._steep_down_start = 0.0
 
             # T3: Moderate slope (uphill or downhill) or lateral tilt
-            # Pitch fires immediately (terrain changes slowly).
+            # Pitch uses 0.5s sustain to filter walking-dynamics noise around the threshold.
             # Roll uses 1.0s sustain to avoid oscillation from walking dynamics + HOME bias.
-            pitch_triggered = abs(pitch_deg) > SLOPE_PITCH_DEG
+            if abs(pitch_deg) > SLOPE_PITCH_DEG:
+                if self._pitch_tilt_start == 0.0:
+                    self._pitch_tilt_start = now
+                pitch_triggered = (now - self._pitch_tilt_start) >= 0.5
+            else:
+                self._pitch_tilt_start = 0.0
+                pitch_triggered = False
             if abs(roll_deg) > SLOPE_ROLL_DEG:
                 if self._roll_tilt_start == 0.0:
                     self._roll_tilt_start = now
@@ -2895,10 +2912,15 @@ if __name__ == "__main__":
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
                 if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
-                    self.terrain_gait = 2  # quadruped — 4 legs grounded, faster than wave
+                    # Load >700 → WAVE (crushing load, max ground contact). 500-700 → QUAD.
+                    if eff_load > 700:
+                        self.terrain_gait = 1  # wave
+                        self.terrain_mult_target = 0.6
+                    else:
+                        self.terrain_gait = 2  # quadruped
+                        self.terrain_mult_target = 0.80
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.80  # T4: quadruped on sand, slightly higher than wave was
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2958,9 +2980,9 @@ if __name__ == "__main__":
             t8_entry_sustain = 1.5
             if not self.terrain_is_tripod:
                 # Not in tripod → strict entry gates
-                pitch_entry_ok = abs(pitch_deg) < 7
-                roll_entry_ok  = abs(roll_deg) < 8
-                load_entry_ok  = eff_load < 360
+                pitch_entry_ok = abs(pitch_deg) < 15
+                roll_entry_ok  = abs(roll_deg) < 10
+                load_entry_ok  = eff_load < 300
                 if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
                     if self._light_load_start == 0.0:
                         self._light_load_start = now
@@ -2981,9 +3003,9 @@ if __name__ == "__main__":
                     self._light_load_start = 0.0
             else:
                 # Already in tripod → loose exit gates (dead band)
-                pitch_exit_bad = abs(pitch_deg) >= 9
-                roll_exit_bad  = abs(roll_deg) >= 10
-                load_exit_bad  = eff_load >= 400
+                pitch_exit_bad = abs(pitch_deg) >= 16
+                roll_exit_bad  = abs(roll_deg) >= 11
+                load_exit_bad  = eff_load >= 330
                 danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
                 if danger:
                     # 0.3s grace filters single-tick spikes (e.g. brief 8° pitch on ramp)
@@ -3027,11 +3049,19 @@ if __name__ == "__main__":
             self._apply_gait_transition(prev_gait)
 
         def _apply_gait_transition(self, prev_gait):
-            """Track gait transition timing for smooth speed ramp."""
+            """Track gait transition timing for smooth speed ramp.
+            Enforces MIN_GAIT_DWELL_S — reverts the switch if it would happen
+            too soon after the previous change (filters classifier flip-flop)."""
             if prev_gait != self.terrain_gait:
+                now = time.monotonic()
+                if (now - self._last_gait_change_time) < MIN_GAIT_DWELL_S:
+                    # Too soon since last switch — revert and keep previous gait.
+                    self.terrain_gait = prev_gait
+                    return
+                self._last_gait_change_time = now
                 # 1.0s blend (was 0.5s) -- gives Heart time to reorganize
                 # duty/phase smoothly without a mechanical jerk.
-                self._gait_transition_until = time.monotonic() + 1.0
+                self._gait_transition_until = now + 1.0
 
         def apply_modifiers(self, speed, imu, accel_mag, voltage, angular_rate,
                             load_asymmetry, stale_seconds, roll_deg):
