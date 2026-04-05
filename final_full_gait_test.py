@@ -1769,8 +1769,8 @@ if __name__ == "__main__":
     HEADING_CORRECTION_BIAS = 0.1
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
-    SLOPE_PITCH_DEG = 12
-    SLOPE_ROLL_DEG = 15       # lateral tilt threshold (higher than pitch to clear HOME bias)
+    SLOPE_PITCH_DEG = 15      # T3 moderate-slope threshold (was 12; raised to filter gait-transition wobble, real course slopes are 20-30°)
+    SLOPE_ROLL_DEG = 20       # T3 lateral tilt threshold (was 15; raised to filter gait-transition wobble + HOME bias)
     HEAVY_TERRAIN_LOAD = 400
     LIGHT_TERRAIN_LOAD = 200
     TERRAIN_SUSTAIN_S = 2.0
@@ -2101,6 +2101,11 @@ if __name__ == "__main__":
                 return False
 
     # IMU processing constants
+    # IMU zero-offsets (set by auto-calibration at startup — see competition loop)
+    # These are subtracted from raw pitch/roll so "level chassis" reads as 0/0.
+    IMU_PITCH_OFFSET_DEG = 0.0
+    IMU_ROLL_OFFSET_DEG = 0.0
+
     def compute_imu(frame):
         """Extract orientation, vibration, angular rate from frame.
         Returns dict with: pitch_deg, roll_deg, yaw_deg, upright_quality,
@@ -2138,12 +2143,20 @@ if __name__ == "__main__":
         # Angular rate from gyroscope
         angular_rate = math.sqrt(frame["gx"]**2 + frame["gy"]**2 + frame["gz"]**2)
 
+        # Apply IMU zero-offsets (measured at startup with rover stationary)
+        pitch_deg_out = math.degrees(pitch_rad) - IMU_PITCH_OFFSET_DEG
+        roll_deg_out = math.degrees(roll_rad) - IMU_ROLL_OFFSET_DEG
+        pitch_rad_out = math.radians(pitch_deg_out)
+        roll_rad_out = math.radians(roll_deg_out)
+        # Recompute upright_quality from offset-corrected angles
+        upright_quality = min(math.cos(abs(pitch_rad_out)),
+                              math.cos(abs(roll_rad_out)))
         return {
-            "pitch_deg": math.degrees(pitch_rad),
-            "roll_deg": math.degrees(roll_rad),
+            "pitch_deg": pitch_deg_out,
+            "roll_deg": roll_deg_out,
             "yaw_deg": math.degrees(yaw_rad),
-            "pitch_rad": pitch_rad,
-            "roll_rad": roll_rad,
+            "pitch_rad": pitch_rad_out,
+            "roll_rad": roll_rad_out,
             "yaw_rad": yaw_rad,
             "upright_quality": upright_quality,
             "accel_mag": accel_mag,
@@ -2811,7 +2824,7 @@ if __name__ == "__main__":
             # 30° total sweep, centered on vertical.
             # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
             # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
-            if pitch_deg > 15:
+            if pitch_deg > 20:  # T1: raised from 15 — real course climbs are 20-30°, filters gait-transition wobble
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
                 if (now - self._steep_up_start) >= 1.0:
@@ -2826,7 +2839,7 @@ if __name__ == "__main__":
                 self._steep_up_start = 0.0
 
             # T2: Steep descent
-            if pitch_deg < -15:
+            if pitch_deg < -20:  # T2: raised from -15 — real course descents are 20-30°, filters gait-transition wobble
                 if self._steep_down_start == 0.0:
                     self._steep_down_start = now
                 if (now - self._steep_down_start) >= 1.0:
@@ -2946,6 +2959,10 @@ if __name__ == "__main__":
                         self._apply_gait_transition(prev_gait)
                         return
                 else:
+                    # Debug: log which T8 entry condition failed (throttled to 1 Hz)
+                    if (now - getattr(self, "_t8_block_last_log", 0.0)) >= 1.0:
+                        self._t8_block_last_log = now
+                        brain_log(f"[T8] block p={abs(pitch_deg):.1f} r={abs(roll_deg):.1f} L={eff_load:.0f} st={no_recent_stalls}")
                     self._light_load_start = 0.0
             else:
                 # Already in tripod → loose exit gates (dead band)
@@ -3260,6 +3277,30 @@ if __name__ == "__main__":
                             first_imu = compute_imu(first_frame)
                             nav.initial_yaw = first_imu["yaw_rad"]
                             brain_log(f"[NAV] initial yaw={math.degrees(nav.initial_yaw):.1f}deg")
+
+                        # --- IMU zero-offset auto-calibration (rover must be stationary on flat-ish ground) ---
+                        # Sample 20 frames over 2s, average the raw pitch/roll, store as offset.
+                        # This eliminates chassis-tilt bias (HOME_POSITIONS bias, leg splay asymmetry, etc).
+                        cal_pitches = []
+                        cal_rolls = []
+                        cal_start = time.monotonic()
+                        last_cal_frame = None
+                        while time.monotonic() - cal_start < 2.0 and len(cal_pitches) < 20:
+                            f = reader.get_latest()
+                            if f is not None and f is not last_cal_frame:
+                                last_cal_frame = f
+                                # Read RAW angles (offsets still 0.0 at this point)
+                                raw = compute_imu(f)
+                                cal_pitches.append(raw["pitch_deg"])
+                                cal_rolls.append(raw["roll_deg"])
+                            time.sleep(0.1)
+                        if len(cal_pitches) >= 5:
+                            IMU_PITCH_OFFSET_DEG = sum(cal_pitches) / len(cal_pitches)
+                            IMU_ROLL_OFFSET_DEG = sum(cal_rolls) / len(cal_rolls)
+                            brain_log(f"[NAV] IMU auto-cal: pitch_off={IMU_PITCH_OFFSET_DEG:+.2f}° roll_off={IMU_ROLL_OFFSET_DEG:+.2f}° ({len(cal_pitches)} samples)")
+                            print(f"[NAV] IMU zero-offset: pitch={IMU_PITCH_OFFSET_DEG:+.2f}° roll={IMU_ROLL_OFFSET_DEG:+.2f}°")
+                        else:
+                            brain_log(f"[NAV] IMU auto-cal SKIPPED (only {len(cal_pitches)} samples)")
 
                         brain_log("[NAV] autonomous nav loop starting")
                         fallen_back = False
