@@ -3524,42 +3524,11 @@ if __name__ == "__main__":
                                   f"R={'YES' if rear_cliff else 'no'}")
                             print(f"  pitch={imu['pitch_deg']:+5.1f}°  "
                                   f"roll={imu['roll_deg']:+5.1f}°  "
-                                  f"yaw={imu['yaw_deg']:+6.1f}°  "
                                   f"upright={imu['upright_quality']:.2f}  "
                                   f"accel={imu['accel_mag']:.1f}  "
                                   f"gyro={imu['angular_rate']:.2f}")
                             print(f"  load_avg={avg_load:.0f}  load_asym={load_asymmetry:.0f}  "
                                   f"voltage={voltage:.1f}V  stale={stale:.2f}s")
-                            # --- Rover shape with sensor snapshot ---
-                            _fdl = frame.get('FDL', 0); _fcf = frame.get('FCF', 0)
-                            _fcd = frame.get('FCD', 0); _fdr = frame.get('FDR', 0)
-                            _rdl = frame.get('RDL', 0); _rcf = frame.get('RCF', 0)
-                            _rcd = frame.get('RCD', 0); _rdr = frame.get('RDR', 0)
-                            _L2 = shared_servo_loads[SERVO_LOAD_INDEX[2]]
-                            _L3 = shared_servo_loads[SERVO_LOAD_INDEX[3]]
-                            _L4 = shared_servo_loads[SERVO_LOAD_INDEX[4]]
-                            _L1 = shared_servo_loads[SERVO_LOAD_INDEX[1]]
-                            _L6 = shared_servo_loads[SERVO_LOAD_INDEX[6]]
-                            _L5 = shared_servo_loads[SERVO_LOAD_INDEX[5]]
-                            _S2 = shared_servo_speeds[SERVO_LOAD_INDEX[2]]
-                            _S3 = shared_servo_speeds[SERVO_LOAD_INDEX[3]]
-                            _S4 = shared_servo_speeds[SERVO_LOAD_INDEX[4]]
-                            _S1 = shared_servo_speeds[SERVO_LOAD_INDEX[1]]
-                            _S6 = shared_servo_speeds[SERVO_LOAD_INDEX[6]]
-                            _S5 = shared_servo_speeds[SERVO_LOAD_INDEX[5]]
-                            print(f"  ── Rover Shape ──              FRONT")
-                            print(f"              FDL={_fdl:>4}  FCF={_fcf:>4}  FCD={_fcd:>4}  FDR={_fdr:>4}")
-                            print(f"                   ┌───────────────────────┐")
-                            print(f"            s2 L:{_L2:>4} │                       │ s1 L:{_L1:>4}")
-                            print(f"                   │                       │")
-                            print(f"            s3 L:{_L3:>4} │         BODY          │ s6 L:{_L6:>4}")
-                            print(f"                   │                       │")
-                            print(f"            s4 L:{_L4:>4} │                       │ s5 L:{_L5:>4}")
-                            print(f"                   └───────────────────────┘")
-                            print(f"              RDL={_rdl:>4}  RCF={_rcf:>4}  RCD={_rcd:>4}  RDR={_rdr:>4}")
-                            print(f"  ── Rover Shape ──               REAR")
-                            print(f"  servo spd: L[s2:{_S2:>3} s3:{_S3:>3} s4:{_S4:>3}]  "
-                                  f"R[s1:{_S1:>3} s6:{_S6:>3} s5:{_S5:>3}]")
                             print(f"  step={step_name}")
                             prev_state_name_comp = state_name_comp
                             nav_tick += 1
