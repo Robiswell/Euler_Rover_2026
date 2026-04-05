@@ -2923,11 +2923,11 @@ if __name__ == "__main__":
             # T8: Hard flat ground — sprint with tripod
             # U1: low ground variance (<4.0 cm²) confirms hard/damp surface; skip tripod on deep sand
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-            if (eff_load < 250
+            if (eff_load < 330
                     and abs(pitch_deg) < 5
                     and abs(roll_deg) < 5
                     and no_recent_stalls
-                    and self.ground_variance < 4.0):  # 4.0 cm² = loosened from 2.0 to allow sprint on damp sand
+                    and self.ground_variance < 4.0):  # 4.0 cm² = loosened from 2.0 to allow sprint on damp sand; load 250→330 for hardware load oscillation
                 if self._light_load_start == 0.0:
                     self._light_load_start = now
                 if (now - self._light_load_start) >= TERRAIN_SUSTAIN_S:
