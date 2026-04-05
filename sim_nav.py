@@ -818,44 +818,59 @@ class NavStateMachine:
         else:
             self._high_vibe_start = 0.0
 
-        # T8: Hard flat ground (relaxed 2026-04-04)
+        # T8: Hard flat ground — dead-band hysteresis (2026-04-04)
         no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-        pitch_ok = abs(pitch_deg) < 7
-        roll_ok  = abs(roll_deg) < 8
-        load_ok  = eff_load < 360
         t8_entry_sustain = 1.5
-        if load_ok and pitch_ok and roll_ok and no_recent_stalls:
-            if self._light_load_start == 0.0:
-                self._light_load_start = now
-            if (now - self._light_load_start) >= t8_entry_sustain:
-                self.terrain_gait = 0
-                self.terrain_impact_start = 330
-                self.terrain_impact_end = 30
-                self.terrain_mult = 1.0
-                self.terrain_is_tripod = True
-                self._tripod_exit_start = 0.0
-                self._apply_gait_transition(prev_gait)
-                return
+        if not self.terrain_is_tripod:
+            pitch_entry_ok = abs(pitch_deg) < 7
+            roll_entry_ok  = abs(roll_deg) < 8
+            load_entry_ok  = eff_load < 360
+            if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
+                if self._light_load_start == 0.0:
+                    self._light_load_start = now
+                if (now - self._light_load_start) >= t8_entry_sustain:
+                    self.terrain_gait = 0
+                    self.terrain_impact_start = 330
+                    self.terrain_impact_end = 30
+                    self.terrain_mult = 1.0
+                    self.terrain_is_tripod = True
+                    self._tripod_exit_start = 0.0
+                    self._apply_gait_transition(prev_gait)
+                    return
+            else:
+                self._light_load_start = 0.0
         else:
-            self._light_load_start = 0.0
-            if self.terrain_is_tripod:
-                danger = (not pitch_ok) or (not roll_ok) or (not no_recent_stalls)
-                if danger:
+            pitch_exit_bad = abs(pitch_deg) >= 9
+            roll_exit_bad  = abs(roll_deg) >= 10
+            load_exit_bad  = eff_load >= 400
+            danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
+            if danger:
+                if self._tripod_exit_start == 0.0:
+                    self._tripod_exit_start = now
+                if (now - self._tripod_exit_start) >= 0.3:
                     self.terrain_gait = 2
                     self.terrain_is_tripod = False
                     self._tripod_exit_start = 0.0
                     self._apply_gait_transition(0)
                 else:
-                    if self._tripod_exit_start == 0.0:
-                        self._tripod_exit_start = now
-                    if (now - self._tripod_exit_start) >= 0.5:
-                        self.terrain_gait = 2
-                        self.terrain_is_tripod = False
-                        self._tripod_exit_start = 0.0
-                        self._apply_gait_transition(0)
-                    else:
-                        self.terrain_mult = 1.0
-                        return
+                    self.terrain_mult = 1.0
+                    return
+            elif load_exit_bad:
+                if self._tripod_exit_start == 0.0:
+                    self._tripod_exit_start = now
+                if (now - self._tripod_exit_start) >= 0.5:
+                    self.terrain_gait = 2
+                    self.terrain_is_tripod = False
+                    self._tripod_exit_start = 0.0
+                    self._apply_gait_transition(0)
+                else:
+                    self.terrain_mult = 1.0
+                    return
+            else:
+                self._tripod_exit_start = 0.0
+                self._light_load_start = now
+                self.terrain_mult = 1.0
+                return
 
         # T9: Default quad
         self.terrain_gait = 2
@@ -867,7 +882,7 @@ class NavStateMachine:
 
     def _apply_gait_transition(self, prev_gait):
         if prev_gait != self.terrain_gait:
-            self._gait_transition_until = time.monotonic() + 0.5
+            self._gait_transition_until = time.monotonic() + 1.0
 
     def apply_modifiers(self, speed, imu, accel_mag, voltage, angular_rate,
                         load_asymmetry, stale_seconds, roll_deg):
@@ -1720,12 +1735,15 @@ def run_n7():
     check(cid, abs(nav.terrain_mult - 1.0) < 0.01, f"T8: terrain_mult={nav.terrain_mult} expected 1.0")
     check(cid, nav.terrain_is_tripod is True, "T8: terrain_is_tripod should be True")
 
-    # T8 safety gate: tripod fallback on condition drop
-    nav.update_terrain(make_imu(pitch_deg=8), 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
-    # pitch=8 doesn't trigger T1/T2/T3, but we need to fail one T8 condition
-    # pitch=8 > 5 fails T8 condition -> tripod safety gate
+    # T8 safety gate: tripod fallback on danger (exit threshold pitch>=9, + 0.3s grace)
+    # pitch=10 crosses exit threshold; first call starts grace, wait 0.3s, second call trips.
+    nav.update_terrain(make_imu(pitch_deg=10), 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
+    check(cid, nav.terrain_is_tripod is True,
+          "T8 safety gate: should hold tripod during 0.3s grace window")
+    time.sleep(0.35)
+    nav.update_terrain(make_imu(pitch_deg=10), 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_is_tripod is False,
-          "T8 safety gate: tripod should fallback when conditions no longer met")
+          "T8 safety gate: tripod should fallback after grace on sustained danger")
     check(cid, nav.terrain_gait == 2, f"T8 safety gate: gait={nav.terrain_gait} expected 2 (quad)")
 
     # T9: Default quad

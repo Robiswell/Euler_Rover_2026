@@ -2922,52 +2922,69 @@ if __name__ == "__main__":
                 self._high_vibe_start = 0.0
 
             # T8: Hard flat ground — sprint with tripod
-            # Relaxed 2026-04-04: give TRIPOD more freedom on hard surfaces
-            #   load 330→360 (40 guard to T4=400), pitch 5→7 (5° guard to T3=12),
-            #   roll 5→8 (7° guard to T3=15, HOME bias), entry sustain 2.0→1.5s
+            # Dead-band hysteresis 2026-04-04: entry tight, exit loose, + grace.
+            #   entry: pitch<7, roll<8, load<360  (strict — only enter if clearly hard flat)
+            #   exit:  pitch≥9, roll≥10, load≥400 (loose — don't bail on a minor wobble)
+            #   grace: 0.3s on danger (pitch/roll/stall), 0.5s on load-only
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
-            pitch_ok = abs(pitch_deg) < 7
-            roll_ok  = abs(roll_deg) < 8
-            load_ok  = eff_load < 360
-            t8_entry_sustain = 1.5  # reduced from TERRAIN_SUSTAIN_S=2.0
-            if load_ok and pitch_ok and roll_ok and no_recent_stalls:
-                if self._light_load_start == 0.0:
-                    self._light_load_start = now
-                if (now - self._light_load_start) >= t8_entry_sustain:
-                    self.terrain_gait = 0  # tripod
-                    self.terrain_impact_start = DEFAULT_IMPACT_START
-                    self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 1.0   # Fix 155: LERP'd smoothly in update()
-                    self.terrain_is_tripod = True
-                    self._tripod_exit_start = 0.0    # reset exit grace on successful entry
-                    self._apply_gait_transition(prev_gait)
-                    return
+            t8_entry_sustain = 1.5
+            if not self.terrain_is_tripod:
+                # Not in tripod → strict entry gates
+                pitch_entry_ok = abs(pitch_deg) < 7
+                roll_entry_ok  = abs(roll_deg) < 8
+                load_entry_ok  = eff_load < 360
+                if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
+                    if self._light_load_start == 0.0:
+                        self._light_load_start = now
+                    if (now - self._light_load_start) >= t8_entry_sustain:
+                        self.terrain_gait = 0  # tripod
+                        self.terrain_impact_start = DEFAULT_IMPACT_START
+                        self.terrain_impact_end = DEFAULT_IMPACT_END
+                        self.terrain_mult_target = 1.0
+                        self.terrain_is_tripod = True
+                        self._tripod_exit_start = 0.0
+                        self._apply_gait_transition(prev_gait)
+                        return
+                else:
+                    self._light_load_start = 0.0
             else:
-                self._light_load_start = 0.0
-                # Smart hysteresis: 0.5s grace ONLY for load-only failure (noisy signal).
-                # Immediate bail on pitch/roll/stall (real danger signals).
-                if self.terrain_is_tripod:
-                    danger = (not pitch_ok) or (not roll_ok) or (not no_recent_stalls)
-                    if danger:
+                # Already in tripod → loose exit gates (dead band)
+                pitch_exit_bad = abs(pitch_deg) >= 9
+                roll_exit_bad  = abs(roll_deg) >= 10
+                load_exit_bad  = eff_load >= 400
+                danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
+                if danger:
+                    # 0.3s grace filters single-tick spikes (e.g. brief 8° pitch on ramp)
+                    if self._tripod_exit_start == 0.0:
+                        self._tripod_exit_start = now
+                    if (now - self._tripod_exit_start) >= 0.3:
                         self.terrain_gait = 2
                         self.terrain_is_tripod = False
                         self._tripod_exit_start = 0.0
                         self._apply_gait_transition(0)
                         # fall through to T9
                     else:
-                        # load-only failure: start/continue 0.5s grace window
-                        if self._tripod_exit_start == 0.0:
-                            self._tripod_exit_start = now
-                        if (now - self._tripod_exit_start) >= 0.5:
-                            self.terrain_gait = 2
-                            self.terrain_is_tripod = False
-                            self._tripod_exit_start = 0.0
-                            self._apply_gait_transition(0)
-                            # fall through to T9
-                        else:
-                            # stay in TRIPOD during grace window
-                            self.terrain_mult_target = 1.0
-                            return
+                        self.terrain_mult_target = 1.0
+                        return
+                elif load_exit_bad:
+                    # 0.5s grace for noisy load signal
+                    if self._tripod_exit_start == 0.0:
+                        self._tripod_exit_start = now
+                    if (now - self._tripod_exit_start) >= 0.5:
+                        self.terrain_gait = 2
+                        self.terrain_is_tripod = False
+                        self._tripod_exit_start = 0.0
+                        self._apply_gait_transition(0)
+                        # fall through to T9
+                    else:
+                        self.terrain_mult_target = 1.0
+                        return
+                else:
+                    # In dead band (loose gates OK) → stay tripod
+                    self._tripod_exit_start = 0.0
+                    self._light_load_start = now
+                    self.terrain_mult_target = 1.0
+                    return
 
             # T9: Default — quad
             self.terrain_gait = 2
@@ -2980,7 +2997,9 @@ if __name__ == "__main__":
         def _apply_gait_transition(self, prev_gait):
             """Track gait transition timing for smooth speed ramp."""
             if prev_gait != self.terrain_gait:
-                self._gait_transition_until = time.monotonic() + 0.5
+                # 1.0s blend (was 0.5s) -- gives Heart time to reorganize
+                # duty/phase smoothly without a mechanical jerk.
+                self._gait_transition_until = time.monotonic() + 1.0
 
         def apply_modifiers(self, speed, imu, accel_mag, voltage, angular_rate,
                             load_asymmetry, stale_seconds, roll_deg):
