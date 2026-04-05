@@ -1784,7 +1784,9 @@ if __name__ == "__main__":
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
     CLIFF_DETECTION_ENABLED = True   # enabled: thresholds raised (45/+18) to reject soft-surface false positives
-    CLIFF_CONFIRM_FRAMES = 8    # consecutive candidate frames before cliff confirmed (raised from 5 — FCD scatter spikes can burst 5+ frames)
+    CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (lowered 8→5 with IMU accelerator as safety)
+    CLIFF_IMU_ANGULAR_RATE = 3.5   # rad/s — matches RAPID_ROTATION_THRESHOLD; cliff IMU accelerator
+    CLIFF_IMU_ACCEL_FALL = 7.0     # m/s² — below tipover (8.0); signals free-fall / severe tip
 
     # --- CSV column indices ---
     CSV_COLS = 20
@@ -2048,22 +2050,30 @@ if __name__ == "__main__":
             self._consecutive_rear = 0
             self._warmup_frames = 0       # Fix 72: skip detection during sensor settle
 
-        def update(self, fcd, rcd, pitch_deg=0.0):
+        def update(self, fcd, rcd, pitch_deg=0.0, accel_mag=9.81, angular_rate=0.0):
             """Update cliff detection with new FCD and RCD readings.
             Returns (front_cliff, rear_cliff) booleans.
             Fix C3: suppress cliff on ascending ramp (pitch > 10 deg) — increasing
-            ground distance is from slope geometry, not a cliff."""
+            ground distance is from slope geometry, not a cliff.
+            IMU accelerator: if rover is already falling/tipping (angular_rate > 3.5 rad/s
+            OR accel_mag < 7.0 m/s²), fire cliff instantly on ANY candidate FCD/RCD,
+            skipping the normal 5-frame confirmation window."""
             self._warmup_frames += 1
             if pitch_deg > 10:
                 self._consecutive_front = 0
                 self._consecutive_rear = 0
                 return False, False
-            front_cliff = self._check_cliff(fcd, is_front=True)
-            rear_cliff = self._check_cliff(rcd, is_front=False)
+            # IMU accelerator: normal walk peaks at 2.0 rad/s angular, accel 9-14 m/s².
+            # These thresholds fire ONLY on real fall (matches RAPID_ROTATION / tipover).
+            imu_falling = (angular_rate > CLIFF_IMU_ANGULAR_RATE) or (accel_mag < CLIFF_IMU_ACCEL_FALL)
+            front_cliff = self._check_cliff(fcd, is_front=True, imu_falling=imu_falling)
+            rear_cliff = self._check_cliff(rcd, is_front=False, imu_falling=imu_falling)
             return front_cliff, rear_cliff
 
-        def _check_cliff(self, reading, is_front):
-            """Check single cliff sensor. Returns True if cliff confirmed."""
+        def _check_cliff(self, reading, is_front, imu_falling=False):
+            """Check single cliff sensor. Returns True if cliff confirmed.
+            imu_falling=True (IMU accelerator) fires cliff instantly on any candidate,
+            bypassing the normal CLIFF_CONFIRM_FRAMES window."""
             counter_attr = "_consecutive_front" if is_front else "_consecutive_rear"
             count = getattr(self, counter_attr)
 
@@ -2080,6 +2090,8 @@ if __name__ == "__main__":
             if reading is None:
                 # Defensive: possible cliff, increment
                 setattr(self, counter_attr, count + 1)
+                if imu_falling:
+                    return True
                 return count + 1 >= CLIFF_CONFIRM_FRAMES
 
             # Update ground EMA with valid low readings (runs during warmup so baseline converges)
@@ -2095,6 +2107,9 @@ if __name__ == "__main__":
 
             if is_candidate:
                 setattr(self, counter_attr, count + 1)
+                # IMU accelerator: fall signature + candidate FCD = fire instantly
+                if imu_falling:
+                    return True
                 return count + 1 >= CLIFF_CONFIRM_FRAMES
             else:
                 setattr(self, counter_attr, 0)
@@ -3406,7 +3421,10 @@ if __name__ == "__main__":
                             for _si, _sk in enumerate(_sensor_keys):
                                 frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
                             front_class, left_class, right_class = classify_sectors_voted(frame)
-                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd, pitch_deg=imu.get("pitch_deg", 0.0))
+                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd,
+                                                                    pitch_deg=imu.get("pitch_deg", 0.0),
+                                                                    accel_mag=imu.get("accel_mag", 9.81),
+                                                                    angular_rate=imu.get("angular_rate", 0.0))
                             turn_intensity = compute_turn_intensity(frame)
                             flicker_count = flicker.update(front_class)
 
@@ -3825,9 +3843,12 @@ if __name__ == "__main__":
 
                         # ── Processed sensor pipeline ────────────────────────
                         front_cls, left_cls, right_cls = classify_sectors_voted(frame)
-                        front_cliff, rear_cliff = cliff.update(
-                            frame["FCD"], frame["RCD"])
                         imu = compute_imu(frame)
+                        front_cliff, rear_cliff = cliff.update(
+                            frame["FCD"], frame["RCD"],
+                            pitch_deg=imu.get("pitch_deg", 0.0),
+                            accel_mag=imu.get("accel_mag", 9.81),
+                            angular_rate=imu.get("angular_rate", 0.0))
                         turn = compute_turn_intensity(frame)
 
                         print(f"  {'--- Sensor Pipeline ---':^50s}")
@@ -3918,7 +3939,10 @@ if __name__ == "__main__":
                         imu = compute_imu(frame)
                         front_cls, left_cls, right_cls = classify_sectors_voted(frame)
                         front_cliff, rear_cliff = cliff_det.update(
-                            frame["FCD"], frame["RCD"])
+                            frame["FCD"], frame["RCD"],
+                            pitch_deg=imu.get("pitch_deg", 0.0),
+                            accel_mag=imu.get("accel_mag", 9.81),
+                            angular_rate=imu.get("angular_rate", 0.0))
                         turn_intensity = compute_turn_intensity(frame)
                         flicker_count = flicker.update(front_cls)
                         # Simulate zero servo loads and nominal voltage (no Heart)
