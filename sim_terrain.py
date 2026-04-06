@@ -38,7 +38,7 @@ LEFT_SERVOS  = [2, 3, 4]
 RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 LEG_SPLAY      = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
-KP_PHASE        = 12.0
+KP_PHASE        = 15.0
 STALL_THRESHOLD = 750
 real_dt           = 0.02
 GAITS = {
@@ -54,7 +54,7 @@ OVERLOAD_MAX_CYCLES      = 10    # max TE cycles per stall event before cap
 # PhErr governor constants (must match final_full_gait_test.py)
 PHERR_ENGAGE_DEG  = 30.0    # deg: engage governor when max phase error exceeds this
 PHERR_RELEASE_DEG = 20.0    # deg: release governor when error drops below this
-PHERR_FLOOR_SCALE = 0.35    # minimum hz scale when governor is fully engaged
+PHERR_FLOOR_SCALE = 0.45    # minimum hz scale when governor is fully engaged
 PHERR_RAMP_WIDTH  = 120.0   # deg: error range over which scale ramps from 1.0 to floor
 KAPPA_GOVERNOR    = 3.0     # exponential decay rate for governor scaling
 

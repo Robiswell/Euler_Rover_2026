@@ -42,7 +42,7 @@ PIVOT_TURN_BIAS = 0.5
 HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
-SLOPE_PITCH_DEG = 12
+SLOPE_PITCH_DEG = 15
 HEAVY_TERRAIN_LOAD = 400
 LIGHT_TERRAIN_LOAD = 200
 TERRAIN_SUSTAIN_S = 2.0
@@ -822,9 +822,9 @@ class NavStateMachine:
         no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
         t8_entry_sustain = 1.5
         if not self.terrain_is_tripod:
-            pitch_entry_ok = abs(pitch_deg) < 7
-            roll_entry_ok  = abs(roll_deg) < 8
-            load_entry_ok  = eff_load < 360
+            pitch_entry_ok = abs(pitch_deg) < 15
+            roll_entry_ok  = abs(roll_deg) < 15
+            load_entry_ok  = eff_load < 250
             if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
                 if self._light_load_start == 0.0:
                     self._light_load_start = now
@@ -840,9 +840,9 @@ class NavStateMachine:
             else:
                 self._light_load_start = 0.0
         else:
-            pitch_exit_bad = abs(pitch_deg) >= 9
-            roll_exit_bad  = abs(roll_deg) >= 10
-            load_exit_bad  = eff_load >= 400
+            pitch_exit_bad = abs(pitch_deg) >= 17
+            roll_exit_bad  = abs(roll_deg) >= 17
+            load_exit_bad  = eff_load >= 280
             danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
             if danger:
                 if self._tripod_exit_start == 0.0:
@@ -882,7 +882,7 @@ class NavStateMachine:
 
     def _apply_gait_transition(self, prev_gait):
         if prev_gait != self.terrain_gait:
-            self._gait_transition_until = time.monotonic() + 1.0
+            self._gait_transition_until = time.monotonic() + 1.5
 
     def apply_modifiers(self, speed, imu, accel_mag, voltage, angular_rate,
                         load_asymmetry, stale_seconds, roll_deg):
@@ -1675,10 +1675,10 @@ def run_n7():
     check(cid, nav.terrain_impact_end == 35, f"T2: impact_end={nav.terrain_impact_end} expected 35")
     check(cid, abs(nav.terrain_mult - 0.5) < 0.01, f"T2: terrain_mult={nav.terrain_mult} expected 0.5")
 
-    # T3: Moderate slope (abs(pitch) > 12)
+    # T3: Moderate slope (abs(pitch) > 15)
     nav = fresh_nav()
     nav.state = NAV_FORWARD
-    imu_mod = make_imu(pitch_deg=14)  # > 12 but <= 15 (T1 won't fire)
+    imu_mod = make_imu(pitch_deg=16)  # > 15 (T3 fires immediately; T1 needs 1s sustain so won't fire)
     nav.update_terrain(imu_mod, 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_gait == 2, f"T3 pitch: gait={nav.terrain_gait} expected 2 (quad)")
     check(cid, abs(nav.terrain_mult - 0.6) < 0.01, f"T3 pitch: terrain_mult={nav.terrain_mult} expected 0.6")
@@ -1735,15 +1735,16 @@ def run_n7():
     check(cid, abs(nav.terrain_mult - 1.0) < 0.01, f"T8: terrain_mult={nav.terrain_mult} expected 1.0")
     check(cid, nav.terrain_is_tripod is True, "T8: terrain_is_tripod should be True")
 
-    # T8 safety gate: tripod fallback on danger (exit threshold pitch>=9, + 0.3s grace)
-    # pitch=10 crosses exit threshold; first call starts grace, wait 0.3s, second call trips.
-    nav.update_terrain(make_imu(pitch_deg=10), 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
+    # T8 safety gate: tripod fallback on load exit (load>=280, 0.5s grace)
+    # Use load-based exit to avoid triggering T3 (pitch>15 would fire T3 first).
+    # load=300 crosses exit threshold; first call starts grace, wait 0.55s, second call trips.
+    nav.update_terrain(make_imu_level(), 300, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_is_tripod is True,
-          "T8 safety gate: should hold tripod during 0.3s grace window")
-    time.sleep(0.35)
-    nav.update_terrain(make_imu(pitch_deg=10), 100, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
+          "T8 safety gate: should hold tripod during 0.5s load grace window")
+    time.sleep(0.55)
+    nav.update_terrain(make_imu_level(), 300, 0.0, 9.81, DIST_CLEAR, 0, 0.0)
     check(cid, nav.terrain_is_tripod is False,
-          "T8 safety gate: tripod should fallback after grace on sustained danger")
+          "T8 safety gate: tripod should fallback after grace on sustained high load")
     check(cid, nav.terrain_gait == 2, f"T8 safety gate: gait={nav.terrain_gait} expected 2 (quad)")
 
     # T9: Default quad

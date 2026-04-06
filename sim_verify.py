@@ -9,7 +9,7 @@ RIGHT_SERVOS = [1, 6, 5]
 ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 DIRECTION_MAP = {1:1, 2:-1, 3:-1, 4:-1, 5:1, 6:1}
 HOME_POSITIONS = {1:3447, 2:955, 3:1420, 4:1569, 5:3197, 6:3175}
-KP_PHASE        = 12.0
+KP_PHASE        = 15.0
 STALL_THRESHOLD = 750
 LEG_SPLAY = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 GAITS = {
@@ -580,7 +580,7 @@ def check_V18_pherr_governor():
     # Governor constants — sync with final_full_gait_test.py
     PHERR_ENGAGE_DEG    = 30.0   # governor activates above this error
     PHERR_RELEASE_DEG   = 20.0   # governor releases below this error
-    PHERR_FLOOR_SCALE   = 0.35   # minimum throttle scale when governor active
+    PHERR_FLOOR_SCALE   = 0.45   # minimum throttle scale when governor active
     PHERR_RAMP_WIDTH    = 120.0  # deg range over which scale ramps from 1.0 to floor
     PHERR_STUCK_TIMEOUT = 5.0    # seconds at floor before escalating to stall
     TICKS_PER_SEC       = 50     # Heart runs at 50 Hz (real_dt = 0.02 s)
@@ -625,8 +625,8 @@ def check_V18_pherr_governor():
         (30.0,  1.0),          # at engage threshold: scale = 1.0 - 0/120 = 1.0
         (42.0,  0.9),          # 1.0 - 12/120 = 0.9
         (90.0,  0.5),          # 1.0 - 60/120 = 0.5
-        (150.0, 0.35),         # 1.0 - 120/120 = 0.0 -> floor clamps to 0.35
-        (200.0, 0.35),         # well beyond ramp width -> floor
+        (150.0, PHERR_FLOOR_SCALE),  # 1.0 - 120/120 = 0.0 -> floor clamps
+        (200.0, PHERR_FLOOR_SCALE),  # well beyond ramp width -> floor
     ]
     for err_deg, expected_scale in ramp_cases:
         # Force governor active to test ramp in active state

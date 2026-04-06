@@ -30,7 +30,7 @@ Modes:
 import time
 import sys
 import signal
-import datetime
+import datetime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
 import os
 import multiprocessing as mp
 import gc
@@ -137,7 +137,7 @@ ROLL_SAFETY_FACTOR  = 2.0     # multiplier — accounts for dynamic bounce durin
 # Exponential ramp from CPG paper (Sensors 2019, 19(17), 3705, Eqs. 20-21)
 PHERR_ENGAGE_DEG   = 30.0   # deg — engage governor when max servo phase error exceeds this
 PHERR_RELEASE_DEG  = 20.0   # deg — release governor (hysteresis band prevents toggle)
-PHERR_FLOOR_SCALE  = 0.35   # minimum Hz multiplier at full throttle (35% of max_safe_hz)
+PHERR_FLOOR_SCALE  = 0.45   # minimum Hz multiplier at full throttle (45% of max_safe_hz)
 PHERR_RAMP_WIDTH   = 120.0  # deg — exponential ramp width (gentle near threshold, aggressive at high error)
 PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, escalate to stall/wiggle
 KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
@@ -187,7 +187,7 @@ HOME_POSITIONS = {
 SERVO_LOAD_INDEX = {sid: i for i, sid in enumerate(ALL_SERVOS)}
 
 # Feedback Gains
-KP_PHASE        = 12.0
+KP_PHASE        = 15.0
 STALL_THRESHOLD = 800  # raised from 750 — wet sand+stones reach 700-750 normally; 800 still below 818 hw cutoff
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
 OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
@@ -1171,9 +1171,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Snap caused 100-170° phase error because servos can't teleport. Ramp at
             # KAPPA_GAIT_SWITCH=3.0 converges in ~1.0s with phase error staying below 30°.
             if current_gait_id != prev_gait_id:
-                smooth_duty = t_duty
-                smooth_ff_budget = t_ff_budget
-                # Offsets are NOT snapped — the CPG ramp below handles them gradually
+                # Duty/ff_budget are NOT snapped — the CPG ramp below handles them gradually
+                # (snapping caused ~1s mismatch where duty led offsets, creating visible jerk)
                 gait_switch_ramp_active = True
                 prev_gait_id = current_gait_id
                 # Suppress PhGov during gait-switch ramp
@@ -1183,22 +1182,24 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 pherr_low_scale_start = 0.0
                 pherr_gov_suppress_until = time.monotonic() + 2.0
 
+            # Unified kappa: slower during startup/gait-switch so duty and
+            # offsets converge together (prevents duty leading offsets).
+            if startup_ramp_active:
+                ramp_kappa = KAPPA_STARTUP
+            elif gait_switch_ramp_active:
+                ramp_kappa = KAPPA_GAIT_SWITCH
+            else:
+                ramp_kappa = KAPPA_TRANSITION
+
             # Duty (ε): CPG exponential ramp (Eq. 13 — ε(t) = ε⁺ + (ε⁻−ε⁺)e^(−κΔt))
-            smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, KAPPA_TRANSITION, real_dt)
+            smooth_duty = cpg_exp_ramp(smooth_duty, t_duty, ramp_kappa, real_dt)
             smooth_duty = max(0.01, min(0.99, smooth_duty))  # clamp after ramp — prevents division by near-zero in stance/air speed calc
-            smooth_ff_budget = cpg_exp_ramp(smooth_ff_budget, t_ff_budget, KAPPA_TRANSITION, real_dt)
+            smooth_ff_budget = cpg_exp_ramp(smooth_ff_budget, t_ff_budget, ramp_kappa, real_dt)
 
             # Phase offsets (φ): CPG circular exponential ramp (Eq. 12)
-            # Use slower kappa during startup/gait-switch to prevent phase death spiral
-            if startup_ramp_active:
-                offset_kappa = KAPPA_STARTUP
-            elif gait_switch_ramp_active:
-                offset_kappa = KAPPA_GAIT_SWITCH
-            else:
-                offset_kappa = KAPPA_TRANSITION
             for sid in ALL_SERVOS:
                 smooth_offsets[sid] = cpg_exp_ramp_circular(
-                    smooth_offsets[sid], t_offsets[sid], offset_kappa, real_dt)
+                    smooth_offsets[sid], t_offsets[sid], ramp_kappa, real_dt)
             # Check convergence — all offsets within threshold of targets
             if startup_ramp_active or gait_switch_ramp_active:
                 max_offset_err = max(
@@ -1265,7 +1266,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Layer 4: Brownout prevention -- throttle Hz when battery sags (Fix 153)
             # Ramps max_safe_hz from 100% at BROWNOUT_VOLTAGE_START down to BROWNOUT_SPEED_FLOOR at VOLTAGE_MIN.
             # Reduces servo current draw before shutdown threshold, preventing brownout cascade.
-            # Combined worst case with PhErr: 0.35 * 0.5 = 0.175x nominal, caught by Hz floor below.
+            # Combined worst case with PhErr: 0.45 * 0.5 = 0.225x nominal, caught by Hz floor below.
             if voltage_reading < BROWNOUT_VOLTAGE_START:
                 brownout_scale = max(BROWNOUT_SPEED_FLOOR,
                     BROWNOUT_SPEED_FLOOR + (1.0 - BROWNOUT_SPEED_FLOOR)
@@ -1761,17 +1762,18 @@ if __name__ == "__main__":
     # Big drops (target <= 0.5 or jump > 0.3) still snap instantly
     # because those mean serious terrain and we can't wait.
     TERRAIN_LERP_ALPHA = 0.45  # per-tick blend factor (0 = no change, 1 = instant)
-    CLIFF_BACKUP_DURATION = 8.0       # seconds of forced backward on front cliff before escape
-    OBSTACLE_BACKUP_DURATION = 8.0    # seconds of forced backward when front blocked + both sides NEAR or worse
-    MAX_TURN_BIAS = 0.25              # restored: r=125mm has ample roll clearance headroom
+    # Per-gait backup durations (slower gaits need more time to cover safe distance)
+    # Gait IDs: 0=tripod, 1=wave, 2=quad
+    BACKUP_DURATION = {0: 4.0, 1: 8.0, 2: 6.0}
+    MAX_TURN_BIAS = 0.30              # tighter arcs for obstacle avoidance (was 0.25)
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — same as default 345/15, explicit for pivot clarity
     HEADING_CORRECTION_BIAS = 0.1
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
-    SLOPE_PITCH_DEG = 20      # T3 moderate-slope threshold (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
-    SLOPE_ROLL_DEG = 20       # T3 lateral tilt threshold (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
+    SLOPE_PITCH_DEG = 15      # T3 moderate-slope threshold (0-15 TRIPOD, 15-40 QUAD, >40 WAVE)
+    SLOPE_ROLL_DEG = 15       # T3 lateral tilt threshold (0-15 TRIPOD, 15-40 QUAD, >40 WAVE)
     HEAVY_TERRAIN_LOAD = 400
     LIGHT_TERRAIN_LOAD = 200
     TERRAIN_SUSTAIN_S = 2.0
@@ -2538,7 +2540,7 @@ if __name__ == "__main__":
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                     self.backward_entry_time = time.monotonic()
-                    self.cliff_backup_until = now + CLIFF_BACKUP_DURATION
+                    self.cliff_backup_until = now + BACKUP_DURATION.get(shared_gait_id.value, 4.0)
                     self.obstacle_backup_until = 0.0  # mutual exclusion with obstacle lockout
                 self._transition(NAV_BACKWARD)
                 self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
@@ -2634,10 +2636,11 @@ if __name__ == "__main__":
             # P10: Front DANGER (2+ frames) -- never advance, only pivot or backup
             if self.front_danger_frames >= 2:
                 if left_class >= DIST_NEAR and right_class >= DIST_NEAR:
-                    # Both sides NEAR or DANGER (<40cm) -- boxed in, backup 8s
+                    # Both sides NEAR or DANGER (<40cm) -- boxed in, backup per-gait
                     # Always refresh lockout timer (even if already BACKWARD from P9)
-                    if self.obstacle_backup_until == 0.0 or now + OBSTACLE_BACKUP_DURATION > self.obstacle_backup_until:
-                        self.obstacle_backup_until = now + OBSTACLE_BACKUP_DURATION
+                    _obs_dur = BACKUP_DURATION.get(shared_gait_id.value, 4.0)
+                    if self.obstacle_backup_until == 0.0 or now + _obs_dur > self.obstacle_backup_until:
+                        self.obstacle_backup_until = now + _obs_dur
                     if self.state != NAV_BACKWARD:
                         self.hold_position_count = 0
                         self.backward_entry_time = time.monotonic()
@@ -2924,16 +2927,16 @@ if __name__ == "__main__":
 
             # T8: Hard flat ground — sprint with tripod
             # Dead-band hysteresis 2026-04-04: entry tight, exit loose, + grace.
-            #   entry: pitch<7, roll<8, load<360  (strict — only enter if clearly hard flat)
-            #   exit:  pitch≥9, roll≥10, load≥400 (loose — don't bail on a minor wobble)
+            #   entry: pitch<15, roll<15, load<250  (strict — only enter if clearly hard flat)
+            #   exit:  pitch≥17, roll≥17, load≥280 (loose — don't bail on a minor wobble)
             #   grace: 0.3s on danger (pitch/roll/stall), 0.5s on load-only
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
             t8_entry_sustain = 1.5
             if not self.terrain_is_tripod:
                 # Not in tripod → strict entry gates
-                pitch_entry_ok = abs(pitch_deg) < 20
-                roll_entry_ok  = abs(roll_deg) < 20
-                load_entry_ok  = eff_load < 300
+                pitch_entry_ok = abs(pitch_deg) < 15
+                roll_entry_ok  = abs(roll_deg) < 15
+                load_entry_ok  = eff_load < 250
                 if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
                     if self._light_load_start == 0.0:
                         self._light_load_start = now
@@ -2954,9 +2957,9 @@ if __name__ == "__main__":
                     self._light_load_start = 0.0
             else:
                 # Already in tripod → loose exit gates (dead band)
-                pitch_exit_bad = abs(pitch_deg) >= 22
-                roll_exit_bad  = abs(roll_deg) >= 22
-                load_exit_bad  = eff_load >= 330
+                pitch_exit_bad = abs(pitch_deg) >= 17
+                roll_exit_bad  = abs(roll_deg) >= 17
+                load_exit_bad  = eff_load >= 280
                 danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
                 if danger:
                     # 0.3s grace filters single-tick spikes (e.g. brief 8° pitch on ramp)
@@ -3012,7 +3015,7 @@ if __name__ == "__main__":
                 self._last_gait_change_time = now
                 # 1.0s blend (was 0.5s) -- gives Heart time to reorganize
                 # duty/phase smoothly without a mechanical jerk.
-                self._gait_transition_until = now + 1.0
+                self._gait_transition_until = now + 1.5
 
         def apply_modifiers(self, speed, imu, accel_mag, voltage, angular_rate,
                             load_asymmetry, stale_seconds, roll_deg):
