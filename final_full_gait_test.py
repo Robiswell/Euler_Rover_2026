@@ -109,8 +109,8 @@ MIN_GROUND_CLEARANCE    = 15.0     # mm — minimum safe clearance (restored: r=
 GOVERNOR_CLEARANCE_MARGIN = 5.0    # mm — extra safety buffer in clearance governor (restored: r=125mm has ample headroom)
 FEEDFORWARD_CAP         = 499.0    # STS raw units -- matches STS3215 no-load max (45 RPM = 270 deg/s * 1.85)
 GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
-DEFAULT_IMPACT_START    = 345      # walking stance start angle (30 deg sweep)
-DEFAULT_IMPACT_END      = 15       # walking stance end angle
+DEFAULT_IMPACT_START    = 340      # walking stance start angle (40 deg sweep)
+DEFAULT_IMPACT_END      = 20       # walking stance end angle
 QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep for 28% motor margin at duty=0.70
 QUAD_IMPACT_END         = 30       # quad air sweep = 300 deg (vs 330 default) — STS3215 can track this
 
@@ -1553,7 +1553,7 @@ if __name__ == "__main__":
                                               #     state_self_right_roll and reset to 1 in finally
     shared_turn_bias    = mp.Value('f', 0.0)  # c_float (4B) — atomic on ARMv7; c_double (8B) was non-atomic
     shared_gait_id      = mp.Value('i', 0)
-    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 345/15 = 30° sweep
+    shared_impact_start = mp.Value('i', DEFAULT_IMPACT_START)  # 340/20 = 40° sweep
     shared_impact_end   = mp.Value('i', DEFAULT_IMPACT_END)
     shared_servo_loads  = mp.Array('i', len(ALL_SERVOS))  # Clean 0-5 indexing
     shared_servo_speeds = mp.Array('i', len(ALL_SERVOS))
@@ -1731,7 +1731,7 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 400          # Tripod/Wave cruise — aligned with governor ceiling to reduce clamping
+    CRUISE_SPEED = 350          # Tripod/Wave cruise — matches governor tripod ceiling, eliminates log noise
     QUAD_CRUISE_SPEED = 250     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
     SLOW_SPEED = 180
     BACKWARD_SPEED = 250
@@ -2849,9 +2849,9 @@ if __name__ == "__main__":
 
             prev_gait = self.terrain_gait
 
-            # T1: Steep climb — symmetric narrow sweep (345°/15°)
-            # 30° total sweep, centered on vertical.
-            # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
+            # T1: Steep climb — symmetric narrow sweep (340°/20°)
+            # 40° total sweep, centered on vertical.
+            # Worst angle from vertical = 20° → clearance ~70.5mm (safe).
             # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
             if pitch_deg > 40:  # T1: WAVE above 40° (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
                 if self._steep_up_start == 0.0:
@@ -3639,10 +3639,10 @@ if __name__ == "__main__":
             # Ground clearance derivation (measured dimensions):
             #   h(θ) = LEG_EFFECTIVE_RADIUS × cos(θ)  = 125.0 × cos(θ) mm
             #   clearance(θ) = h(θ) − SHAFT_TO_CHASSIS_BOTTOM = h(θ) − 47 mm
-            #   At 345/15 (30° sweep): clearance at 15° = 125*cos(15°)-47 = 73.7mm
-            #   Air sweep = 330°, governor limits Hz to keep servo within budget
-            tripod_impact_start = DEFAULT_IMPACT_START  # 30° sweep
-            tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
+            #   At 340/20 (40° sweep): clearance at 20° = 125*cos(20°)-47 = 70.5mm
+            #   Air sweep = 320°, governor limits Hz to keep servo within budget
+            tripod_impact_start = DEFAULT_IMPACT_START  # 40° sweep
+            tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 20°: 70.5mm
             tripod_duty = GAITS[0]['duty']  # 0.55
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
             tripod_speed = min(250, max_speed)  # reduced from 350 — governor was clamping 57%, PhErr 69 deg
@@ -3721,10 +3721,10 @@ if __name__ == "__main__":
             # === TEST: Wave phase only ===
             # Clearance analysis:
             #   Wave duty=0.75 → air phase is 25% of cycle → higher ff demand.
-            #   345/15 (30° sweep): clearance at 15° = 73.7mm.
+            #   340/20 (40° sweep): clearance at 20° = 70.5mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
-            wave_impact_start = DEFAULT_IMPACT_START  # 30° sweep
-            wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 15°: 73.7mm
+            wave_impact_start = DEFAULT_IMPACT_START  # 40° sweep
+            wave_impact_end   = DEFAULT_IMPACT_END    # clearance at 20°: 70.5mm
             wave_duty = GAITS[1]['duty']  # 0.75
             max_hz_w, max_speed_w = compute_max_safe_speed(wave_impact_start, wave_impact_end, wave_duty)
             max_clr_hz_w = compute_max_clearance_hz(wave_impact_start, wave_impact_end, wave_duty,
