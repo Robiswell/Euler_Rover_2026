@@ -812,7 +812,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
         pass
 
     master_time_L, master_time_R = 0.0, 0.0
-    target_dt      = 1.0 / 50.0
+    target_dt      = 1.0 / 40.0
     last_loop_time = time.perf_counter()
 
     # State Smoothing (V69)
@@ -891,19 +891,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 else:
                     actual_phases[sid] = last_actual_phases[sid]
                     servo_comm_fails[sid] += 1
-                    if servo_comm_fails[sid] == 50:
+                    if servo_comm_fails[sid] == 40:
                         print(f"[heart] servo {sid} unresponsive for 1s — zeroing speed")
                         servo_disabled[sid] = True
                         current_per_servo[sid] = 0  # S3: don't let phantom current pollute governor
 
-            # Bus disconnect detection — if no servo responds for 10 consecutive
-            # ticks (200ms at 50Hz), the USB link is dead.  STS3215 servos in
+            # Bus disconnect detection — if no servo responds for 8 consecutive
+            # ticks (200ms at 40Hz), the USB link is dead.  STS3215 servos in
             # velocity mode keep spinning at last speed, so detect fast.
             if pos_read_count == 0:
                 comm_fail_streak += 1
             else:
                 comm_fail_streak = 0
-            if comm_fail_streak >= 10:
+            if comm_fail_streak >= 8:
                 print("[heart] serial bus error — no servo responding for 200ms")
                 # Tier 3d: log bus disconnect to file (was stdout only)
                 try:
@@ -1437,9 +1437,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if gov_active:
                 gov_clamp_count += 1
 
-            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz
+            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz (every 8th tick at 40Hz)
             h5_counter += 1
-            if VERBOSE_TELEMETRY and h5_counter % 10 == 0:
+            if VERBOSE_TELEMETRY and h5_counter % 8 == 0:
                 t_off = time.monotonic() - heart_start_mono
                 pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
                 spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
@@ -1461,7 +1461,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 pass
 
             # Loop overrun detection
-            if prev_loop_ms > 18.0:
+            if prev_loop_ms > 23.0:
                 overrun_streak += 1
                 ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")

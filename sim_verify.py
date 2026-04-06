@@ -17,7 +17,7 @@ GAITS = {
     1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
     2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
-real_dt           = 0.02
+real_dt           = 0.025
 
 # sync: final_full_gait_test.py lines 159-178
 def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
@@ -556,7 +556,7 @@ def check_V18_pherr_governor():
       (E) stay inactive at 25 deg when governor was never engaged
           — error below engage threshold must not engage from cold start,
       (F) flag a stuck-timeout escalation after error stays at PHERR_FLOOR_SCALE
-          conditions for longer than PHERR_STUCK_TIMEOUT (5 s) at 50 Hz.
+          conditions for longer than PHERR_STUCK_TIMEOUT (5 s) at 40 Hz.
 
     Failure means:
       (A-fail) Gait runs at full speed immediately after a gait switch while phase
@@ -575,7 +575,7 @@ def check_V18_pherr_governor():
                instead of escalating to stall recovery.
 
     Known false positive risk: none. Pure state machine with no timing jitter.
-    PHERR_STUCK_TIMEOUT uses real_dt=0.02 s per tick, so 5 s = 250 ticks exactly.
+    PHERR_STUCK_TIMEOUT uses real_dt=0.025 s per tick, so 5 s = 200 ticks exactly.
     """
     # Governor constants — sync with final_full_gait_test.py
     PHERR_ENGAGE_DEG    = 30.0   # governor activates above this error
@@ -583,7 +583,7 @@ def check_V18_pherr_governor():
     PHERR_FLOOR_SCALE   = 0.45   # minimum throttle scale when governor active
     PHERR_RAMP_WIDTH    = 120.0  # deg range over which scale ramps from 1.0 to floor
     PHERR_STUCK_TIMEOUT = 5.0    # seconds at floor before escalating to stall
-    TICKS_PER_SEC       = 50     # Heart runs at 50 Hz (real_dt = 0.02 s)
+    TICKS_PER_SEC       = 40     # Heart runs at 40 Hz (real_dt = 0.025 s)
 
     failures = []
 
@@ -674,12 +674,12 @@ def check_V18_pherr_governor():
 
     # --- Sub-check F: stuck-at-floor for > 5 s must flag escalation ---
     # Simulate the stuck-timeout counter: increment each tick while ph_scale == PHERR_FLOOR_SCALE,
-    # reset when scale rises above floor. After PHERR_STUCK_TIMEOUT seconds (250 ticks at 50 Hz)
+    # reset when scale rises above floor. After PHERR_STUCK_TIMEOUT seconds (200 ticks at 40 Hz)
     # the escalation flag must be set.
     #
     # The stuck condition is: governor active AND error high enough to pin scale at floor.
     # Use error = 200 deg (well above ramp width, guaranteed floor).
-    STUCK_TIMEOUT_TICKS = int(PHERR_STUCK_TIMEOUT * TICKS_PER_SEC)  # 250 ticks
+    STUCK_TIMEOUT_TICKS = int(PHERR_STUCK_TIMEOUT * TICKS_PER_SEC)  # 200 ticks
 
     stuck_ticks = 0
     escalated   = False
@@ -801,7 +801,7 @@ if sim.v7_fail and wt and wt[3] > 150:
     delta = abs(wt[2]-wt[1]); thr = 0.01*wt[2]
     print(f"  After 150 frames: residual = {(1.0 - duty_lr)**150 * delta:.5f} vs threshold {thr:.5f}")
     print(f"  Frames to converge: {wt[3]}")
-    print(f"  duty_lerp_rate = 4.0*real_dt = 0.08 (matches speed lerp rate)")
+    print(f"  duty_lerp_rate = 4.0*real_dt = 0.10 (matches speed lerp rate)")
 
 print()
 graded = [sim.v1_fail,sim.v2_fail,sim.v4_fail,sim.v5_fail,sim.v6_fail,sim.v7_fail,
