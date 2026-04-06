@@ -26,9 +26,9 @@
       GyroX,  GyroY,  GyroZ,                      (rad/s)
       UpsideDown                                   (0=normal, 1=inverted)
 
-    UpsideDown detection (IMU mounted upside-down in chassis):
+    UpsideDown detection (IMU mounted face-up in chassis):
       gravity_z > 5.0 -> rover is right-side up   -> UpsideDown = 0
-      gravity_z <= 5.0 -> rover is physically inverted -> UpsideDown = 1
+      gravity_z <= 0   -> rover is physically inverted -> UpsideDown = 1
 
     Wiring notes:
       - HC-SR04: share GND with Arduino; if MCU is 3.3 V add a voltage divider
@@ -51,8 +51,8 @@
       FIX 9:  Timestamp captured after measurements, not before
       FIX 10: Sensor names moved to PROGMEM (~130 bytes SRAM saved)
       FIX 11: Switch from Rotation Vector to Game Rotation Vector (boot-relative,
-              no magnetometer) -- avoids 180 deg quaternion flip from upside-down IMU
-              mounting that causes P1 NAV_STOP_SAFE to fire immediately.
+              no magnetometer) -- avoids absolute orientation encoding that
+              caused P1 NAV_STOP_SAFE to fire immediately on some boot poses.
               getQuat() replaced with getQuatI/J/K/Real() individual getters
               (shared rawQuat fields serve whichever RV type is enabled).
       FIX 12: Blind-zone false-VERY-FAR fix -- when step-D times out (echo HIGH
@@ -397,7 +397,7 @@
     }
 
     // FIX 14: UpsideDown detection with 2-consecutive-reading hysteresis
-    // Gravity Z for upside-down-mounted IMU:
+    // Gravity Z for detecting physical inversion:
     //   Right-side up: gravity_z > +5 (gravity points "up" in IMU frame)
     //   Inverted:      gravity_z <= 0 (gravity pointing wrong way)
     if (last_gravity_z <= 0.0f) {
