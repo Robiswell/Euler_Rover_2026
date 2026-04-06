@@ -1770,8 +1770,8 @@ if __name__ == "__main__":
     HEADING_CORRECTION_BIAS = 0.1
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
-    SLOPE_PITCH_DEG = 15      # T3 moderate-slope threshold (was 12; raised to filter gait-transition wobble, real course slopes are 20-30°)
-    SLOPE_ROLL_DEG = 20       # T3 lateral tilt threshold (was 15; raised to filter gait-transition wobble + HOME bias)
+    SLOPE_PITCH_DEG = 20      # T3 moderate-slope threshold (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
+    SLOPE_ROLL_DEG = 20       # T3 lateral tilt threshold (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
     HEAVY_TERRAIN_LOAD = 400
     LIGHT_TERRAIN_LOAD = 200
     TERRAIN_SUSTAIN_S = 2.0
@@ -2142,10 +2142,10 @@ if __name__ == "__main__":
         # Pitch and roll from quaternion
         sinp = 2.0 * (w * y - z * x)
         sinp = max(-1.0, min(1.0, sinp))
-        pitch_rad = math.asin(sinp)
+        roll_rad = math.asin(sinp)
 
-        roll_rad = math.atan2(2.0 * (w * x + y * z),
-                              1.0 - 2.0 * (x * x + y * y))
+        pitch_rad = math.atan2(2.0 * (w * x + y * z),
+                               1.0 - 2.0 * (x * x + y * y))
 
         yaw_rad = math.atan2(2.0 * (w * z + x * y),
                              1.0 - 2.0 * (y * y + z * z))
@@ -2850,7 +2850,7 @@ if __name__ == "__main__":
             # 30° total sweep, centered on vertical.
             # Worst angle from vertical = 15° → clearance ~73.7mm (safe).
             # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
-            if pitch_deg > 30:  # T1: WAVE above 30° (0-15 TRIPOD, 15-30 QUAD, >30 WAVE)
+            if pitch_deg > 40:  # T1: WAVE above 40° (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
                 if (now - self._steep_up_start) >= 1.0:
@@ -2865,7 +2865,7 @@ if __name__ == "__main__":
                 self._steep_up_start = 0.0
 
             # T2: Steep descent
-            if pitch_deg < -30:  # T2: WAVE below -30° (0-15 TRIPOD, 15-30 QUAD, >30 WAVE)
+            if pitch_deg < -40:  # T2: WAVE below -40° (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
                 if self._steep_down_start == 0.0:
                     self._steep_down_start = now
                 if (now - self._steep_down_start) >= 1.0:
@@ -2905,71 +2905,22 @@ if __name__ == "__main__":
                 self._apply_gait_transition(prev_gait)
                 return
 
-            # T4: Heavy terrain (soft sand)
-            # U1: high ground variance corroborates sand — lower the load threshold
-            heavy_load_thresh = HEAVY_TERRAIN_LOAD - 50 if self.ground_variance > 5.0 else HEAVY_TERRAIN_LOAD  # 5.0 cm² = sand/gravel
-            if eff_load > heavy_load_thresh:
+            # T4: Heavy terrain (load-based only, simplified 2026-04-05)
+            # load > 600 → WAVE (max ground contact). 350-600 → QUAD.
+            # Removed T4b/T5/T6/T7 — classifier uses only pitch, roll, load.
+            if eff_load > 600:
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
                 if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
-                    # Load >700 → WAVE (crushing load, max ground contact). 500-700 → QUAD.
-                    if eff_load > 700:
-                        self.terrain_gait = 1  # wave
-                        self.terrain_mult_target = 0.6
-                    else:
-                        self.terrain_gait = 2  # quadruped
-                        self.terrain_mult_target = 0.80
+                    self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
+                    self.terrain_mult_target = 0.6
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
             else:
                 self._heavy_load_start = 0.0
-
-            # T4b: Sinkage detection (U3) — high load + low forward acceleration
-            if eff_load > SINKING_LOAD_THRESH and abs(forward_accel) < SINKING_ACCEL_THRESH:
-                if self._sinking_start == 0.0:
-                    self._sinking_start = now
-                if (now - self._sinking_start) >= TERRAIN_SUSTAIN_S:
-                    self.terrain_gait = 1  # wave — max ground contact
-                    self.terrain_impact_start = DEFAULT_IMPACT_START
-                    self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.6  # T4b: aggressive slowdown for sinkage
-                    self.terrain_is_tripod = False
-                    self._apply_gait_transition(prev_gait)
-                    return
-            else:
-                self._sinking_start = 0.0
-
-            # T5: Excessive wobble
-            if angular_rate > 0.3:
-                self.terrain_impact_start = DEFAULT_IMPACT_START
-                self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.8   # T5: raised from 0.7
-                self.terrain_is_tripod = False
-                return  # keep current gait
-
-            # T6: Rocky terrain (flicker + moderate load)
-            if flicker_count >= FLICKER_COUNT_THRESHOLD and avg_load > 300 and load_variance > ROCKY_VARIANCE_THRESH:
-                self.terrain_impact_start = DEFAULT_IMPACT_START
-                self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.9   # T6: raised from 0.8
-                self.terrain_is_tripod = False
-                return  # keep current gait
-
-            # T7: High vibration
-            if accel_mag > 14:
-                if self._high_vibe_start == 0.0:
-                    self._high_vibe_start = now
-                if (now - self._high_vibe_start) >= 0.5:
-                    self.terrain_impact_start = DEFAULT_IMPACT_START
-                    self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.9   # T7: raised from 0.8
-                    self.terrain_is_tripod = False
-                    return  # keep current gait
-            else:
-                self._high_vibe_start = 0.0
 
             # T8: Hard flat ground — sprint with tripod
             # Dead-band hysteresis 2026-04-04: entry tight, exit loose, + grace.
@@ -2980,8 +2931,8 @@ if __name__ == "__main__":
             t8_entry_sustain = 1.5
             if not self.terrain_is_tripod:
                 # Not in tripod → strict entry gates
-                pitch_entry_ok = abs(pitch_deg) < 15
-                roll_entry_ok  = abs(roll_deg) < 10
+                pitch_entry_ok = abs(pitch_deg) < 20
+                roll_entry_ok  = abs(roll_deg) < 20
                 load_entry_ok  = eff_load < 300
                 if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
                     if self._light_load_start == 0.0:
@@ -3003,8 +2954,8 @@ if __name__ == "__main__":
                     self._light_load_start = 0.0
             else:
                 # Already in tripod → loose exit gates (dead band)
-                pitch_exit_bad = abs(pitch_deg) >= 16
-                roll_exit_bad  = abs(roll_deg) >= 11
+                pitch_exit_bad = abs(pitch_deg) >= 22
+                roll_exit_bad  = abs(roll_deg) >= 22
                 load_exit_bad  = eff_load >= 330
                 danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
                 if danger:
@@ -3574,7 +3525,8 @@ if __name__ == "__main__":
                                   f"roll={imu['roll_deg']:+5.1f}°  "
                                   f"upright={imu['upright_quality']:.2f}  "
                                   f"accel={imu['accel_mag']:.1f}  "
-                                  f"gyro={imu['angular_rate']:.2f}")
+                                  f"gyro={imu['angular_rate']:.2f}  "
+                                  f"upside_down={frame.get('upside_down', 0)}")
                             print(f"  load_avg={avg_load:.0f}  load_asym={load_asymmetry:.0f}  "
                                   f"voltage={voltage:.1f}V  stale={stale:.2f}s")
                             print(f"  step={step_name}")
@@ -4031,7 +3983,8 @@ if __name__ == "__main__":
                               f"yaw={imu['yaw_deg']:+6.1f}°  "
                               f"upright={imu['upright_quality']:.2f}  "
                               f"accel={imu['accel_mag']:.1f}  "
-                              f"gyro={imu['angular_rate']:.2f}")
+                              f"gyro={imu['angular_rate']:.2f}  "
+                              f"upside_down={frame.get('upside_down', 0)}")
                         # --- Rover shape with all 8 ultrasonics (servo loads fake in test-nav) ---
                         _fdl = frame.get('FDL', 0); _fcf = frame.get('FCF', 0)
                         _fcd = frame.get('FCD', 0); _fdr = frame.get('FDR', 0)
