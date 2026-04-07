@@ -1937,12 +1937,23 @@ if __name__ == "__main__":
             with self._lock:
                 return self._latest
 
+        def get_latest_with_time(self):
+            """Return (frame, frame_time) atomically under one lock."""
+            with self._lock:
+                return self._latest, self._last_frame_time
+
         @property
         def healthy(self):
             """True if a valid frame was received within the last 300ms."""
             with self._lock:
                 t = self._last_frame_time
             return (time.monotonic() - t) < 0.3
+
+        @property
+        def frame_time(self):
+            """Monotonic timestamp of the latest frame (0.0 if none)."""
+            with self._lock:
+                return self._last_frame_time
 
         def stale_seconds(self):
             """Seconds since last valid frame. Returns inf if never received."""
@@ -2083,6 +2094,14 @@ if __name__ == "__main__":
             counter_attr = "_consecutive_front" if is_front else "_consecutive_rear"
             count = getattr(self, counter_attr)
 
+            # Fix 136: None guard must come before numeric comparisons
+            if reading is None:
+                # Defensive: possible cliff, increment
+                setattr(self, counter_attr, count + 1)
+                if imu_falling:
+                    return True
+                return count + 1 >= CLIFF_CONFIRM_FRAMES
+
             if reading == -1:
                 # Ground in blind zone (very close) — NOT a cliff. Reset.
                 setattr(self, counter_attr, 0)
@@ -2092,13 +2111,6 @@ if __name__ == "__main__":
             if reading >= 300.0:
                 setattr(self, counter_attr, 0)
                 return False
-
-            if reading is None:
-                # Defensive: possible cliff, increment
-                setattr(self, counter_attr, count + 1)
-                if imu_falling:
-                    return True
-                return count + 1 >= CLIFF_CONFIRM_FRAMES
 
             # Update ground EMA with valid low readings (runs during warmup so baseline converges)
             if 0 < reading <= 40:
@@ -2194,6 +2206,12 @@ if __name__ == "__main__":
         # Replace -1 and None with 25 cm (effective distance for blind zone)
         fdl_eff = 25.0 if (fdl is None or fdl == -1) else fdl
         fdr_eff = 25.0 if (fdr is None or fdr == -1) else fdr
+        # Fix 137: FAULT (-2) means no data — use the other sensor's value
+        # so the difference is zero (neutral).  If both faulted, return 0.
+        if fdl == -2:
+            fdl_eff = fdr_eff
+        if fdr == -2:
+            fdr_eff = fdl_eff
         return math.tanh((fdl_eff - fdr_eff) / 50.0)
 
     def compute_battery_mult(voltage_value):
@@ -3349,6 +3367,16 @@ if __name__ == "__main__":
 
                         # === MAIN NAV LOOP (~10 Hz) ===
                         speed = 0  # init for S2 speed_error on first iteration (set by nav.update() each tick)
+                        # Fix 138: frame de-dup — skip sensor processing when Arduino hasn't sent a new frame
+                        _last_processed_ft = 0.0
+                        _cached_front_class, _cached_left_class, _cached_right_class = 0, 0, 0
+                        _cached_front_cliff, _cached_rear_cliff = False, False
+                        _cached_turn_intensity = 0.0
+                        _cached_flicker_count = 0
+                        _cached_imu = {"pitch_deg": 0.0, "roll_deg": 0.0, "yaw_deg": 0.0,
+                                        "pitch_rad": 0.0, "roll_rad": 0.0, "yaw_rad": 0.0,
+                                        "accel_mag": 9.81, "angular_rate": 0.0,
+                                        "upright_quality": 1.0, "forward_accel": 0.0}
                         while is_running.value and not nav.finished:
                             loop_start = time.monotonic()
 
@@ -3376,44 +3404,53 @@ if __name__ == "__main__":
                                 break
 
                             # --- Get latest sensor frame ---
-                            frame = reader.get_latest()
+                            frame, _ft = reader.get_latest_with_time()
                             if frame is None:
                                 time.sleep(0.1)
                                 continue
 
-                            # --- Sensor processing ---
-                            imu = compute_imu(frame)
-                            # Save cliff sensor readings with median filter only (no EMA).
-                            # Median rejects single-frame scatter spikes (e.g., 164cm on 34cm floor)
-                            # while adding only 1 frame of latency. Cliff detector's own EMA +
-                            # CLIFF_CONFIRM_FRAMES=8 provide the remaining noise rejection.
-                            raw_fcd = frame.get("FCD")
-                            raw_rcd = frame.get("RCD")
-                            if raw_fcd is not None and raw_fcd > 0:
-                                cliff_median_fcd.append(raw_fcd)
-                                raw_fcd = sorted(cliff_median_fcd)[len(cliff_median_fcd) // 2] if len(cliff_median_fcd) >= 3 else raw_fcd
+                            # --- Sensor processing (only on new Arduino frames) ---
+                            _new_frame = (_ft != _last_processed_ft)
+                            if _new_frame:
+                                _last_processed_ft = _ft
+                                imu = compute_imu(frame)
+                                raw_fcd = frame.get("FCD")
+                                raw_rcd = frame.get("RCD")
+                                if raw_fcd is not None and raw_fcd > 0:
+                                    cliff_median_fcd.append(raw_fcd)
+                                    raw_fcd = sorted(cliff_median_fcd)[len(cliff_median_fcd) // 2] if len(cliff_median_fcd) >= 3 else raw_fcd
+                                else:
+                                    cliff_median_fcd.clear()
+                                if raw_rcd is not None and raw_rcd > 0:
+                                    cliff_median_rcd.append(raw_rcd)
+                                    raw_rcd = sorted(cliff_median_rcd)[len(cliff_median_rcd) // 2] if len(cliff_median_rcd) >= 3 else raw_rcd
+                                else:
+                                    cliff_median_rcd.clear()
+                                nav.update_ground_variance(frame)
+                                _sensor_keys = NAV_SENSOR_KEYS
+                                frame = dict(frame)
+                                for _si, _sk in enumerate(_sensor_keys):
+                                    frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
+                                front_class, left_class, right_class = classify_sectors_voted(frame)
+                                front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd,
+                                                                        pitch_deg=imu.get("pitch_deg", 0.0),
+                                                                        accel_mag=imu.get("accel_mag", 9.81),
+                                                                        angular_rate=imu.get("angular_rate", 0.0))
+                                turn_intensity = compute_turn_intensity(frame)
+                                flicker_count = flicker.update(front_class)
+                                # Cache for reuse on duplicate frames
+                                _cached_imu = imu
+                                _cached_front_class, _cached_left_class, _cached_right_class = front_class, left_class, right_class
+                                _cached_front_cliff, _cached_rear_cliff = front_cliff, rear_cliff
+                                _cached_turn_intensity = turn_intensity
+                                _cached_flicker_count = flicker_count
                             else:
-                                cliff_median_fcd.clear()
-                            if raw_rcd is not None and raw_rcd > 0:
-                                cliff_median_rcd.append(raw_rcd)
-                                raw_rcd = sorted(cliff_median_rcd)[len(cliff_median_rcd) // 2] if len(cliff_median_rcd) >= 3 else raw_rcd
-                            else:
-                                cliff_median_rcd.clear()
-                            # U1: update ground variance BEFORE smoothing (uses raw readings)
-                            nav.update_ground_variance(frame)
-                            # EMA smooth all 8 ultrasonic readings before classification
-                            # (-1 and None pass through unmodified; alpha=0.3)
-                            _sensor_keys = NAV_SENSOR_KEYS
-                            frame = dict(frame)  # shallow copy — do not mutate shared reader state
-                            for _si, _sk in enumerate(_sensor_keys):
-                                frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
-                            front_class, left_class, right_class = classify_sectors_voted(frame)
-                            front_cliff, rear_cliff = cliff.update(raw_fcd, raw_rcd,
-                                                                    pitch_deg=imu.get("pitch_deg", 0.0),
-                                                                    accel_mag=imu.get("accel_mag", 9.81),
-                                                                    angular_rate=imu.get("angular_rate", 0.0))
-                            turn_intensity = compute_turn_intensity(frame)
-                            flicker_count = flicker.update(front_class)
+                                # Reuse cached sensor results — still run FSM/terrain below
+                                imu = _cached_imu
+                                front_class, left_class, right_class = _cached_front_class, _cached_left_class, _cached_right_class
+                                front_cliff, rear_cliff = _cached_front_cliff, _cached_rear_cliff
+                                turn_intensity = _cached_turn_intensity
+                                flicker_count = _cached_flicker_count
 
                             # [BS] verbose telemetry: sensor snapshot at 2Hz (every 5th nav tick)
                             bs_counter += 1
@@ -3902,6 +3939,8 @@ if __name__ == "__main__":
                 nav = NavStateMachine()
                 cliff_det = CliffDetector()
                 flicker = FlickerTracker()
+                cliff_median_fcd = collections.deque(maxlen=3)
+                cliff_median_rcd = collections.deque(maxlen=3)
                 SEVERITY_LABELS = {0: "CLEAR", 1: "CAUTION", 2: "NEAR", 3: "DANGER"}
                 GAIT_LABELS = {0: "TRIPOD", 1: "WAVE", 2: "QUAD"}
                 prev_state_name = "FORWARD"
@@ -3923,11 +3962,30 @@ if __name__ == "__main__":
                             print(f"[{i:02d}] no frame (stale={reader.stale_seconds():.2f}s)")
                             time.sleep(0.2)
                             continue
-                        # --- Sensor processing (identical to competition loop) ---
+                        # --- Sensor processing (matched to competition loop) ---
                         imu = compute_imu(frame)
+                        # Cliff median filter on raw FCD/RCD (same as competition loop)
+                        raw_fcd = frame.get("FCD")
+                        raw_rcd = frame.get("RCD")
+                        if raw_fcd is not None and raw_fcd > 0:
+                            cliff_median_fcd.append(raw_fcd)
+                            raw_fcd = sorted(cliff_median_fcd)[len(cliff_median_fcd) // 2] if len(cliff_median_fcd) >= 3 else raw_fcd
+                        else:
+                            cliff_median_fcd.clear()
+                        if raw_rcd is not None and raw_rcd > 0:
+                            cliff_median_rcd.append(raw_rcd)
+                            raw_rcd = sorted(cliff_median_rcd)[len(cliff_median_rcd) // 2] if len(cliff_median_rcd) >= 3 else raw_rcd
+                        else:
+                            cliff_median_rcd.clear()
+                        # Ground variance on raw frame (before smoothing)
+                        nav.update_ground_variance(frame)
+                        # EMA smooth all 8 ultrasonic readings before classification
+                        frame = dict(frame)
+                        for _si, _sk in enumerate(NAV_SENSOR_KEYS):
+                            frame[_sk] = nav.smooth_sensor(_si, frame[_sk])
                         front_cls, left_cls, right_cls = classify_sectors_voted(frame)
                         front_cliff, rear_cliff = cliff_det.update(
-                            frame["FCD"], frame["RCD"],
+                            raw_fcd, raw_rcd,
                             pitch_deg=imu.get("pitch_deg", 0.0),
                             accel_mag=imu.get("accel_mag", 9.81),
                             angular_rate=imu.get("angular_rate", 0.0))

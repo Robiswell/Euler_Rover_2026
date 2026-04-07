@@ -77,6 +77,8 @@
       FIX 16: Wire.clearWireTimeoutFlag() in setup and IMU reinit.
       FIX 17: FIX 12a drain uses NEAR_RECHECK_US (not 40 ms) + pre-check for
               echo still HIGH before retrigger.
+      FIX 18: Double-ping echo timeout (break) fell through to distance calc,
+              producing false 34 cm readings.  Changed break -> return 300.0f.
   */
 
   #include <Arduino.h>
@@ -249,7 +251,7 @@
         // Echo detected on second ping -- measure its duration.
         unsigned long rise2 = micros();
         while (digitalRead(echo) == HIGH) {
-          if (micros() - rise2 > NEAR_RECHECK_US) break;
+          if (micros() - rise2 > NEAR_RECHECK_US) return 300.0f;  // FIX 18: echo still HIGH after recheck -> far, not 34 cm
         }
         unsigned long dur2 = micros() - rise2;
         durations_us[idx] = (long)dur2;
