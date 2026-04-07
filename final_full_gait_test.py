@@ -4,7 +4,7 @@ Hexapod rover kinematics - STS3215 servos, Raspberry Pi 3B+
 
 Two processes:
   Brain  - mission sequencer, runs gait phases and recovery behaviors
-  Heart  - 50Hz kinematics loop, Buehler clock math + LERP smoothing
+  Heart  - 35Hz kinematics loop, Buehler clock math + LERP smoothing
 
 Hardware: 6x STS3215 12V servos on /dev/ttyUSB1 @ 1Mbaud
 No software angle offsets - clearance is managed physically.
@@ -236,7 +236,7 @@ GAITS = {
 # -----------------------------------------------------------------
 # Exponential ramp rate κ for smooth gait transitions.
 # Controls convergence speed of duty (ε) and phase offset (φ) ramps.
-# κ·dt ≈ 0.16 at 50 Hz → 95% settled in ~0.6 s (paper recommends 0.5–1.0 s).
+# κ·dt ≈ 0.16 at 35 Hz → 95% settled in ~0.6 s (paper recommends 0.5–1.0 s).
 KAPPA_TRANSITION = 8.0  # 1/s — exponential decay rate for φ/ε ramps
 
 # Adjacent-leg pairs: no two adjacent legs may be in swing (air) simultaneously.
@@ -518,7 +518,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 shared_impact_start, shared_impact_end, shared_servo_loads, shared_servo_speeds,
                 shared_heartbeat, shared_stall_override, shared_roll_mode, shared_voltage, is_running):
     """
-    50Hz kinematics loop. Runs as a separate process.
+    35Hz kinematics loop. Runs as a separate process.
     GroupSyncRead for position and load every tick. Temp/voltage/current
     rotate one servo per tick to avoid unnecessary bus traffic.
     """
@@ -593,7 +593,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     cmd_sock.setblocking(False)
     last_log_time  = 0
 
-    # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 50Hz loop)
+    # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 35Hz loop)
     h5_buffer  = []       # buffered [H5] lines, drained at 1Hz with log_telemetry
     h5_counter = 0        # tick counter for 5Hz decimation
     cmd_speeds     = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
@@ -812,7 +812,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
         pass
 
     master_time_L, master_time_R = 0.0, 0.0
-    target_dt      = 1.0 / 40.0
+    target_dt      = 1.0 / 35.0
     last_loop_time = time.perf_counter()
 
     # State Smoothing (V69)
@@ -891,19 +891,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 else:
                     actual_phases[sid] = last_actual_phases[sid]
                     servo_comm_fails[sid] += 1
-                    if servo_comm_fails[sid] == 40:
+                    if servo_comm_fails[sid] == 35:
                         print(f"[heart] servo {sid} unresponsive for 1s — zeroing speed")
                         servo_disabled[sid] = True
                         current_per_servo[sid] = 0  # S3: don't let phantom current pollute governor
 
             # Bus disconnect detection — if no servo responds for 8 consecutive
-            # ticks (200ms at 40Hz), the USB link is dead.  STS3215 servos in
+            # ticks (200ms at 35Hz), the USB link is dead.  STS3215 servos in
             # velocity mode keep spinning at last speed, so detect fast.
             if pos_read_count == 0:
                 comm_fail_streak += 1
             else:
                 comm_fail_streak = 0
-            if comm_fail_streak >= 8:
+            if comm_fail_streak >= 7:
                 print("[heart] serial bus error — no servo responding for 200ms")
                 # Tier 3d: log bus disconnect to file (was stdout only)
                 try:
@@ -917,15 +917,17 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 is_running.value = False
                 break
 
-            # Telemetry read - rotate one servo per tick for full telemetry,
-            # read all servos for load (needed for stall detection every tick)
-            gsread_load.txRxPacket()
+            # Telemetry read - rotate one servo per tick for full telemetry.
+            # Load read every 2nd tick to save ~2-3ms serial bus time.
+            # shared_servo_loads retains previous frame values on skip ticks.
+            if shared_heartbeat.value % 2 == 0:
+                gsread_load.txRxPacket()
+                for sid in ALL_SERVOS:
+                    if gsread_load.isAvailable(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD):
+                        load  = gsread_load.getData(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD)
+                        l_mag = load & 0x3FF
+                        shared_servo_loads[SERVO_LOAD_INDEX[sid]] = l_mag
             stall_active = not shared_stall_override.value
-            for sid in ALL_SERVOS:
-                if gsread_load.isAvailable(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD):
-                    load  = gsread_load.getData(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD)
-                    l_mag = load & 0x3FF
-                    shared_servo_loads[SERVO_LOAD_INDEX[sid]] = l_mag
 
             # S2: Read present speed each tick
             gsread_speed.txRxPacket()
@@ -941,7 +943,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         # Exit: counter must fall to 0 before stall is cleared.
                         # During exit, a new spike increments the counter back up —
                         # stall re-latches immediately when counter hits 3 again.
-                        if l_mag > STALL_THRESHOLD:
+                        sid_load = shared_servo_loads[SERVO_LOAD_INDEX[sid]]
+                        if sid_load > STALL_THRESHOLD:
                             stall_counters[sid] = min(stall_counters[sid] + 1, 3)
                         else:
                             stall_counters[sid] = max(0, stall_counters[sid] - 1)
@@ -952,7 +955,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                             is_stalled[sid] = False
                         # counter between 1-2: maintain current stall state (no change)
                         if is_stalled[sid] != prev_stalled:
-                            log_stall_event(sid, is_stalled[sid], l_mag)
+                            log_stall_event(sid, is_stalled[sid], sid_load)
                             if is_stalled[sid]:
                                 stall_entry_time[sid] = time.perf_counter()
                             else:
@@ -1437,9 +1440,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if gov_active:
                 gov_clamp_count += 1
 
-            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz (every 8th tick at 40Hz)
+            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz (every 7th tick at 35Hz)
             h5_counter += 1
-            if VERBOSE_TELEMETRY and h5_counter % 8 == 0:
+            if VERBOSE_TELEMETRY and h5_counter % 7 == 0:
                 t_off = time.monotonic() - heart_start_mono
                 pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
                 spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
@@ -1461,7 +1464,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 pass
 
             # Loop overrun detection
-            if prev_loop_ms > 23.0:
+            if prev_loop_ms > 25.7:
                 overrun_streak += 1
                 ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
@@ -1648,7 +1651,7 @@ if __name__ == "__main__":
         set_gait_state(impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="wiggle_window_reset")
 
         # Phase 4 zeros speed before calling this, so we own the speed here
-        set_gait_state(speed=350, step_name="wiggle_engage")
+        set_gait_state(speed=180, step_name="wiggle_engage")
 
         end_time    = time.time() + duration
         try:
@@ -1731,10 +1734,10 @@ if __name__ == "__main__":
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
-    CRUISE_SPEED = 350          # Tripod/Wave cruise — matches governor tripod ceiling, eliminates log noise
-    QUAD_CRUISE_SPEED = 250     # Quad-specific cruise — keeps phase error below 29.9 deg overlap margin
-    SLOW_SPEED = 180
-    BACKWARD_SPEED = 250
+    CRUISE_SPEED = 180          # Tripod/Wave cruise — lowered to STS3215 loaded capability (~250 deg/s max)
+    QUAD_CRUISE_SPEED = 150     # Quad-specific cruise — lowered to reduce 87 deg avg phase error
+    SLOW_SPEED = 150
+    BACKWARD_SPEED = 150
     BACKWARD_MIN_DWELL = 0.8          # seconds in BACKWARD before allowing pivot escalation
     REAR_UNSAFE_DEBOUNCE = 4          # C2: consecutive rear-unsafe frames before declaring truly unsafe
     LOAD_WINDOW_SIZE = 25
@@ -3164,7 +3167,7 @@ if __name__ == "__main__":
     try:
         print("[brain] waiting for heart...")
         # Use != 0 sentinel rather than < 50 threshold: a signed 32-bit counter
-        # overflows to negative after ~497 days at 50 Hz, making the < 50 check
+        # overflows to negative after ~497 days at 35 Hz, making the < 50 check
         # pass immediately on the next boot and starting the mission before Heart
         # has actually initialised.  Any nonzero value means Heart has ticked at
         # least once — sufficient proof of life for the boot gate.
@@ -3645,7 +3648,7 @@ if __name__ == "__main__":
             tripod_impact_end   = DEFAULT_IMPACT_END    # clearance at 20°: 70.5mm
             tripod_duty = GAITS[0]['duty']  # 0.55
             max_hz, max_speed = compute_max_safe_speed(tripod_impact_start, tripod_impact_end, tripod_duty)
-            tripod_speed = min(250, max_speed)  # reduced from 350 — governor was clamping 57%, PhErr 69 deg
+            tripod_speed = min(180, max_speed)  # reduced from 250 — governor was clamping, PhErr 87 deg avg
             print("=== TEST MODE: TRIPOD ===")
             print(f"    Body geometry: leg_radius={LEG_EFFECTIVE_RADIUS}mm, "
                   f"shaft_to_bottom={SHAFT_TO_CHASSIS_BOTTOM}mm")
@@ -4021,7 +4024,7 @@ if __name__ == "__main__":
             stall_tsleep(45)
 
             # Phase 2: Wave fallback (max ground contact if quad didn't finish)
-            set_gait_state(gait=1, speed=350, step_name="comp_wave_fwd")
+            set_gait_state(gait=1, speed=180, step_name="comp_wave_fwd")
             stall_tsleep(30)
 
             # Decel and stop
@@ -4037,17 +4040,17 @@ if __name__ == "__main__":
             print("\n-- phase 1: tripod --")
             set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="phase1_init")
 
-            set_gait_state(speed=900, step_name="forward");                                    stall_tsleep(12)
+            set_gait_state(speed=180, step_name="forward");                                    stall_tsleep(12)
             set_gait_state(turn=-0.2, step_name="carve_left");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.2, step_name="carve_right");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.35, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.35, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p1"); tsleep(0.5)
-            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-180, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel pause - smooth_hz bleeds ~720ms from -1.2Hz without this,
             # meaning the robot reverses briefly after Phase 2 starts.
@@ -4059,22 +4062,22 @@ if __name__ == "__main__":
             print("\n-- phase 2: quadruped --")
             set_gait_state(gait=2, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="phase2_init")
 
-            set_gait_state(speed=900, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=180, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.15, step_name="carve_left");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.15, step_name="carve_right");                                stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.35, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.35, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p2"); tsleep(0.5)
-            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-180, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel before walking tall - avoids ~720ms of backward motion bleed into forward mode
             set_gait_state(speed=0, step_name="decel_p2"); tsleep(2)
 
-            set_gait_state(speed=250, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
+            set_gait_state(speed=180, impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="walking_tall");   stall_tsleep(15)
             set_gait_state(impact_start=QUAD_IMPACT_START, impact_end=QUAD_IMPACT_END, step_name="stealth_crawl");              stall_tsleep(15)
 
             # =========================================================
@@ -4083,17 +4086,17 @@ if __name__ == "__main__":
             print("\n-- phase 3: wave --")
             set_gait_state(gait=1, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="phase3_init")
 
-            set_gait_state(speed=900, turn=0.0, step_name="forward");                          stall_tsleep(12)
+            set_gait_state(speed=180, turn=0.0, step_name="forward");                          stall_tsleep(12)
             set_gait_state(turn=-0.1, step_name="carve_left");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(turn=0.1, step_name="carve_right");                                 stall_tsleep(10)
             set_gait_state(turn=0.0, step_name="straight");                                    stall_tsleep(3)
             set_gait_state(speed=0, turn=-0.25, impact_start=345, impact_end=15, step_name="pivot_left");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, turn=0.25, impact_start=345, impact_end=15, step_name="pivot_right");  stall_tsleep(10)
-            set_gait_state(turn=0.0, speed=900, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
+            set_gait_state(turn=0.0, speed=180, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END, step_name="straight"); stall_tsleep(3)
             set_gait_state(speed=0, step_name="decel_pre_reverse_p3"); tsleep(0.5)
-            set_gait_state(speed=-900, turn=0.0, step_name="reverse");                         stall_tsleep(12)
+            set_gait_state(speed=-180, turn=0.0, step_name="reverse");                         stall_tsleep(12)
 
             # Decel pause - matches Phase 1/2 pattern, bleeds ~720ms of reverse motion before COG shift
             set_gait_state(speed=0, step_name="decel_p3"); tsleep(2)

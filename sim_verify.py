@@ -17,7 +17,7 @@ GAITS = {
     1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
     2: {'duty': 0.7,  'offsets': {2:0.0, 5:0.0, 3:0.333, 6:0.333, 4:0.666, 1:0.666}},
 }
-real_dt           = 0.025
+real_dt           = 1.0/35.0
 
 # sync: final_full_gait_test.py lines 159-178
 def get_buehler_angle(t_norm, duty_cycle, start_ang, end_ang, is_reversed=False):
@@ -556,7 +556,7 @@ def check_V18_pherr_governor():
       (E) stay inactive at 25 deg when governor was never engaged
           — error below engage threshold must not engage from cold start,
       (F) flag a stuck-timeout escalation after error stays at PHERR_FLOOR_SCALE
-          conditions for longer than PHERR_STUCK_TIMEOUT (5 s) at 40 Hz.
+          conditions for longer than PHERR_STUCK_TIMEOUT (5 s) at 35 Hz.
 
     Failure means:
       (A-fail) Gait runs at full speed immediately after a gait switch while phase
@@ -575,7 +575,7 @@ def check_V18_pherr_governor():
                instead of escalating to stall recovery.
 
     Known false positive risk: none. Pure state machine with no timing jitter.
-    PHERR_STUCK_TIMEOUT uses real_dt=0.025 s per tick, so 5 s = 200 ticks exactly.
+    PHERR_STUCK_TIMEOUT uses real_dt=1/35 s per tick, so 5 s = 175 ticks exactly.
     """
     # Governor constants — sync with final_full_gait_test.py
     PHERR_ENGAGE_DEG    = 30.0   # governor activates above this error
@@ -583,7 +583,7 @@ def check_V18_pherr_governor():
     PHERR_FLOOR_SCALE   = 0.45   # minimum throttle scale when governor active
     PHERR_RAMP_WIDTH    = 120.0  # deg range over which scale ramps from 1.0 to floor
     PHERR_STUCK_TIMEOUT = 5.0    # seconds at floor before escalating to stall
-    TICKS_PER_SEC       = 40     # Heart runs at 40 Hz (real_dt = 0.025 s)
+    TICKS_PER_SEC       = 35     # Heart runs at 35 Hz (real_dt = 1/35 s)
 
     failures = []
 
@@ -674,7 +674,7 @@ def check_V18_pherr_governor():
 
     # --- Sub-check F: stuck-at-floor for > 5 s must flag escalation ---
     # Simulate the stuck-timeout counter: increment each tick while ph_scale == PHERR_FLOOR_SCALE,
-    # reset when scale rises above floor. After PHERR_STUCK_TIMEOUT seconds (200 ticks at 40 Hz)
+    # reset when scale rises above floor. After PHERR_STUCK_TIMEOUT seconds (175 ticks at 35 Hz)
     # the escalation flag must be set.
     #
     # The stuck condition is: governor active AND error high enough to pin scale at floor.
