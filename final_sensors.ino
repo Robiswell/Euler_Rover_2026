@@ -123,7 +123,7 @@
   // Loop scheduling (FIX 3 -- self-throttled by measurement time, ~5 Hz)
   // -----------------------------------------------------------------------
   unsigned long prev_millis    = 0;
-  const unsigned long INTERVAL = 0;             // ms between CSV rows (0 = as fast as sensors allow)
+  const unsigned long INTERVAL = 50;            // ms between CSV rows (50ms = 20Hz cap, prevents Serial flood on sensor disconnect)
   const unsigned int  SENSOR_GAP_MS = 2;        // inter-sensor gap (FIX 3: reduced from 6)
 
   // -----------------------------------------------------------------------

@@ -190,7 +190,7 @@ SERVO_LOAD_INDEX = {sid: i for i, sid in enumerate(ALL_SERVOS)}
 KP_PHASE        = 15.0
 STALL_THRESHOLD = 800  # raised from 750 — wet sand+stones reach 700-750 normally; 800 still below 818 hw cutoff
 GHOST_TEMP      = 125  # STS3215 EMI artifact - bus noise returns flat 125°C (not a real reading)
-OVERLOAD_PREVENTION_TIME = 1.5  # seconds — clear overload flag before 2s hardware cutoff (time-based, loop-rate invariant)
+OVERLOAD_PREVENTION_TIME = 1.2  # seconds — clear overload flag before 2s hardware cutoff (reduced from 1.5 for more margin)
 OVERLOAD_MAX_CYCLES = 50  # max TE cycles per servo per session — raised from 10 for competition sand (EEPROM rated 100k writes)
 OVERLOAD_DECAY_INTERVAL = 30.0  # seconds without overload before decaying 1 cycle from counter
 
@@ -1730,7 +1730,7 @@ if __name__ == "__main__":
     # =====================================================================
 
     # --- Arduino serial config ---
-    ARDUINO_PORT = "/dev/ttyUSB0"
+    ARDUINO_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"  # stable symlink -- immune to USB enumeration order (was /dev/ttyUSB0)
     ARDUINO_BAUD = 115200
 
     # --- Nav tunable constants ---
@@ -1767,7 +1767,7 @@ if __name__ == "__main__":
     TERRAIN_LERP_ALPHA = 0.45  # per-tick blend factor (0 = no change, 1 = instant)
     # Per-gait backup durations (slower gaits need more time to cover safe distance)
     # Gait IDs: 0=tripod, 1=wave, 2=quad
-    BACKUP_DURATION = {0: 4.0, 1: 8.0, 2: 6.0}
+    BACKUP_DURATION = {0: 2.0, 1: 3.0, 2: 2.5}  # reduced from 4/8/6 -- competition course is short, less backup time needed
     MAX_TURN_BIAS = 0.30              # tighter arcs for obstacle avoidance (was 0.25)
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -1789,7 +1789,7 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
-    CLIFF_DETECTION_ENABLED = False  # DISABLED for indoor/carpet testing -- re-enable for outdoor terrain (FCD false positives on carpet)
+    CLIFF_DETECTION_ENABLED = True  # ENABLED for competition outdoor terrain (was False for indoor/carpet testing)
     CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (lowered 8→5 with IMU accelerator as safety)
     CLIFF_IMU_ANGULAR_RATE = 3.5   # rad/s — matches RAPID_ROTATION_THRESHOLD; cliff IMU accelerator
     CLIFF_IMU_ACCEL_FALL = 7.0     # m/s² — below tipover (8.0); signals free-fall / severe tip
@@ -2152,8 +2152,8 @@ if __name__ == "__main__":
             return {
                 "pitch_deg": 0.0, "roll_deg": 0.0, "yaw_deg": 0.0,
                 "pitch_rad": 0.0, "roll_rad": 0.0, "yaw_rad": 0.0,
-                "upright_quality": 0.0,  # dead IMU → trigger P1 STOP_SAFE
-                "accel_mag": 9.81, "angular_rate": 0.0,
+                "upright_quality": 1.0,  # dead IMU → assume upright, don't trigger STOP_SAFE (was 0.0)
+                "accel_mag": 9.81, "angular_rate": 0.0, "forward_accel": 0.0,
             }
 
         # Pitch and roll from quaternion
@@ -2519,7 +2519,7 @@ if __name__ == "__main__":
 
             # IMU grace period: BNO085 UART-RVC mode needs ~1-2s to produce valid
             # quaternions.  During this window the IMU may report all-zeros, which
-            # compute_imu() maps to upright_quality=0.0.  Skipping IMU-dependent
+            # compute_imu() maps to upright_quality=1.0 (assumes upright).  Skipping IMU-dependent
             # safety checks (P1/P2/P5) avoids a false STOP_SAFE on startup.
             imu_ready = (now - self._nav_start) >= self.IMU_GRACE_PERIOD_S
             self.imu_ready = imu_ready  # expose for Brain loop STOP_SAFE check
@@ -2678,6 +2678,13 @@ if __name__ == "__main__":
                         pivot_dir = -1 if l_cm >= r_cm else 1
                     self.pivot_direction = pivot_dir
                     self.consecutive_pivot_count += 1
+                    # Fix: break infinite pivot loop -- after 3 consecutive pivots, force backup
+                    if self.consecutive_pivot_count >= 3:
+                        _obs_dur = BACKUP_DURATION.get(shared_gait_id.value, 2.0)
+                        self.obstacle_backup_until = now + _obs_dur
+                        self._transition(NAV_BACKWARD)
+                        brain_log(f"[NAV] P10 pivot limit ({self.consecutive_pivot_count}) -- backing up")
+                        return self._backward_action(frame)
                     self._transition(NAV_PIVOT_TURN)
                     self._start_dwell(1.5)
                     self.terrain_impact_start = PIVOT_IMPACT_START
@@ -3585,7 +3592,7 @@ if __name__ == "__main__":
                                 # Blocking wiggle recovery
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
                                                step_name="nav_pre_wiggle")
-                                state_recovery_wiggle()
+                                state_recovery_wiggle(duration=4)
                                 nav.stall_speed_mult *= 0.80  # raised from 0.75
                                 if nav.stall_count_30s >= 3:
                                     # Switch to wave gait, reduced speed
@@ -3628,10 +3635,10 @@ if __name__ == "__main__":
                                 #brain_log("[NAV] tipover — attempting self-right")
                                 # V0.5.01 - add roll attempt counter and limit to prevent infinite loop if self-right fails
                                 roll_attempts += 1
-                                brain_log(f"[NAV] tipover — attempting self-right ({roll_attempts}/{MAX_ROLL_ATTEMPTS})")
-                                state_self_right_roll()
-                                # Fresh frame after recovery
-                                time.sleep(0.2)
+                                # state_self_right_roll()  # DISABLED for competition -- unvalidated on hardware, 22s blocking risk
+                                brain_log(f"[NAV] tipover detected — holding STOP_SAFE (self-right disabled, attempt {roll_attempts}/{MAX_ROLL_ATTEMPTS})")
+                                set_gait_state(speed=0, turn=0.0, x_flip=1, step_name="nav_stop_safe_hold")
+                                time.sleep(0.5)
                                 continue
 
                             # --- Apply gait state ---
@@ -4168,7 +4175,7 @@ if __name__ == "__main__":
             set_gait_state(speed=0, turn=0.0, gait=0, step_name="phase4_init"); tsleep(3)
 
             state_recovery_wiggle()
-            state_self_right_roll()
+            # state_self_right_roll()  # DISABLED for competition -- unvalidated on hardware, 22s blocking risk
 
             # =========================================================
             # PHASE 5: DONE
