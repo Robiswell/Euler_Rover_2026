@@ -1792,7 +1792,6 @@ if __name__ == "__main__":
     PIVOT_TURN_BIAS = 0.22            # must stay > MAX_TURN_BIAS (pivot is the more aggressive escape)
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — same as default 345/15, explicit for pivot clarity
-    HEADING_CORRECTION_BIAS = 0.1
     STALL_LOAD_THRESHOLD_NAV = 500
     STALL_SUSTAIN_S = 1.5
     SLOPE_PITCH_DEG = 15      # T3 moderate-slope threshold (0-15 TRIPOD, 15-40 QUAD, >40 WAVE)
@@ -2316,6 +2315,10 @@ if __name__ == "__main__":
         4: "BACKWARD", 5: "PIVOT", 6: "WIGGLE", 7: "STOP_SAFE",
     }
 
+    # States where heading-hold is active. Grouped so slow↔fast forward transitions
+    # (triggered by obstacle proximity) do not reset yaw baseline mid-cruise.
+    CRUISING_STATES = (NAV_FORWARD, NAV_SLOW_FORWARD)
+
     def is_rear_safe(frame):
         """Check if rear is clear enough for reversing.
         Returns False if any rear sensor < 20cm. Blind zone (-1) = no data, not obstacle."""
@@ -2414,7 +2417,7 @@ if __name__ == "__main__":
             self.dwell_start = time.monotonic()
             self.dwell_duration = duration
 
-        def _transition(self, new_state, force=False):
+        def _transition(self, new_state, force=False, imu=None):
             """Change FSM state, with minimum dwell guard (Fix 154).
 
             The robot must stay in each state for at least MIN_STATE_DWELL
@@ -2440,6 +2443,12 @@ if __name__ == "__main__":
                 time_in_state = time.monotonic() - self.state_entry_time
                 if time_in_state < MIN_STATE_DWELL:
                     return False  # Fix 147: caller must check return value
+
+            # Re-baseline yaw on cruising-entry from non-cruising state (arc/pivot/
+            # backward/cliff/stall recovery). Prevents accumulated drift from carrying
+            # into the new forward leg.
+            if imu is not None and new_state in CRUISING_STATES and self.state not in CRUISING_STATES:
+                self.initial_yaw = imu["yaw_rad"]
 
             self.prev_state = self.state
             self.state = new_state
@@ -2834,11 +2843,11 @@ if __name__ == "__main__":
                 yaw_error = math.atan2(
                     math.sin(imu["yaw_rad"] - self.initial_yaw),
                     math.cos(imu["yaw_rad"] - self.initial_yaw))
-                if abs(yaw_error) > math.radians(30):
-                    if yaw_error > 0:
-                        turn = -HEADING_CORRECTION_BIAS  # drifted right → correct left
-                    else:
-                        turn = HEADING_CORRECTION_BIAS   # drifted left → correct right
+                err_deg = math.degrees(yaw_error)
+                # Deadband 5° absorbs IMU jitter. Gain 0.015/°, cap ±0.10 (below
+                # is_pivot=0.10 threshold so heading-hold never triggers pivot semantics).
+                if abs(err_deg) > 5.0:
+                    turn = max(-0.10, min(0.10, -0.015 * err_deg))
 
             return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
@@ -3631,7 +3640,7 @@ if __name__ == "__main__":
                             if state == NAV_WIGGLE:
                                 if dry_run:
                                     brain_log("[NAV][DRY-RUN] would wiggle")
-                                    nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
+                                    nav._transition(NAV_FORWARD, force=True, imu=imu)  # Fix 154: recovery bypass
                                     continue
                                 # Blocking wiggle recovery
                                 set_gait_state(speed=0, turn=0.0, x_flip=1,
@@ -3643,7 +3652,7 @@ if __name__ == "__main__":
                                     nav.terrain_gait = 1
                                     nav.stall_speed_mult = 0.55  # raised from 0.5
                                     brain_log("[NAV] 3 stalls in 30s — wave gait, half speed")
-                                nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
+                                nav._transition(NAV_FORWARD, force=True, imu=imu)  # Fix 154: recovery bypass
                                 continue
 
                             # Fix C2: STOP_SAFE recovery — if conditions that triggered it have cleared
@@ -3656,7 +3665,7 @@ if __name__ == "__main__":
                                         nav._stop_safe_clear_start = time.monotonic()
                                     elif time.monotonic() - nav._stop_safe_clear_start >= 3.0:
                                         brain_log("[NAV] STOP_SAFE conditions cleared for 3s — resuming FORWARD")
-                                        nav._transition(NAV_FORWARD, force=True)
+                                        nav._transition(NAV_FORWARD, force=True, imu=imu)
                                         nav._stop_safe_clear_start = None
                                         continue
                                 else:
@@ -3665,7 +3674,7 @@ if __name__ == "__main__":
                             if state == NAV_STOP_SAFE and imu_ready and imu["upright_quality"] < 0.15:
                                 if dry_run:
                                     brain_log("[NAV][DRY-RUN] would self-right")
-                                    nav._transition(NAV_FORWARD, force=True)  # Fix 154: recovery bypass
+                                    nav._transition(NAV_FORWARD, force=True, imu=imu)  # Fix 154: recovery bypass
                                     continue
                                 # V0.5.01 - add roll attempt counter and limit to prevent infinite loop if self-right fails
                                 if roll_attempts >= MAX_ROLL_ATTEMPTS:
