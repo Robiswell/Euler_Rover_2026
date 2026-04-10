@@ -39,7 +39,6 @@ SINKING_LOAD_THRESH  = 400
 SINKING_ACCEL_THRESH = 2.0
 MAX_TURN_BIAS = 0.20
 PIVOT_TURN_BIAS = 0.22
-HEADING_CORRECTION_BIAS = 0.1
 STALL_LOAD_THRESHOLD_NAV = 500
 STALL_SUSTAIN_S = 1.5
 SLOPE_PITCH_DEG = 15
@@ -84,6 +83,10 @@ NAV_STATE_NAMES = {
     0: "FORWARD", 1: "SLOW_FWD", 2: "ARC_L", 3: "ARC_R",
     4: "BACKWARD", 5: "PIVOT", 6: "WIGGLE", 7: "STOP_SAFE",
 }
+
+# States where heading-hold is active. Grouped so slow<->fast forward transitions
+# (triggered by obstacle proximity) do not reset yaw baseline mid-cruise.
+CRUISING_STATES = (NAV_FORWARD, NAV_SLOW_FORWARD)
 
 NAV_IMU_SETTLE_TICKS = 5  # ignore IMU safety checks for first 0.5s (BNO085 convergence)
 CLIFF_WARMUP = 5  # frames before cliff detection active (sensor settle)
@@ -471,8 +474,12 @@ class NavStateMachine:
         self.dwell_start = time.monotonic()
         self.dwell_duration = duration
 
-    def _transition(self, new_state):
+    def _transition(self, new_state, imu=None):
         if new_state != self.state:
+            # Re-baseline yaw on cruising-entry from non-cruising state. Prevents
+            # accumulated drift from carrying into the new forward leg.
+            if imu is not None and new_state in CRUISING_STATES and self.state not in CRUISING_STATES:
+                self.initial_yaw = imu["yaw_rad"]
             self.prev_state = self.state
             self.state = new_state
             self.dwell_duration = 0
@@ -665,11 +672,11 @@ class NavStateMachine:
             yaw_error = math.atan2(
                 math.sin(imu["yaw_rad"] - self.initial_yaw),
                 math.cos(imu["yaw_rad"] - self.initial_yaw))
-            if abs(yaw_error) > math.radians(30):
-                if yaw_error > 0:
-                    turn = -HEADING_CORRECTION_BIAS
-                else:
-                    turn = HEADING_CORRECTION_BIAS
+            err_deg = math.degrees(yaw_error)
+            # Deadband 5 deg absorbs IMU jitter. Gain 0.015/deg, cap +/-0.10 (below
+            # is_pivot=0.10 threshold so heading-hold never triggers pivot semantics).
+            if abs(err_deg) > 5.0:
+                turn = max(-0.10, min(0.10, -0.015 * err_deg))
 
         return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
