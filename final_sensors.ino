@@ -79,6 +79,18 @@
               echo still HIGH before retrigger.
       FIX 18: Double-ping echo timeout (break) fell through to distance calc,
               producing false 34 cm readings.  Changed break -> return 300.0f.
+      FIX 19: SENSOR_DISABLED bitmask skips FAULT sensors (idx 1 + 5).
+              Reports -2.0 without blocking on dead echoes.  Saves ~40ms/frame.
+      FIX 20: All ECHO pins set to INPUT_PULLUP to reject EMI false edges
+              from 1 Mbaud RS-485 servo bus on floating pins.
+      FIX 21: Real-time 4-layer sensor filter -- ring buffer (5 readings per
+              sensor) + median of valid readings + rate limit + consecutive
+              FAULT counter with auto-recovery.  Supersedes FIX 19 hard-disable:
+              all 8 sensors stay active; bad readings are filtered dynamically;
+              a sensor that starts reading well again recovers on its own
+              without a reflash.  The old SENSOR_DISABLED bitmask is retained
+              as sensor_disabled_mask with default 0 -- emergency manual
+              override only, for physically destroyed sensors.
   */
 
   #include <Arduino.h>
@@ -112,6 +124,23 @@
   // -----------------------------------------------------------------------
   const int TRIG_PINS[8] = { 2,  4,  6,  8, 10, 12, A0, A2 };
   const int ECHO_PINS[8] = { 3,  5,  7,  9, 11, 13, A1, A3 };
+
+  // FIX 21: Real-time 4-layer sensor filter state (supersedes FIX 19 hard-disable).
+  // Ring buffer of 5 raw readings per sensor + median + rate limit + FAULT counter.
+  static float   sensor_history[8][5];        // 160 B -- ring buffer of raw readings
+  static uint8_t ring_pos[8];                  //   8 B -- next write index into history
+  static uint8_t fault_count[8];               //   8 B -- consecutive FAULT readings (L4)
+  static uint8_t rate_reject_count[8];         //   8 B -- consecutive rate-limit rejects (L3)
+  static float   last_output[8];               //  32 B -- last filtered value emitted
+  static const float   HISTORY_EMPTY   = -1000.0f;  // sentinel: slot never written
+  static const uint8_t FAULT_THRESHOLD = 10;        // ~2 s at 5 Hz -> declare dead
+  static const uint8_t RATE_REJECT_MAX = 3;         // accept after 3 rejections (escape hatch)
+  static const float   RATE_LIMIT_CM   = 100.0f;    // max plausible per-frame change (cm)
+
+  // FIX 19 (retained as emergency override): bitmask of sensors to skip entirely.
+  // Default = 0: all 8 sensors active, filter handles intermittent FAULT automatically.
+  // Set bit N to 1 ONLY if sensor N is physically destroyed and cannot be repaired.
+  uint8_t sensor_disabled_mask = 0;
 
   // -----------------------------------------------------------------------
   // Measurement buffers
@@ -292,6 +321,130 @@
   }
 
   // -----------------------------------------------------------------------
+  // FIX 21: 4-layer real-time sensor filter helpers
+  // -----------------------------------------------------------------------
+
+  // Insertion sort for tiny arrays (N <= 5). No stdlib dependency.
+  static void insertionSort(float *arr, uint8_t n) {
+    for (uint8_t i = 1; i < n; i++) {
+      float key = arr[i];
+      int8_t j = (int8_t)i - 1;
+      while (j >= 0 && arr[j] > key) {
+        arr[j + 1] = arr[j];
+        j--;
+      }
+      arr[j + 1] = key;
+    }
+  }
+
+  // Returns median of valid readings in sensor_history[idx][].
+  // "Valid" = numeric range [2.0, 300.0). Excludes -2 / -1 / 300 / HISTORY_EMPTY.
+  static float medianOfValid(uint8_t idx) {
+    float valid[5];
+    uint8_t n = 0;
+    for (uint8_t k = 0; k < 5; k++) {
+      float v = sensor_history[idx][k];
+      if (v >= 2.0f && v < 300.0f) valid[n++] = v;
+    }
+    if (n == 0) return HISTORY_EMPTY;
+    insertionSort(valid, n);
+    return valid[n / 2];
+  }
+
+  // Most recent valid reading, scanning backwards from ring_pos.
+  static float mostRecentValid(uint8_t idx) {
+    for (uint8_t k = 0; k < 5; k++) {
+      int8_t slot = (int8_t)ring_pos[idx] - 1 - (int8_t)k;
+      if (slot < 0) slot += 5;
+      float v = sensor_history[idx][slot];
+      if (v >= 2.0f && v < 300.0f) return v;
+    }
+    return HISTORY_EMPTY;
+  }
+
+  // Propagate worst classification seen in history (-2 > -1 > 300).
+  static float worstClassificationInHistory(uint8_t idx) {
+    bool has_fault = false, has_near = false, has_far = false;
+    for (uint8_t k = 0; k < 5; k++) {
+      float v = sensor_history[idx][k];
+      if (v == -2.0f)       has_fault = true;
+      else if (v == -1.0f)  has_near  = true;
+      else if (v >= 300.0f) has_far   = true;
+    }
+    if (has_fault) return -2.0f;
+    if (has_near)  return -1.0f;
+    return 300.0f;
+  }
+
+  // FIX 21: 4-layer real-time filter.
+  //   L1 ring buffer -> L2 median of valid -> L3 rate limit -> L4 FAULT counter.
+  static float filterReading(uint8_t idx, float raw) {
+    // Layer 1: store raw into ring buffer
+    sensor_history[idx][ring_pos[idx]] = raw;
+    ring_pos[idx] = (ring_pos[idx] + 1) % 5;
+
+    // Layer 4 pre-update: consecutive FAULT tracking with auto-recovery
+    if (raw == -2.0f) {
+      if (fault_count[idx] < 255) fault_count[idx]++;
+    } else {
+      fault_count[idx] = 0;  // any non-FAULT read resets counter (auto-recovery)
+    }
+
+    // Layer 4 early exit: sensor declared dead until it reads well again
+    if (fault_count[idx] >= FAULT_THRESHOLD) {
+      last_output[idx]       = -2.0f;
+      rate_reject_count[idx] = 0;  // clear stale L3 state across dead/recover cycle
+      return -2.0f;
+    }
+
+    // Layer 2: count valid readings in history window
+    uint8_t n_valid = 0;
+    for (uint8_t k = 0; k < 5; k++) {
+      float v = sensor_history[idx][k];
+      if (v >= 2.0f && v < 300.0f) n_valid++;
+    }
+
+    float candidate;
+    if (n_valid >= 3) {
+      candidate = medianOfValid(idx);
+    } else if (n_valid >= 1) {
+      candidate = mostRecentValid(idx);
+    } else {
+      // No valid numeric readings in window -- pass sentinel through.
+      if (raw == -2.0f || raw == -1.0f || raw >= 300.0f) {
+        candidate = raw;
+      } else {
+        candidate = worstClassificationInHistory(idx);
+      }
+      last_output[idx] = candidate;
+      rate_reject_count[idx] = 0;
+      return candidate;
+    }
+
+    // Layer 3: rate limit between valid numeric values only
+    float prev = last_output[idx];
+    if (prev >= 2.0f && prev < 300.0f &&
+        candidate >= 2.0f && candidate < 300.0f) {
+      float delta = candidate - prev;
+      if (delta < 0) delta = -delta;
+      if (delta > RATE_LIMIT_CM) {
+        if (rate_reject_count[idx] < RATE_REJECT_MAX) {
+          rate_reject_count[idx]++;
+          return prev;  // hold last output
+        }
+        rate_reject_count[idx] = 0;  // escape hatch: accept real scene change
+      } else {
+        rate_reject_count[idx] = 0;
+      }
+    } else {
+      rate_reject_count[idx] = 0;
+    }
+
+    last_output[idx] = candidate;
+    return candidate;
+  }
+
+  // -----------------------------------------------------------------------
   // Setup
   // -----------------------------------------------------------------------
   void setup() {
@@ -314,17 +467,21 @@
     imu.enableGyro(50);
     imu.enableGravity(50);          // FIX 6: gravity vector for UpsideDown detection
 
-    // Ultrasonic pin setup (FIX 7: pin 13 uses INPUT_PULLUP)
+    // Ultrasonic pin setup (FIX 7 + FIX 20: INPUT_PULLUP on ALL echo pins)
+    // Prevents floating pins from picking up servo bus EMI as false rising edges.
+    // Pin 13 already had INPUT_PULLUP (FIX 7); now all echo pins match.
     for (int i = 0; i < 8; i++) {
       pinMode(TRIG_PINS[i], OUTPUT);
-      if (ECHO_PINS[i] == 13) {
-        pinMode(ECHO_PINS[i], INPUT_PULLUP);  // FIX 7: counteract LED load
-      } else {
-        pinMode(ECHO_PINS[i], INPUT);
-      }
+      pinMode(ECHO_PINS[i], INPUT_PULLUP);  // FIX 20: all ECHO pins pulled up
       digitalWrite(TRIG_PINS[i], LOW);
       durations_us[i]  = 0;
       distances_cm[i]  = 300.0f;   // default: very far (safe assumption)
+      // FIX 21: init 4-layer filter state
+      for (uint8_t k = 0; k < 5; k++) sensor_history[i][k] = HISTORY_EMPTY;
+      ring_pos[i]          = 0;
+      fault_count[i]       = 0;
+      rate_reject_count[i] = 0;
+      last_output[i]       = 300.0f;
     }
 
     // CSV header -- must match the 20-column format expected by input_thread.py
@@ -357,7 +514,12 @@
     static const uint8_t FIRE_ORDER[8] = {0, 5, 2, 7, 4, 1, 6, 3};
     for (int i = 0; i < 8; i++) {
       uint8_t idx = FIRE_ORDER[i];
-      distances_cm[idx] = measureClassified(idx);
+      if (sensor_disabled_mask & (1 << idx)) {
+        distances_cm[idx] = -2.0f;  // FIX 19 emergency override: physically destroyed sensor
+        continue;
+      }
+      // FIX 21: raw reading piped through 4-layer real-time filter
+      distances_cm[idx] = filterReading(idx, measureClassified(idx));
       delay(SENSOR_GAP_MS);
     }
 
