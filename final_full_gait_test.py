@@ -1810,7 +1810,7 @@ if __name__ == "__main__":
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
     CLIFF_DETECTION_ENABLED = True  # ENABLED for competition outdoor terrain (was False for indoor/carpet testing)
-    CLIFF_CONFIRM_FRAMES = 5    # consecutive candidate frames before cliff confirmed (lowered 8→5 with IMU accelerator as safety)
+    CLIFF_CONFIRM_FRAMES = 3    # consecutive candidate frames before cliff confirmed (lowered 5→3 to cut debounce 500ms→300ms at 10Hz -- reaction latency fix)
     CLIFF_IMU_ANGULAR_RATE = 3.5   # rad/s — matches RAPID_ROTATION_THRESHOLD; cliff IMU accelerator
     CLIFF_IMU_ACCEL_FALL = 7.0     # m/s² — below tipover (8.0); signals free-fall / severe tip
 
