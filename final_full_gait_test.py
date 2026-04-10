@@ -1171,8 +1171,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             # Speed/turn: keep linear LERP (command inputs, not CPG parameters)
             lerp_rate    = min(1.0, 4.0 * real_dt)
+            turn_lerp_rate = min(1.0, 2.0 * real_dt)
             smooth_hz   += (target_hz   - smooth_hz)   * lerp_rate
-            smooth_turn += (target_turn - smooth_turn) * lerp_rate
+            smooth_turn += (target_turn - smooth_turn) * turn_lerp_rate
 
             # Impact angles: keep linear circular LERP (geometric, not CPG)
             d_s = (shared_impact_start.value - smooth_imp_start + 180) % 360 - 180
@@ -1787,8 +1788,8 @@ if __name__ == "__main__":
     # Per-gait backup durations (slower gaits need more time to cover safe distance)
     # Gait IDs: 0=tripod, 1=wave, 2=quad
     BACKUP_DURATION = {0: 4.0, 1: 8.0, 2: 6.0}  # restored to original competition values -- sufficient backup distance on wet sand
-    MAX_TURN_BIAS = 0.30              # tighter arcs for obstacle avoidance (was 0.25)
-    PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
+    MAX_TURN_BIAS = 0.20              # arc turn bias; higher values worsen phase desync on wet sand
+    PIVOT_TURN_BIAS = 0.22            # must stay > MAX_TURN_BIAS (pivot is the more aggressive escape)
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
     PIVOT_IMPACT_END   = 15           # ° — same as default 345/15, explicit for pivot clarity
     HEADING_CORRECTION_BIAS = 0.1
@@ -2422,9 +2423,12 @@ if __name__ == "__main__":
 
             Safety-critical targets (STOP_SAFE, BACKWARD) always go
             through immediately — we never delay cliff or tipover response.
+
+            Returns True if the transition was applied, False if blocked
+            by the dwell guard (Fix 147).
             """
             if new_state == self.state:
-                return  # already there, nothing to do
+                return True
 
             # --- Fix 154: minimum dwell guard ---
             # Safety exits are never delayed (cliff, tipover, etc.)
@@ -2432,7 +2436,7 @@ if __name__ == "__main__":
             if not force and new_state not in safety_targets:
                 time_in_state = time.monotonic() - self.state_entry_time
                 if time_in_state < MIN_STATE_DWELL:
-                    return  # too soon — hold current state
+                    return False  # Fix 147: caller must check return value
 
             self.prev_state = self.state
             self.state = new_state
@@ -2440,6 +2444,7 @@ if __name__ == "__main__":
             self.dwell_duration = 0  # Fix 68 (A4): reset stale dwell on state change
             self.rear_unsafe_frames = 0  # C2: reset rear debounce on state change
             brain_log(f"[NAV] {NAV_STATE_NAMES.get(self.prev_state)}→{NAV_STATE_NAMES.get(new_state)}")
+            return True
 
         def smooth_sensor(self, idx, raw_cm):
             """3-sample median + EMA smoothing for ultrasonic sensors.
@@ -2707,13 +2712,14 @@ if __name__ == "__main__":
                         self._transition(NAV_BACKWARD)
                         brain_log(f"[NAV] P10 pivot limit ({self.consecutive_pivot_count}) -- backing up")
                         return self._backward_action(frame)
-                    self._transition(NAV_PIVOT_TURN)
-                    self._start_dwell(1.5)
-                    self.terrain_impact_start = PIVOT_IMPACT_START
-                    self.terrain_impact_end = PIVOT_IMPACT_END
-                    turn = pivot_dir * PIVOT_TURN_BIAS
-                    step = "nav_danger_pivot_L" if pivot_dir < 0 else "nav_danger_pivot_R"
-                    return (NAV_PIVOT_TURN, 0, turn, 1, step)
+                    if self._transition(NAV_PIVOT_TURN):  # Fix 147: only act if dwell guard allows
+                        self._start_dwell(1.5)
+                        self.terrain_impact_start = PIVOT_IMPACT_START
+                        self.terrain_impact_end = PIVOT_IMPACT_END
+                        turn = pivot_dir * PIVOT_TURN_BIAS
+                        step = "nav_danger_pivot_L" if pivot_dir < 0 else "nav_danger_pivot_R"
+                        return (NAV_PIVOT_TURN, 0, turn, 1, step)
+                    # Dwell guard blocked -- fall through to lower priorities
 
             # P10b: Obstacle backup lockout -- forced BACKWARD until duration expires, then escape
             if self.obstacle_backup_until > 0.0:
