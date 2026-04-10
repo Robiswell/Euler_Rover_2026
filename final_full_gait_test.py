@@ -4140,6 +4140,110 @@ if __name__ == "__main__":
             set_gait_state(speed=0, turn=0.0, step_name="comp_shutdown")
             tsleep(3)
 
+        elif "--drift-test" in sys.argv:
+            # === TEST: Drift measurement per gait (heading-hold tuning) ===
+            # Walks forward 15s at CRUISE speed with turn=0, logs yaw drift every 0.5s.
+            # No nav FSM, no obstacle checks. Used to characterize mechanical drift per gait.
+            try:
+                idx = sys.argv.index("--drift-test")
+                gait_arg = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "tripod"
+            except (ValueError, IndexError):
+                gait_arg = "tripod"
+
+            GAIT_MAP = {
+                "tripod":      (0, 180,                          DEFAULT_IMPACT_START, DEFAULT_IMPACT_END),
+                "tripod-slow": (0, 130,                          DEFAULT_IMPACT_START, DEFAULT_IMPACT_END),
+                "wave":        (1, 180,                          DEFAULT_IMPACT_START, DEFAULT_IMPACT_END),
+                "wave-slow":   (1, 130,                          DEFAULT_IMPACT_START, DEFAULT_IMPACT_END),
+                "quad":        (2, QUAD_CRUISE_SPEED,            QUAD_IMPACT_START,    QUAD_IMPACT_END),
+                "quad-slow":   (2, int(QUAD_CRUISE_SPEED * 0.7), QUAD_IMPACT_START,    QUAD_IMPACT_END),
+            }
+            if gait_arg not in GAIT_MAP:
+                print(f"[DRIFT] unknown gait '{gait_arg}'. Valid: {list(GAIT_MAP.keys())}")
+                sys.exit(1)
+
+            gait_idx, drift_speed, imp_start, imp_end = GAIT_MAP[gait_arg]
+            print(f"=== DRIFT TEST: {gait_arg} (gait={gait_idx} speed={drift_speed}) ===")
+
+            if not HAS_SERIAL:
+                print("[DRIFT] pyserial not installed -- cannot read IMU. Aborting.")
+                sys.exit(1)
+
+            reader = None
+            try:
+                reader = ArduinoReader()
+                print("[DRIFT] Arduino reader started")
+
+                # Wait up to 3s for first valid frame, then 0.5s warmup
+                init_wait = time.monotonic()
+                while reader.stale_seconds() == float("inf"):
+                    if time.monotonic() - init_wait > 3.0:
+                        break
+                    time.sleep(0.1)
+                if reader.stale_seconds() == float("inf"):
+                    print("[DRIFT] no Arduino data after 3s -- aborting")
+                    sys.exit(1)
+                time.sleep(0.5)
+
+                # Capture initial yaw
+                first_frame = reader.get_latest()
+                if not first_frame:
+                    print("[DRIFT] no IMU frame -- aborting")
+                    sys.exit(1)
+                first_imu = compute_imu(first_frame)
+                initial_yaw = first_imu["yaw_rad"]
+                print(f"[DRIFT] initial yaw = {math.degrees(initial_yaw):.2f} deg")
+
+                # Init gait and start forward
+                set_gait_state(gait=gait_idx, impact_start=imp_start, impact_end=imp_end,
+                               speed=0, turn=0.0, step_name="drift_init")
+                time.sleep(0.3)
+                set_gait_state(speed=drift_speed, turn=0.0, step_name="drift_fwd")
+
+                # Log loop: 15 seconds at 2 Hz (0.5s interval = 30 samples)
+                t_start = time.monotonic()
+                last_log = t_start
+                DURATION = 15.0
+                INTERVAL = 0.5
+                print(f"[DRIFT] walking {DURATION}s ... (Ctrl+C to abort)")
+                print(f"[DRIFT] {'t':>5} {'yaw_deg':>10} {'err_deg':>10}")
+                while time.monotonic() - t_start < DURATION:
+                    now = time.monotonic()
+                    if now - last_log >= INTERVAL:
+                        last_log = now
+                        frame = reader.get_latest()
+                        if frame:
+                            imu = compute_imu(frame)
+                            yaw = imu["yaw_rad"]
+                            err = math.atan2(math.sin(yaw - initial_yaw),
+                                             math.cos(yaw - initial_yaw))
+                            t_elapsed = now - t_start
+                            line = f"[DRIFT] {t_elapsed:5.1f} {math.degrees(yaw):10.2f} {math.degrees(err):+10.2f}"
+                            print(line)
+                            brain_log(line)
+                    time.sleep(0.05)
+
+                # Stop
+                set_gait_state(speed=0, turn=0.0, step_name="drift_stop")
+                time.sleep(1.0)
+
+                # Final summary
+                final_frame = reader.get_latest()
+                if final_frame:
+                    final_imu = compute_imu(final_frame)
+                    final_err = math.atan2(math.sin(final_imu["yaw_rad"] - initial_yaw),
+                                           math.cos(final_imu["yaw_rad"] - initial_yaw))
+                    rate = math.degrees(final_err) / DURATION
+                    summary = (f"[DRIFT] FINAL gait={gait_arg} duration={DURATION:.1f}s "
+                               f"drift={math.degrees(final_err):+.2f}deg "
+                               f"rate={rate:+.2f}deg/s")
+                    print(summary)
+                    brain_log(summary)
+            finally:
+                if reader is not None:
+                    reader.stop()
+                    print("[DRIFT] Arduino reader stopped")
+
         else:
             # === DEMO MODE: Full maneuver showcase ===
             # Speeds reduced from test values for wet-sand obstacle navigation (Alamosa CO, April)
