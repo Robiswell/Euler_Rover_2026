@@ -228,7 +228,10 @@ def compute_turn_intensity(frame):
     fdr = frame["FDR"]
     fdl_eff = 25.0 if (fdl is None or fdl == -1) else fdl
     fdr_eff = 25.0 if (fdr is None or fdr == -1) else fdr
-    return math.tanh((fdl_eff - fdr_eff) / 50.0)
+    # FIX 23: proximity scaling -- closer obstacle = more dramatic arc turn.
+    closest = min(fdl_eff, fdr_eff)
+    proximity_scale = max(0.25, min(1.0, (60.0 - closest) / 40.0))
+    return math.tanh((fdl_eff - fdr_eff) / 50.0) * proximity_scale
 
 
 def compute_battery_mult(voltage_value):

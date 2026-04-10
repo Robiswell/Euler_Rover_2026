@@ -2112,18 +2112,19 @@ if __name__ == "__main__":
 
         def _check_cliff(self, reading, is_front, imu_falling=False):
             """Check single cliff sensor. Returns True if cliff confirmed.
-            imu_falling=True (IMU accelerator) fires cliff instantly on any candidate,
-            bypassing the normal CLIFF_CONFIRM_FRAMES window."""
+            FIX 24: IMU confirmation is now REQUIRED (not just an accelerator).
+            Soft terrain (carpet, wet sand) produces chronic FCD scatter (200-300cm
+            readings with no cliff present). Only a real fall -- confirmed by IMU
+            pitch/accel signature -- can fire cliff. Concrete cliffs still fire via
+            FCD candidate + IMU (the robot tips as it approaches the edge)."""
             counter_attr = "_consecutive_front" if is_front else "_consecutive_rear"
             count = getattr(self, counter_attr)
 
             # Fix 136: None guard must come before numeric comparisons
             if reading is None:
-                # Defensive: possible cliff, increment
+                # Defensive: possible cliff, increment counter but only fire with IMU
                 setattr(self, counter_attr, count + 1)
-                if imu_falling:
-                    return True
-                return count + 1 >= CLIFF_CONFIRM_FRAMES
+                return (count + 1 >= CLIFF_CONFIRM_FRAMES) and imu_falling
 
             if reading == -1:
                 # Ground in blind zone (very close) — NOT a cliff. Reset.
@@ -2143,15 +2144,13 @@ if __name__ == "__main__":
             if self._warmup_frames <= CLIFF_WARMUP:
                 return False
 
-            # Cliff candidate: absolute > 30 OR delta > EMA + 10
+            # Cliff candidate: absolute > 45 OR delta > EMA + 18
             is_candidate = (reading > 45) or (reading > self._ground_ema + 18)
 
             if is_candidate:
                 setattr(self, counter_attr, count + 1)
-                # IMU accelerator: fall signature + candidate FCD = fire instantly
-                if imu_falling:
-                    return True
-                return count + 1 >= CLIFF_CONFIRM_FRAMES
+                # FIX 24: IMU now REQUIRED. Candidate alone is insufficient on soft terrain.
+                return (count + 1 >= CLIFF_CONFIRM_FRAMES) and imu_falling
             else:
                 setattr(self, counter_attr, 0)
                 return False
@@ -2235,7 +2234,11 @@ if __name__ == "__main__":
             fdl_eff = fdr_eff
         if fdr == -2:
             fdr_eff = fdl_eff
-        return math.tanh((fdl_eff - fdr_eff) / 50.0)
+        # FIX 23: proximity scaling -- closer obstacle = more dramatic arc turn.
+        # min(fdl,fdr) <= 20cm -> full turn; >=60cm -> floor 0.25 (slight turn).
+        closest = min(fdl_eff, fdr_eff)
+        proximity_scale = max(0.25, min(1.0, (60.0 - closest) / 40.0))
+        return math.tanh((fdl_eff - fdr_eff) / 50.0) * proximity_scale
 
     def compute_battery_mult(voltage_value):
         """Compute battery speed multiplier from shared_voltage.
@@ -2583,8 +2586,11 @@ if __name__ == "__main__":
             else:
                 self._freefall_start = 0.0
 
-            # P6: Front cliff
-            if CLIFF_DETECTION_ENABLED and front_cliff:
+            # P6: Front cliff (FIX 22: gated to forward-motion states + BACKWARD hold; soft terrain
+            # scatter on carpet/wet sand produced false positives in other states. NAV_BACKWARD
+            # included so repeated cliff frames sustain BACKWARD without re-triggering _start_dwell.)
+            _cliff_active_states = (NAV_FORWARD, NAV_SLOW_FORWARD, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD)
+            if CLIFF_DETECTION_ENABLED and front_cliff and self.state in _cliff_active_states:
                 if self.state != NAV_BACKWARD:
                     self.hold_position_count = 0
                     self.backward_entry_time = time.monotonic()
@@ -2594,8 +2600,8 @@ if __name__ == "__main__":
                 self._start_dwell(0.8)  # Fix A5a: refreshes every frame; dwell counts from last cliff
                 return self._backward_action(frame)
 
-            # P7: Rear cliff (overrides cliff lockout -- don't back into a drop-off)
-            if CLIFF_DETECTION_ENABLED and rear_cliff:
+            # P7: Rear cliff (FIX 22: only while already backing up; prevents scatter misfires)
+            if CLIFF_DETECTION_ENABLED and rear_cliff and self.state == NAV_BACKWARD:
                 self.cliff_backup_until = 0.0  # clear lockout on rear cliff
                 self.obstacle_backup_until = 0.0  # clear obstacle lockout on rear cliff
                 self._transition(NAV_SLOW_FORWARD)

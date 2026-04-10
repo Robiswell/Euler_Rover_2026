@@ -330,7 +330,10 @@ def compute_turn_intensity(frame):
     fdr = frame["FDR"]
     fdl_eff = 25.0 if (fdl is None or fdl == -1) else fdl
     fdr_eff = 25.0 if (fdr is None or fdr == -1) else fdr
-    return math.tanh((fdl_eff - fdr_eff) / 50.0)
+    # FIX 23: proximity scaling -- closer obstacle = more dramatic arc turn.
+    closest = min(fdl_eff, fdr_eff)
+    proximity_scale = max(0.25, min(1.0, (60.0 - closest) / 40.0))
+    return math.tanh((fdl_eff - fdr_eff) / 50.0) * proximity_scale
 
 
 def compute_battery_mult(voltage_value):
@@ -544,16 +547,17 @@ class NavStateMachine:
         else:
             self._freefall_start = 0.0
 
-        # P6: Front cliff
-        if front_cliff:
+        # P6: Front cliff (FIX 22: forward-motion states + BACKWARD hold)
+        _cliff_active_states = (NAV_FORWARD, NAV_SLOW_FORWARD, NAV_ARC_LEFT, NAV_ARC_RIGHT, NAV_BACKWARD)
+        if front_cliff and self.state in _cliff_active_states:
             if self.state != NAV_BACKWARD:
                 self.hold_position_count = 0
                 self._start_dwell(0.8)  # Fix 68: only on first transition
             self._transition(NAV_BACKWARD)
             return self._backward_action(frame)
 
-        # P7: Rear cliff
-        if rear_cliff:
+        # P7: Rear cliff (FIX 22: only while backing up)
+        if rear_cliff and self.state == NAV_BACKWARD:
             self._transition(NAV_SLOW_FORWARD)
             speed = int(SLOW_SPEED * self.terrain_mult * self.stall_speed_mult)
             return (NAV_SLOW_FORWARD, speed, 0.0, 1, "nav_slow_fwd")
@@ -1268,8 +1272,9 @@ def run_n3():
     check(cid, state == NAV_BACKWARD, f"P6 front cliff: state={state} expected {NAV_BACKWARD}")
     check(cid, x_flip == -1, f"P6 front cliff: x_flip={x_flip} expected -1 (reversing)")
 
-    # --- P7: Rear cliff ---
+    # --- P7: Rear cliff (FIX 22: only fires while in BACKWARD) ---
     nav = fresh_nav()
+    nav.state = NAV_BACKWARD  # precondition: P7 gated to BACKWARD state
     state, speed, turn, x_flip, step = fsm_update_simple(nav, rear_cliff=True)
     check(cid, state == NAV_SLOW_FORWARD, f"P7 rear cliff: state={state} expected {NAV_SLOW_FORWARD}")
     check(cid, x_flip == 1, f"P7 rear cliff: x_flip={x_flip} expected 1 (forward)")
