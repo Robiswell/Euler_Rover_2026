@@ -40,7 +40,7 @@ ALL_SERVOS   = LEFT_SERVOS + RIGHT_SERVOS
 LEG_SPLAY      = {1:-35, 2:-35, 6:0, 3:0, 5:35, 4:35}
 KP_PHASE        = 15.0
 STALL_THRESHOLD = 750
-real_dt           = 1.0 / 35.0
+real_dt           = 1.0 / 30.0
 GAITS = {
     0: {'duty': 0.5,  'offsets': {2:0.0, 6:0.0, 4:0.0,  1:0.5, 3:0.5, 5:0.5}},
     1: {'duty': 0.75, 'offsets': {4:0.833, 3:0.666, 2:0.5, 5:0.333, 6:0.166, 1:0.0}},
@@ -776,7 +776,7 @@ def evaluate(r):
             fails.append(f"EXIT SNAP on stall recovery (exit_snap={r['max_exit_snap']} STS, limit 2000)")
 
     elif name.startswith("T4"):
-        # At 35 Hz, stall phase drift is larger per-tick; governor clamps this in production
+        # At 30 Hz, stall phase drift is larger per-tick; governor clamps this in production
         if r['max_exit_snap'] > 2800:
             fails.append(f"EXIT SNAP on hole recovery (exit_snap={r['max_exit_snap']} STS, limit 2800)")
 

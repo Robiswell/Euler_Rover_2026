@@ -4,7 +4,7 @@ Hexapod rover kinematics - STS3215 servos, Raspberry Pi 3B+
 
 Two processes:
   Brain  - mission sequencer, runs gait phases and recovery behaviors
-  Heart  - 35Hz kinematics loop, Buehler clock math + LERP smoothing
+  Heart  - 30Hz kinematics loop, Buehler clock math + LERP smoothing
 
 Hardware: 6x STS3215 12V servos on /dev/ttyUSB1 @ 1Mbaud
 No software angle offsets - clearance is managed physically.
@@ -236,7 +236,7 @@ GAITS = {
 # -----------------------------------------------------------------
 # Exponential ramp rate κ for smooth gait transitions.
 # Controls convergence speed of duty (ε) and phase offset (φ) ramps.
-# κ·dt ≈ 0.16 at 35 Hz → 95% settled in ~0.6 s (paper recommends 0.5–1.0 s).
+# κ·dt ≈ 0.27 at 30 Hz → 95% settled in ~0.32 s (paper recommends 0.5–1.0 s).
 KAPPA_TRANSITION = 8.0  # 1/s — exponential decay rate for φ/ε ramps
 
 # Adjacent-leg pairs: no two adjacent legs may be in swing (air) simultaneously.
@@ -518,7 +518,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 shared_impact_start, shared_impact_end, shared_servo_loads, shared_servo_speeds,
                 shared_heartbeat, shared_stall_override, shared_roll_mode, shared_voltage, is_running):
     """
-    35Hz kinematics loop. Runs as a separate process.
+    30Hz kinematics loop. Runs as a separate process.
     GroupSyncRead for position and load every tick. Temp/voltage/current
     rotate one servo per tick to avoid unnecessary bus traffic.
     """
@@ -593,7 +593,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
     cmd_sock.setblocking(False)
     last_log_time  = 0
 
-    # Verbose telemetry: [H5] servo detail at 5Hz (every 10th tick of 35Hz loop)
+    # Verbose telemetry: [H5] servo detail at 5Hz (every 6th tick of 30Hz loop)
     h5_buffer  = []       # buffered [H5] lines, drained at 1Hz with log_telemetry
     h5_counter = 0        # tick counter for 5Hz decimation
     cmd_speeds     = {sid: 0 for sid in ALL_SERVOS}    # per-servo commanded speed (raw units)
@@ -738,37 +738,54 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
         port_handler.clearPort()
         print("[heart] snapping legs to home...")
-        
+
+        def _servo_write_retry(write_fn, retries=3, delay=0.05):
+            """Retry a servo write up to N times on comm failure."""
+            for attempt in range(retries):
+                result, error = write_fn()
+                if result == 0:
+                    return 0, error
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                    port_handler.clearPort()
+            return result, error
+
         for sid in ALL_SERVOS:
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
-            dxl_comm_result, dxl_error = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 0)  # Position
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 0))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} mode write failed (err={dxl_comm_result})")
+                print(f"[init] WARNING: servo {sid} mode write failed after retries (err={dxl_comm_result})")
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_ACCEL, 20)
-            dxl_comm_result, dxl_error = packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 400)
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 400))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} torque_limit write failed (err={dxl_comm_result})")
+                print(f"[init] WARNING: servo {sid} torque_limit write failed after retries (err={dxl_comm_result})")
             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_SPEED, 800)
             packet_handler.write2ByteTxRx(port_handler, sid, ADDR_GOAL_POSITION, HOME_POSITIONS[sid])
-            dxl_comm_result, dxl_error = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} torque_enable write failed (err={dxl_comm_result})")
+                print(f"[init] WARNING: servo {sid} torque_enable write failed after retries (err={dxl_comm_result})")
 
         time.sleep(3.0)
 
         print("[heart] switching to velocity mode")
         for sid in ALL_SERVOS:
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 0)
-            dxl_comm_result, dxl_error = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1)  # Velocity
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write1ByteTxRx(port_handler, sid, ADDR_MODE, 1))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} velocity mode write failed (err={dxl_comm_result})")
+                print(f"[init] WARNING: servo {sid} velocity mode write failed after retries (err={dxl_comm_result})")
             packet_handler.write1ByteTxRx(port_handler, sid, ADDR_ACCEL, 0)
-            dxl_comm_result, dxl_error = packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000)
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write2ByteTxRx(port_handler, sid, ADDR_TORQUE_LIMIT, 1000))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} torque_limit write failed (err={dxl_comm_result})")
-            dxl_comm_result, dxl_error = packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1)
+                print(f"[init] WARNING: servo {sid} torque_limit write failed after retries (err={dxl_comm_result})")
+            dxl_comm_result, dxl_error = _servo_write_retry(
+                lambda: packet_handler.write1ByteTxRx(port_handler, sid, ADDR_TORQUE_ENABLE, 1))
             if dxl_comm_result != 0:
-                print(f"[init] WARNING: servo {sid} torque_enable write failed (err={dxl_comm_result})")
+                print(f"[init] WARNING: servo {sid} torque_enable write failed after retries (err={dxl_comm_result})")
 
         # Pre-register all servos for position and load sync reads
         for sid in ALL_SERVOS:
@@ -812,7 +829,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
         pass
 
     master_time_L, master_time_R = 0.0, 0.0
-    target_dt      = 1.0 / 35.0
+    target_dt      = 1.0 / 30.0
     last_loop_time = time.perf_counter()
 
     # State Smoothing (V69)
@@ -891,19 +908,19 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                 else:
                     actual_phases[sid] = last_actual_phases[sid]
                     servo_comm_fails[sid] += 1
-                    if servo_comm_fails[sid] == 35:
+                    if servo_comm_fails[sid] == 30:
                         print(f"[heart] servo {sid} unresponsive for 1s — zeroing speed")
                         servo_disabled[sid] = True
                         current_per_servo[sid] = 0  # S3: don't let phantom current pollute governor
 
             # Bus disconnect detection — if no servo responds for 8 consecutive
-            # ticks (200ms at 35Hz), the USB link is dead.  STS3215 servos in
+            # ticks (200ms at 30Hz), the USB link is dead.  STS3215 servos in
             # velocity mode keep spinning at last speed, so detect fast.
             if pos_read_count == 0:
                 comm_fail_streak += 1
             else:
                 comm_fail_streak = 0
-            if comm_fail_streak >= 7:
+            if comm_fail_streak >= 6:
                 print("[heart] serial bus error — no servo responding for 200ms")
                 # Tier 3d: log bus disconnect to file (was stdout only)
                 try:
@@ -920,7 +937,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             # Telemetry read - rotate one servo per tick for full telemetry.
             # Load read every 2nd tick to save ~2-3ms serial bus time.
             # shared_servo_loads retains previous frame values on skip ticks.
-            if shared_heartbeat.value % 2 == 0:
+            load_read_tick = (shared_heartbeat.value % 2 == 0)
+            if load_read_tick:
                 gsread_load.txRxPacket()
                 for sid in ALL_SERVOS:
                     if gsread_load.isAvailable(sid, ADDR_PRESENT_LOAD, LEN_PRESENT_LOAD):
@@ -944,10 +962,11 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
                         # During exit, a new spike increments the counter back up —
                         # stall re-latches immediately when counter hits 3 again.
                         sid_load = shared_servo_loads[SERVO_LOAD_INDEX[sid]]
-                        if sid_load > STALL_THRESHOLD:
-                            stall_counters[sid] = min(stall_counters[sid] + 1, 3)
-                        else:
-                            stall_counters[sid] = max(0, stall_counters[sid] - 1)
+                        if load_read_tick:
+                            if sid_load > STALL_THRESHOLD:
+                                stall_counters[sid] = min(stall_counters[sid] + 1, 3)
+                            else:
+                                stall_counters[sid] = max(0, stall_counters[sid] - 1)
                         prev_stalled = is_stalled[sid]
                         if stall_counters[sid] >= 3:
                             is_stalled[sid] = True
@@ -1440,9 +1459,9 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             if gov_active:
                 gov_clamp_count += 1
 
-            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz (every 7th tick at 35Hz)
+            # [H5] verbose telemetry: servo positions + commanded speeds + phase angles at 5Hz (every 6th tick at 30Hz)
             h5_counter += 1
-            if VERBOSE_TELEMETRY and h5_counter % 7 == 0:
+            if VERBOSE_TELEMETRY and h5_counter % 6 == 0:
                 t_off = time.monotonic() - heart_start_mono
                 pos_str = ",".join(str(raw_positions.get(sid, 0)) for sid in ALL_SERVOS)
                 spd_str = ",".join(str(cmd_speeds[sid]) for sid in ALL_SERVOS)
@@ -1463,8 +1482,8 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
             while time.perf_counter() - loop_start < target_dt:
                 pass
 
-            # Loop overrun detection
-            if prev_loop_ms > 25.7:
+            # Loop overrun detection (30Hz loop = 33.33ms target; flag above 33.5ms)
+            if prev_loop_ms > 33.5:
                 overrun_streak += 1
                 ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 overrun_buffer.append(f"[{ts}] [OVERRUN] dt={prev_loop_ms:.1f}ms at T+{tick_mono:.3f}\n")
@@ -1767,7 +1786,7 @@ if __name__ == "__main__":
     TERRAIN_LERP_ALPHA = 0.45  # per-tick blend factor (0 = no change, 1 = instant)
     # Per-gait backup durations (slower gaits need more time to cover safe distance)
     # Gait IDs: 0=tripod, 1=wave, 2=quad
-    BACKUP_DURATION = {0: 2.0, 1: 3.0, 2: 2.5}  # reduced from 4/8/6 -- competition course is short, less backup time needed
+    BACKUP_DURATION = {0: 4.0, 1: 8.0, 2: 6.0}  # restored to original competition values -- sufficient backup distance on wet sand
     MAX_TURN_BIAS = 0.30              # tighter arcs for obstacle avoidance (was 0.25)
     PIVOT_TURN_BIAS = 0.28            # reduced from 0.35 -- stays within roll-aware clearance governor
     PIVOT_IMPACT_START = 345          # ° — narrowed 30° stance sweep for safe pivot clearance
@@ -1886,6 +1905,9 @@ if __name__ == "__main__":
             """Open serial port. Returns True on success."""
             try:
                 self._ser = serial.Serial(self._port, self._baud, timeout=0.1)
+                self._ser.reset_input_buffer()
+                time.sleep(0.05)
+                self._ser.readline()  # discard first (possibly partial) line
                 self._consecutive_failures = 0
                 return True
             except (serial.SerialException, OSError) as e:
@@ -3192,7 +3214,7 @@ if __name__ == "__main__":
     try:
         print("[brain] waiting for heart...")
         # Use != 0 sentinel rather than < 50 threshold: a signed 32-bit counter
-        # overflows to negative after ~497 days at 35 Hz, making the < 50 check
+        # overflows to negative after ~497 days at 30 Hz, making the < 50 check
         # pass immediately on the next boot and starting the mission before Heart
         # has actually initialised.  Any nonzero value means Heart has ticked at
         # least once — sufficient proof of life for the boot gate.
@@ -3268,12 +3290,15 @@ if __name__ == "__main__":
 
             if reader is not None:
                 try:
-                    # Wait up to 3s for first valid frame
+                    # Wait up to 3s for first valid frame, then 0.5s warmup
                     init_wait = time.monotonic()
                     while reader.stale_seconds() == float("inf"):
                         if time.monotonic() - init_wait > 3.0:
                             break
                         time.sleep(0.1)
+                    if reader.stale_seconds() < float("inf"):
+                        time.sleep(0.5)  # sensor warmup: let EMA seed with real data
+                        brain_log("[NAV] sensor warmup complete")
 
                     if reader.stale_seconds() == float("inf"):
                         brain_log("[NAV] no Arduino data after 3s — timed fallback")
@@ -3465,8 +3490,8 @@ if __name__ == "__main__":
                                 t_off = time.monotonic() - brain_start_mono
                                 bs_buffer.append(
                                     f"[BS] T+{t_off:.3f} "
-                                    f"F:{frame.get('FDL',0)},{frame.get('FCF',0)},{frame.get('FCD',0)},{frame.get('FDR',0)} "
-                                    f"R:{frame.get('RDL',0)},{frame.get('RCF',0)},{frame.get('RCD',0)},{frame.get('RDR',0)} "
+                                    f"F:{frame.get('FDL',0):.2f},{frame.get('FCF',0):.2f},{frame.get('FCD',0):.2f},{frame.get('FDR',0):.2f} "
+                                    f"R:{frame.get('RDL',0):.2f},{frame.get('RCF',0):.2f},{frame.get('RCD',0):.2f},{frame.get('RDR',0):.2f} "
                                     f"P:{imu['pitch_deg']:+.1f} Ro:{imu['roll_deg']:+.1f} Y:{imu['yaw_deg']:+.1f} "
                                     f"Ac:{imu['accel_mag']:.1f} Gy:{imu['angular_rate']:.2f} U:{imu['upright_quality']:.2f}\n")
 
@@ -3571,6 +3596,13 @@ if __name__ == "__main__":
                                   f"R={SEVERITY_LABELS_COMP[right_class]}  "
                                   f"cliff: F={'YES' if front_cliff else 'no'} "
                                   f"R={'YES' if rear_cliff else 'no'}")
+                            print(f"  FDL:{SEVERITY_LABELS_COMP[classify_distance(frame.get('FDL'))]}({frame.get('FDL', -1):.0f}) "
+                                  f"FCF:{SEVERITY_LABELS_COMP[classify_distance(frame.get('FCF'))]}({frame.get('FCF', -1):.0f}) "
+                                  f"FDR:{SEVERITY_LABELS_COMP[classify_distance(frame.get('FDR'))]}({frame.get('FDR', -1):.0f}) | "
+                                  f"RDL:{SEVERITY_LABELS_COMP[classify_distance(frame.get('RDL'))]}({frame.get('RDL', -1):.0f}) "
+                                  f"RCF:{SEVERITY_LABELS_COMP[classify_distance(frame.get('RCF'))]}({frame.get('RCF', -1):.0f}) "
+                                  f"RDR:{SEVERITY_LABELS_COMP[classify_distance(frame.get('RDR'))]}({frame.get('RDR', -1):.0f}) | "
+                                  f"FCD:{frame.get('FCD', -1):.0f} RCD:{frame.get('RCD', -1):.0f}")
                             print(f"  pitch={imu['pitch_deg']:+5.1f}°  "
                                   f"roll={imu['roll_deg']:+5.1f}°  "
                                   f"upright={imu['upright_quality']:.2f}  "
@@ -4062,7 +4094,7 @@ if __name__ == "__main__":
                         _rdl = frame.get('RDL', 0); _rcf = frame.get('RCF', 0)
                         _rcd = frame.get('RCD', 0); _rdr = frame.get('RDR', 0)
                         print(f"  ── Rover Shape ──              FRONT")
-                        print(f"              FDL={_fdl:>4}  FCF={_fcf:>4}  FCD={_fcd:>4}  FDR={_fdr:>4}")
+                        print(f"              FDL={_fdl:>7.2f}  FCF={_fcf:>7.2f}  FCD={_fcd:>7.2f}  FDR={_fdr:>7.2f}")
                         print(f"                   ┌───────────────────────┐")
                         print(f"              s2   │                       │   s1")
                         print(f"                   │                       │")
@@ -4070,7 +4102,7 @@ if __name__ == "__main__":
                         print(f"                   │                       │")
                         print(f"              s4   │                       │   s5")
                         print(f"                   └───────────────────────┘")
-                        print(f"              RDL={_rdl:>4}  RCF={_rcf:>4}  RCD={_rcd:>4}  RDR={_rdr:>4}")
+                        print(f"              RDL={_rdl:>7.2f}  RCF={_rcf:>7.2f}  RCD={_rcd:>7.2f}  RDR={_rdr:>7.2f}")
                         print(f"  ── Rover Shape ──               REAR")
                         print(f"  step_name={step_name}")
                         prev_state_name = state_name
