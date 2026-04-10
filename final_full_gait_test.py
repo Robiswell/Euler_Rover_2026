@@ -1803,7 +1803,7 @@ if __name__ == "__main__":
     LOAD_ASYMMETRY_THRESHOLD = 200
     FLICKER_WINDOW_S = 2.0
     FLICKER_COUNT_THRESHOLD = 3
-    MISSION_TIMEOUT_S = 90
+    MISSION_TIMEOUT_S = 180  # extended 90→180s (3 min) for April 11 Alamosa competition on wet sand
     FINISH_WALL_DIST_CM = 10
     FINISH_WALL_SUSTAIN_S = 2.0
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
