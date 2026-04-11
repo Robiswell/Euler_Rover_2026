@@ -2376,6 +2376,7 @@ if __name__ == "__main__":
             self._steep_up_start = 0.0
             self._steep_down_start = 0.0
             self._heavy_load_start = 0.0
+            self._mid_load_start = 0.0    # T4b: moderate load sustain (FIX 152)
             self._light_load_start = 0.0
             self._tripod_exit_start = 0.0     # T8 hysteresis: grace timer for load-only failures
             self._roll_sustained_start = 0.0
@@ -2385,7 +2386,7 @@ if __name__ == "__main__":
             self._impact_cooldown_until = 0.0
             self._last_stall_clear_time = time.monotonic()
             # Terrain state (held during non-FORWARD/SLOW states)
-            self.terrain_gait = 2  # default quad
+            self.terrain_gait = 0  # default tripod (FIX 152)
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult = 1.0          # smoothed value (what speed formula reads)
@@ -2924,14 +2925,14 @@ if __name__ == "__main__":
             # 40° total sweep, centered on vertical.
             # Worst angle from vertical = 20° → clearance ~70.5mm (safe).
             # Old 330°/15° had worst angle 30° → clearance 61.2mm (< 70mm effective with margin).
-            if pitch_deg > 40:  # T1: WAVE above 40° (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
+            if pitch_deg > 25:  # T1: WAVE above 25° (0-20 TRIPOD, 20-25 QUAD, >25 WAVE)
                 if self._steep_up_start == 0.0:
                     self._steep_up_start = now
-                if (now - self._steep_up_start) >= 1.0:
+                if (now - self._steep_up_start) >= 1.5:
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.9   # T1: raised from 0.8 — governor-clamped for wave anyway
+                    self.terrain_mult_target = 1.0   # T1: FIX 152 — arena flat, no speed penalty
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2939,14 +2940,14 @@ if __name__ == "__main__":
                 self._steep_up_start = 0.0
 
             # T2: Steep descent
-            if pitch_deg < -40:  # T2: WAVE below -40° (0-20 TRIPOD, 20-40 QUAD, >40 WAVE)
+            if pitch_deg < -25:  # T2: WAVE below -25° (0-20 TRIPOD, 20-25 QUAD, >25 WAVE)
                 if self._steep_down_start == 0.0:
                     self._steep_down_start = now
-                if (now - self._steep_down_start) >= 1.0:
+                if (now - self._steep_down_start) >= 1.5:
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.6   # T2: raised from 0.5 — snap threshold adjusted to <=0.6
+                    self.terrain_mult_target = 0.85  # T2: FIX 152 — raised from 0.6
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
@@ -2959,14 +2960,14 @@ if __name__ == "__main__":
             if abs(pitch_deg) > SLOPE_PITCH_DEG:
                 if self._pitch_tilt_start == 0.0:
                     self._pitch_tilt_start = now
-                pitch_triggered = (now - self._pitch_tilt_start) >= 0.5
+                pitch_triggered = (now - self._pitch_tilt_start) >= 1.0
             else:
                 self._pitch_tilt_start = 0.0
                 pitch_triggered = False
             if abs(roll_deg) > SLOPE_ROLL_DEG:
                 if self._roll_tilt_start == 0.0:
                     self._roll_tilt_start = now
-                roll_triggered = (now - self._roll_tilt_start) >= 1.0
+                roll_triggered = (now - self._roll_tilt_start) >= 2.0
             else:
                 self._roll_tilt_start = 0.0
                 roll_triggered = False
@@ -2974,7 +2975,7 @@ if __name__ == "__main__":
                 self.terrain_gait = 2  # quadruped — faster than wave, still stable
                 self.terrain_impact_start = DEFAULT_IMPACT_START
                 self.terrain_impact_end = DEFAULT_IMPACT_END
-                self.terrain_mult_target = 0.85  # T3: raised from 0.7 — governor-clamped for wave
+                self.terrain_mult_target = 1.0   # T3: FIX 152 — arena flat, no speed penalty
                 self.terrain_is_tripod = False
                 self._apply_gait_transition(prev_gait)
                 return
@@ -2985,21 +2986,37 @@ if __name__ == "__main__":
             if eff_load > 600:
                 if self._heavy_load_start == 0.0:
                     self._heavy_load_start = now
-                if (now - self._heavy_load_start) >= TERRAIN_SUSTAIN_S:
+                if (now - self._heavy_load_start) >= 3.0:
                     self.terrain_gait = 1  # wave
                     self.terrain_impact_start = DEFAULT_IMPACT_START
                     self.terrain_impact_end = DEFAULT_IMPACT_END
-                    self.terrain_mult_target = 0.6
+                    self.terrain_mult_target = 0.85  # T4a: FIX 152 — raised from 0.6
                     self.terrain_is_tripod = False
                     self._apply_gait_transition(prev_gait)
                     return
             else:
                 self._heavy_load_start = 0.0
 
+            # T4b: Moderate load -- QUAD (FIX 152, 2026-04-11)
+            # 350-600 load -> QUAD. Sustain 3s filters arena bache spikes.
+            if eff_load > 350:
+                if self._mid_load_start == 0.0:
+                    self._mid_load_start = now
+                if (now - self._mid_load_start) >= 3.0:
+                    self.terrain_gait = 2  # quadruped
+                    self.terrain_impact_start = DEFAULT_IMPACT_START
+                    self.terrain_impact_end = DEFAULT_IMPACT_END
+                    self.terrain_mult_target = 1.0
+                    self.terrain_is_tripod = False
+                    self._apply_gait_transition(prev_gait)
+                    return
+            else:
+                self._mid_load_start = 0.0
+
             # T8: Hard flat ground — sprint with tripod
             # Dead-band hysteresis 2026-04-04: entry tight, exit loose, + grace.
-            #   entry: pitch<15, roll<15, load<250  (strict — only enter if clearly hard flat)
-            #   exit:  pitch≥17, roll≥17, load≥280 (loose — don't bail on a minor wobble)
+            #   entry: pitch<15, roll<15, load<280  (strict — only enter if clearly hard flat)
+            #   exit:  pitch≥17, roll≥17, load≥300 (loose — don't bail on a minor wobble)
             #   grace: 0.3s on danger (pitch/roll/stall), 0.5s on load-only
             no_recent_stalls = (now - self._last_stall_clear_time) > 30 or self.stall_count_30s == 0
             t8_entry_sustain = 1.5
@@ -3007,7 +3024,7 @@ if __name__ == "__main__":
                 # Not in tripod → strict entry gates
                 pitch_entry_ok = abs(pitch_deg) < 15
                 roll_entry_ok  = abs(roll_deg) < 15
-                load_entry_ok  = eff_load < 250
+                load_entry_ok  = eff_load < 280
                 if load_entry_ok and pitch_entry_ok and roll_entry_ok and no_recent_stalls:
                     if self._light_load_start == 0.0:
                         self._light_load_start = now
@@ -3030,7 +3047,7 @@ if __name__ == "__main__":
                 # Already in tripod → loose exit gates (dead band)
                 pitch_exit_bad = abs(pitch_deg) >= 17
                 roll_exit_bad  = abs(roll_deg) >= 17
-                load_exit_bad  = eff_load >= 280
+                load_exit_bad  = eff_load >= 300
                 danger = pitch_exit_bad or roll_exit_bad or (not no_recent_stalls)
                 if danger:
                     # 0.3s grace filters single-tick spikes (e.g. brief 8° pitch on ramp)
@@ -3065,8 +3082,8 @@ if __name__ == "__main__":
                     self.terrain_mult_target = 1.0
                     return
 
-            # T9: Default — quad
-            self.terrain_gait = 2
+            # T9: Default — tripod (FIX 152: was quad)
+            self.terrain_gait = 0
             self.terrain_impact_start = DEFAULT_IMPACT_START
             self.terrain_impact_end = DEFAULT_IMPACT_END
             self.terrain_mult_target = 1.0   # Fix 155: LERP'd smoothly in update()
@@ -3339,8 +3356,8 @@ if __name__ == "__main__":
                         # Reset stall count on mission start — if we have sensor data, we can track stalls accurately from the beginning
                         roll_attempts = 0
                         MAX_ROLL_ATTEMPTS = 2
-                        # Set initial gait: quad for competition
-                        set_gait_state(gait=2, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
+                        # Set initial gait: tripod for competition (FIX 152)
+                        set_gait_state(gait=0, impact_start=DEFAULT_IMPACT_START, impact_end=DEFAULT_IMPACT_END,
                                        speed=0, turn=0.0, x_flip=1,
                                        step_name="nav_init")
 
