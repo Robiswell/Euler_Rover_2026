@@ -1876,14 +1876,17 @@ if __name__ == "__main__":
             if dists[i] > 450:
                 dists[i] = 450.0
 
-        # Competition hotfix 2026-04-11 (v2): FDL sensor hardware fault + cables disconnected.
-        # Previous alias FDL=FCD caused right-drift (FCD reads ground ~25cm, classified as
-        # "obstacle-near-left", forcing constant right pivots). Now force FDL to 450 (far/clear)
-        # so the left classifier trusts only RDL. FCD cables remain read on their own pin; key
-        # "FCD" still carries the real downward reading (harmless -- cliff detection is disabled).
+        # Competition hotfix 2026-04-11 (v4): physical cable swap. The FDL sensor
+        # hardware was faulty, so the FCD ultrasonic was physically relocated to the
+        # FDL mounting position. Arduino is UNCHANGED: it still reads that sensor on
+        # the "FCD" pin and emits it in the FCD column of the CSV. In the Pi we
+        # remap: Python's "FDL" takes the Arduino's FCD column (real front-diagonal-
+        # left reading now), and Python's "FCD" is forced to 450 (ignored; cliff
+        # detection is disabled anyway). Arduino's FDL column is garbage (pins
+        # disconnected) -- drop it.
         return {
             "timestamp_ms": ts,
-            "FDL": 450.0, "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
+            "FDL": dists[2], "FCF": dists[1], "FCD": 450.0, "FDR": dists[3],
             "RDL": dists[4], "RCF": dists[5], "RCD": dists[6], "RDR": dists[7],
             "qw": qw, "qx": qx, "qy": qy, "qz": qz,
             "ax": ax, "ay": ay, "az": az,
