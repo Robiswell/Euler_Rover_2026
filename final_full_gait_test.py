@@ -111,7 +111,7 @@ FEEDFORWARD_CAP         = 499.0    # STS raw units -- matches STS3215 no-load ma
 GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
 DEFAULT_IMPACT_START    = 340      # walking stance start angle (40 deg sweep)
 DEFAULT_IMPACT_END      = 20       # walking stance end angle
-QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep for 28% motor margin at duty=0.70
+QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep — Quad duty=0.75 → air=25%, motor margin ~10% at max Hz
 QUAD_IMPACT_END         = 30       # quad air sweep = 300 deg (vs 330 default) — STS3215 can track this
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
@@ -225,7 +225,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.70,
+        'duty': 0.75,
         'ff_budget': 465.0,  # lowered — matches 250 deg/s loaded speed (carpet); PhErr governor adapts for heavier terrain
         'offsets': {2: 0.0, 5: 0.0,  1: 0.333, 3: 0.333,  4: 0.667, 6: 0.667}
     }
@@ -3773,13 +3773,13 @@ if __name__ == "__main__":
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
             # Clearance analysis:
-            #   Quad duty=0.70 → air phase is 30% of cycle.
-            #   330/30 (60° sweep): air_sweep=300°, motor margin=28% at max Hz.
+            #   Quad duty=0.75 → air phase is 25% of cycle.
+            #   330/30 (60° sweep): air_sweep=300°, motor margin ~10% at max Hz.
             #   Worst angle from vertical = 30° → clearance = 125*cos(30)-47 = 61mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = QUAD_IMPACT_START  # 60° sweep, 300° air
             quad_impact_end   = QUAD_IMPACT_END    # clearance at 30°: 61mm
-            quad_duty = GAITS[2]['duty']  # 0.70
+            quad_duty = GAITS[2]['duty']  # 0.75
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
