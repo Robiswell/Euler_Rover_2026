@@ -2838,9 +2838,10 @@ if __name__ == "__main__":
             speed_s = speed_scale_from_front(front_class)
             speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
-            # Heading drift correction
+            # Heading drift correction (FIX 153A: gated by imu_ready to avoid
+            # steering on stale yaw during the 2s IMU grace window).
             turn = 0.0
-            if self.initial_yaw is not None:
+            if self.initial_yaw is not None and self.imu_ready:
                 yaw_error = math.atan2(
                     math.sin(imu["yaw_rad"] - self.initial_yaw),
                     math.cos(imu["yaw_rad"] - self.initial_yaw))
@@ -3391,6 +3392,14 @@ if __name__ == "__main__":
                             print(f"[NAV] IMU zero-offset: pitch={IMU_PITCH_OFFSET_DEG:+.2f}° roll={IMU_ROLL_OFFSET_DEG:+.2f}°")
                         else:
                             brain_log(f"[NAV] IMU auto-cal SKIPPED (only {len(cal_pitches)} samples)")
+
+                        # FIX 153B: re-baseline initial_yaw AFTER the 2s IMU calibration
+                        # window. The first-frame capture (line ~3368) happens before the
+                        # BNO085 UART-RVC has stabilized and may be corrupt.
+                        if last_cal_frame is not None:
+                            stable_imu = compute_imu(last_cal_frame)
+                            nav.initial_yaw = stable_imu["yaw_rad"]
+                            brain_log(f"[NAV] initial yaw re-baselined post-cal={math.degrees(nav.initial_yaw):.1f}deg")
 
                         brain_log("[NAV] autonomous nav loop starting")
                         fallen_back = False
