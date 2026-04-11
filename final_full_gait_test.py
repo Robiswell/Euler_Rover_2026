@@ -1876,11 +1876,14 @@ if __name__ == "__main__":
             if dists[i] > 450:
                 dists[i] = 450.0
 
-        # Competition hotfix 2026-04-11: FDL sensor hardware fault -- alias FCD reading as FDL.
-        # Cliff detection is disabled (line 1811) so FCD is free to be used as left-diagonal proxy.
+        # Competition hotfix 2026-04-11 (v2): FDL sensor hardware fault + cables disconnected.
+        # Previous alias FDL=FCD caused right-drift (FCD reads ground ~25cm, classified as
+        # "obstacle-near-left", forcing constant right pivots). Now force FDL to 450 (far/clear)
+        # so the left classifier trusts only RDL. FCD cables remain read on their own pin; key
+        # "FCD" still carries the real downward reading (harmless -- cliff detection is disabled).
         return {
             "timestamp_ms": ts,
-            "FDL": dists[2], "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
+            "FDL": 450.0, "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
             "RDL": dists[4], "RCF": dists[5], "RCD": dists[6], "RDR": dists[7],
             "qw": qw, "qx": qx, "qy": qy, "qz": qz,
             "ax": ax, "ay": ay, "az": az,
