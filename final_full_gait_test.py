@@ -2843,18 +2843,12 @@ if __name__ == "__main__":
             speed_s = speed_scale_from_front(front_class)
             speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
-            # Heading drift correction (FIX 153A: gated by imu_ready to avoid
-            # steering on stale yaw during the 2s IMU grace window).
+            # Competition hotfix 2026-04-11 (v3): heading-hold DISABLED. Rover was
+            # drifting right because initial_yaw baseline was captured while rover
+            # was moving during IMU 2s cal window, causing constant right-correction
+            # toward a phantom heading. Let the rover walk straight based purely on
+            # mechanical symmetry; no yaw-based auto-adjust.
             turn = 0.0
-            if self.initial_yaw is not None and self.imu_ready:
-                yaw_error = math.atan2(
-                    math.sin(imu["yaw_rad"] - self.initial_yaw),
-                    math.cos(imu["yaw_rad"] - self.initial_yaw))
-                err_deg = math.degrees(yaw_error)
-                # Deadband 5° absorbs IMU jitter. Gain 0.015/°, cap ±0.10 (below
-                # is_pivot=0.10 threshold so heading-hold never triggers pivot semantics).
-                if abs(err_deg) > 5.0:
-                    turn = max(-0.10, min(0.10, -0.015 * err_deg))
 
             return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
