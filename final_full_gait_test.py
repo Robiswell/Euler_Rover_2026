@@ -179,8 +179,8 @@ DIRECTION_MAP = {
 # V0.5.01 New Constants for calibrated home positions and stall detection tuning for wet sand operation.
 # Calibrated zero points (Legs pointing straight down)
 HOME_POSITIONS = {
-    1: 1727, 2: 2769, 3: 1431,
-    4: 2899, 5: 1188, 6: 3200,
+    1: 4004, 2: 1099, 3: 3333,
+    4: 980,  5: 3460, 6: 927,
 }
 
 # Servo ID -> shared_servo_loads array index (0-based, clean mapping)
@@ -1808,7 +1808,7 @@ if __name__ == "__main__":
     RAPID_ROTATION_THRESHOLD = 3.5     # Fix 73: walking oscillation peaks ~2.0 rad/s
     NAV_SENSOR_KEYS = ("FDL", "FCF", "FCD", "FDR", "RDL", "RCF", "RCD", "RDR")  # Fix A7: hoisted from inline loop
     CLIFF_WARMUP = 5  # Fix 72: frames to skip during sensor settle
-    CLIFF_DETECTION_ENABLED = True  # ENABLED for competition outdoor terrain (was False for indoor/carpet testing)
+    CLIFF_DETECTION_ENABLED = False  # Competition hotfix 2026-04-11: Alamosa dunes have no real cliffs; FCD is also being aliased to FDL (hardware fault) so cliff logic must be off
     CLIFF_CONFIRM_FRAMES = 3    # consecutive candidate frames before cliff confirmed (lowered 5→3 to cut debounce 500ms→300ms at 10Hz -- reaction latency fix)
     CLIFF_IMU_ANGULAR_RATE = 3.5   # rad/s — matches RAPID_ROTATION_THRESHOLD; cliff IMU accelerator
     CLIFF_IMU_ACCEL_FALL = 7.0     # m/s² — below tipover (8.0); signals free-fall / severe tip
@@ -1876,9 +1876,11 @@ if __name__ == "__main__":
             if dists[i] > 450:
                 dists[i] = 450.0
 
+        # Competition hotfix 2026-04-11: FDL sensor hardware fault -- alias FCD reading as FDL.
+        # Cliff detection is disabled (line 1811) so FCD is free to be used as left-diagonal proxy.
         return {
             "timestamp_ms": ts,
-            "FDL": dists[0], "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
+            "FDL": dists[2], "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
             "RDL": dists[4], "RCF": dists[5], "RCD": dists[6], "RDR": dists[7],
             "qw": qw, "qx": qx, "qy": qy, "qz": qz,
             "ax": ax, "ay": ay, "az": az,
