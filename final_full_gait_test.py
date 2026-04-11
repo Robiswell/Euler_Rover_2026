@@ -143,7 +143,7 @@ PHERR_STUCK_TIMEOUT = 5.0   # sec — if governor stays at floor for this long, 
 KAPPA_GOVERNOR     = 3.0    # exponential decay rate (gentler than KAPPA_TRANSITION=12.0 for gait switches)
 MIN_STANCE_HZ      = 0.15   # Hz -- absolute floor after PhErr governor; prevents positive feedback loop
 KAPPA_STARTUP      = 1.5    # offset ramp rate at cold start (95% in 2.0s — prevents phase death spiral)
-KAPPA_GAIT_SWITCH  = 3.0    # offset ramp rate during gait transitions (95% in 1.0s)
+KAPPA_GAIT_SWITCH  = 1.5    # offset ramp rate during gait transitions (95% in 2.0s)
 OFFSET_CONVERGE_THRESH = 0.02  # offset convergence threshold (7.2 deg) — ramp done when all offsets within this
 
 # Industrial Safety Parameters
@@ -1192,7 +1192,7 @@ def gait_worker(shared_speed, shared_x_flip, shared_z_flip, shared_turn_bias, sh
 
             # Gait switch: ramp offsets gradually instead of snapping (replaces Fix 65 snap).
             # Snap caused 100-170° phase error because servos can't teleport. Ramp at
-            # KAPPA_GAIT_SWITCH=3.0 converges in ~1.0s with phase error staying below 30°.
+            # KAPPA_GAIT_SWITCH=1.5 converges in ~2.0s with phase error staying below 30°.
             if current_gait_id != prev_gait_id:
                 # Duty/ff_budget are NOT snapped — the CPG ramp below handles them gradually
                 # (snapping caused ~1s mismatch where duty led offsets, creating visible jerk)
