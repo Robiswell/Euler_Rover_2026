@@ -111,7 +111,7 @@ FEEDFORWARD_CAP         = 499.0    # STS raw units -- matches STS3215 no-load ma
 GOVERNOR_FF_BUDGET      = 575.0    # STS raw units — default fallback; per-gait 'ff_budget' in GAITS dict overrides this
 DEFAULT_IMPACT_START    = 340      # walking stance start angle (40 deg sweep)
 DEFAULT_IMPACT_END      = 20       # walking stance end angle
-QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep — Quad duty=0.75 → air=25%, motor margin ~10% at max Hz
+QUAD_IMPACT_START       = 330      # quad-specific: wider 60 deg sweep — Quad duty=0.70 → air=30%, motor margin ~16% at max Hz
 QUAD_IMPACT_END         = 30       # quad air sweep = 300 deg (vs 330 default) — STS3215 can track this
 
 # Body Dimensions (final mechanical design appendix — measured from physical robot)
@@ -225,7 +225,7 @@ GAITS = {
         'offsets': {2: 0.0, 6: 0.167, 4: 0.333, 1: 0.5, 3: 0.667, 5: 0.833}
     },
     2: {  # QUADRUPED
-        'duty': 0.75,
+        'duty': 0.70,
         'ff_budget': 465.0,  # lowered — matches 250 deg/s loaded speed (carpet); PhErr governor adapts for heavier terrain
         'offsets': {2: 0.0, 5: 0.0,  1: 0.333, 3: 0.333,  4: 0.667, 6: 0.667}
     }
@@ -1876,17 +1876,9 @@ if __name__ == "__main__":
             if dists[i] > 450:
                 dists[i] = 450.0
 
-        # Competition hotfix 2026-04-11 (v4): physical cable swap. The FDL sensor
-        # hardware was faulty, so the FCD ultrasonic was physically relocated to the
-        # FDL mounting position. Arduino is UNCHANGED: it still reads that sensor on
-        # the "FCD" pin and emits it in the FCD column of the CSV. In the Pi we
-        # remap: Python's "FDL" takes the Arduino's FCD column (real front-diagonal-
-        # left reading now), and Python's "FCD" is forced to 450 (ignored; cliff
-        # detection is disabled anyway). Arduino's FDL column is garbage (pins
-        # disconnected) -- drop it.
         return {
             "timestamp_ms": ts,
-            "FDL": dists[2], "FCF": dists[1], "FCD": 450.0, "FDR": dists[3],
+            "FDL": dists[0], "FCF": dists[1], "FCD": dists[2], "FDR": dists[3],
             "RDL": dists[4], "RCF": dists[5], "RCD": dists[6], "RDR": dists[7],
             "qw": qw, "qx": qx, "qy": qy, "qz": qz,
             "ax": ax, "ay": ay, "az": az,
@@ -2846,12 +2838,18 @@ if __name__ == "__main__":
             speed_s = speed_scale_from_front(front_class)
             speed = int(base_speed * speed_s * self.terrain_mult * self.stall_speed_mult)
 
-            # Competition hotfix 2026-04-11 (v3): heading-hold DISABLED. Rover was
-            # drifting right because initial_yaw baseline was captured while rover
-            # was moving during IMU 2s cal window, causing constant right-correction
-            # toward a phantom heading. Let the rover walk straight based purely on
-            # mechanical symmetry; no yaw-based auto-adjust.
+            # Heading drift correction (FIX 153A: gated by imu_ready to avoid
+            # steering on stale yaw during the 2s IMU grace window).
             turn = 0.0
+            if self.initial_yaw is not None and self.imu_ready:
+                yaw_error = math.atan2(
+                    math.sin(imu["yaw_rad"] - self.initial_yaw),
+                    math.cos(imu["yaw_rad"] - self.initial_yaw))
+                err_deg = math.degrees(yaw_error)
+                # Deadband 5 deg absorbs IMU jitter. Gain 0.015/deg, cap +/-0.10 (below
+                # is_pivot=0.10 threshold so heading-hold never triggers pivot semantics).
+                if abs(err_deg) > 5.0:
+                    turn = max(-0.10, min(0.10, -0.015 * err_deg))
 
             return (NAV_FORWARD, speed, turn, 1, "nav_forward")
 
@@ -3801,13 +3799,13 @@ if __name__ == "__main__":
         elif "--test-quad" in sys.argv:
             # === TEST: Quadruped phase only ===
             # Clearance analysis:
-            #   Quad duty=0.75 → air phase is 25% of cycle.
-            #   330/30 (60° sweep): air_sweep=300°, motor margin ~10% at max Hz.
+            #   Quad duty=0.70 → air phase is 30% of cycle.
+            #   330/30 (60° sweep): air_sweep=300°, motor margin ~16% at max Hz.
             #   Worst angle from vertical = 30° → clearance = 125*cos(30)-47 = 61mm.
             #   Governor dynamically limits Hz to maintain MIN_GROUND_CLEARANCE.
             quad_impact_start = QUAD_IMPACT_START  # 60° sweep, 300° air
             quad_impact_end   = QUAD_IMPACT_END    # clearance at 30°: 61mm
-            quad_duty = GAITS[2]['duty']  # 0.75
+            quad_duty = GAITS[2]['duty']  # 0.70
             max_hz_q, max_speed_q = compute_max_safe_speed(quad_impact_start, quad_impact_end, quad_duty)
             max_clr_hz_q = compute_max_clearance_hz(quad_impact_start, quad_impact_end, quad_duty,
                                                     min_clearance=MIN_GROUND_CLEARANCE + GOVERNOR_CLEARANCE_MARGIN)
