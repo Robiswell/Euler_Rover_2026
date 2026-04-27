@@ -201,10 +201,10 @@ python3 sim_nav.py
 - The clearest remaining failure mode was abrupt terrain transition within a single stride.
 - Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains.
 
-## Resume Summary
+## Summary
 
 Built and validated a six-legged autonomous rover spanning Python-based Raspberry Pi control, Arduino/C++ sensor firmware, CAD-modeled and 3D-printed mechanical parts, selected hardware components, terrain-adaptive gait overlays, Brain/Heart process architecture, and simulation-backed navigation tests. Formal field validation showed 31/32 successful traversals across seven terrain categories.
 
 ## Repository Status
 
-This repository is a cleaned public portfolio version of the Team Euler rover codebase. Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
+Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
