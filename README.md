@@ -24,13 +24,7 @@ My work focused on the Python gait and navigation stack, terrain-overlay tuning,
 
 ## System Architecture
 
-```mermaid
-flowchart LR
-    Sensors[8x HC-SR04 + BNO085 IMU] --> Nano[Arduino Nano<br/>C++ sensor firmware]
-    Nano -->|20-column CSV at ~10 Hz| Brain[Raspberry Pi Brain<br/>Python navigation FSM]
-    Brain -->|shared commands| Heart[Raspberry Pi Heart<br/>30 Hz gait loop]
-    Heart -->|GroupSyncWrite| Servos[6x Feetech STS3215 Servos]
-```
+![Brain/Heart system architecture diagram](docs/assets/brain-heart-architecture.jpg)
 
 The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, applies safety governors, and keeps motor control isolated from slower navigation work.
 
