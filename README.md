@@ -6,6 +6,41 @@ Identity is a six-legged autonomous rover built by Team Euler for the COSGC robo
 
 The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
 
+## Table Of Contents
+
+- [Results At A Glance](#results-at-a-glance)
+- [My Role](#my-role)
+- [System Architecture](#system-architecture)
+  - [Brain/Heart Process Split](#brainheart-process-split)
+- [Key Engineering Decisions](#key-engineering-decisions)
+- [Hardware Stack](#hardware-stack)
+  - [Measured Platform Geometry](#measured-platform-geometry)
+  - [CAD Models](#cad-models)
+- [Software Map](#software-map)
+  - [Runtime And Gait Control](#runtime-and-gait-control)
+  - [Main Program Modes](#main-program-modes)
+  - [Sensor Firmware And Input](#sensor-firmware-and-input)
+  - [Calibration And Configuration](#calibration-and-configuration)
+  - [Simulation And Verification](#simulation-and-verification)
+  - [Analysis And Tuning](#analysis-and-tuning)
+  - [Regression Tests And Notes](#regression-tests-and-notes)
+- [Gait Control](#gait-control)
+  - [Gait Pattern Visuals](#gait-pattern-visuals)
+- [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
+  - [Terrain Classification](#terrain-classification)
+  - [Servo Load Margin](#servo-load-margin)
+  - [Field Demo Videos](#field-demo-videos)
+  - [Course Success Runs](#course-success-runs)
+- [Colorado Space Grant Consortium Robotics Challenge Award](#colorado-space-grant-consortium-robotics-challenge-award)
+- [Simulation And Testing](#simulation-and-testing)
+- [Releases](#releases)
+- [Limitations](#limitations)
+- [Summary](#summary)
+- [Repository Status](#repository-status)
+- [Colorado Space Grant Consortium Research Symposium Submissions](#colorado-space-grant-consortium-research-symposium-submissions)
+  - [Symposium Poster Presentation](#symposium-poster-presentation)
+  - [Symposium Awards](#symposium-awards)
+
 ## Results At A Glance
 
 | Metric | Result |
