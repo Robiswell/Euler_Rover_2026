@@ -150,12 +150,12 @@ Servo load stayed below the stall threshold across the validation terrain set:
 
 | Run | Preview |
 | --- | --- |
-| Course 1 success | [![Course 1 success preview](docs/assets/course-1-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4) |
-| Course 2 success | [![Course 2 success preview](docs/assets/course-2-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4) |
-| Course 3 success | [![Course 3 success preview](docs/assets/course-3-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4) |
-| Course 4 success | [![Course 4 success preview](docs/assets/course-4-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4) |
-| Course 5 success | [![Course 5 success preview](docs/assets/course-5-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4) |
-| Challenge course success | [![Challenge course success preview](docs/assets/challenge-course-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4) |
+| Course 1 success | [![Course 1 success preview](docs/assets/course-1-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4) |
+| Course 2 success | [![Course 2 success preview](docs/assets/course-2-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4) |
+| Course 3 success | [![Course 3 success preview](docs/assets/course-3-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4) |
+| Course 4 success | [![Course 4 success preview](docs/assets/course-4-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4) |
+| Course 5 success | [![Course 5 success preview](docs/assets/course-5-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4) |
+| Challenge course success | [![Challenge course success preview](docs/assets/challenge-course-success-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4) |
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
