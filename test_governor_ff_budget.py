@@ -1,5 +1,5 @@
 """
-Tests for GOVERNOR_FF_BUDGET=700 / FEEDFORWARD_CAP=499 (production values) invariants.
+Tests for GOVERNOR_FF_BUDGET=575 / FEEDFORWARD_CAP=499 production invariants.
 
 These tests are pure arithmetic -- no hardware, no imports from final_full_gait_test.py.
 They replicate the exact formulas from the source so they survive internal refactors
@@ -135,24 +135,24 @@ def test_feedforward_cap_binds_before_budget(gait_name, duty, budget, air_sweep)
 
 
 # ---------------------------------------------------------------------------
-# Test 4: wave gait at budget=700 has sufficient Hz headroom (> 0.2 Hz)
+# Test 4: wave gait per-gait budget has sufficient Hz headroom (> 0.2 Hz)
 # ---------------------------------------------------------------------------
 
 def test_wave_duty_075_hz_exceeds_minimum_walking_threshold():
     """
-    Invariant: wave gait max_safe_hz > 0.2 Hz with GOVERNOR_FF_BUDGET=700.
+    Invariant: wave gait max_safe_hz > 0.2 Hz with FF_BUDGET_WAVE=700.
 
     Wave is the slowest gait (duty=0.75, most air-phase time). At 0.2 Hz the
     rover completes one full gait cycle in 5 seconds -- below that the robot
     moves too slowly to be useful on a competition course.
     """
-    WAVE_DUTY = 0.80
+    WAVE_DUTY = 0.75
     MIN_WALKING_HZ = 0.2
 
-    hz = governor_max_hz(GOVERNOR_FF_BUDGET, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
+    hz = governor_max_hz(FF_BUDGET_WAVE, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
     assert hz > MIN_WALKING_HZ, (
         f"Wave gait max_safe_hz={hz:.4f} <= {MIN_WALKING_HZ}. "
-        f"Budget={GOVERNOR_FF_BUDGET} is insufficient for wave walking on competition course."
+        f"Budget={FF_BUDGET_WAVE} is insufficient for wave walking on competition course."
     )
 
 
@@ -179,9 +179,9 @@ def test_budget_900_would_exceed_feedforward_cap():
     assert FEEDFORWARD_CAP < UNSAFE_BUDGET, (
         "Test setup error: cap should be below the unsafe budget to demonstrate the hazard."
     )
-    # Confirm hz is higher than with budget=700 (governor is less conservative)
-    hz_at_700 = governor_max_hz(GOVERNOR_FF_BUDGET, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
-    assert hz_at_900 > hz_at_700, (
-        "Budget=900 should allow higher Hz than budget=700, "
+    # Confirm hz is higher than with the current wave budget (governor is less conservative)
+    hz_at_wave_budget = governor_max_hz(FF_BUDGET_WAVE, VELOCITY_SCALAR, WAVE_DUTY, AIR_SWEEP_DEFAULT)
+    assert hz_at_900 > hz_at_wave_budget, (
+        "Budget=900 should allow higher Hz than the current wave budget, "
         "demonstrating the governor is less restrictive (and unsafe)."
     )

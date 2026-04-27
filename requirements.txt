@@ -1,0 +1,8 @@
+# Simulation, analysis, and test tooling
+pytest>=8.0
+numpy>=1.26
+matplotlib>=3.8
+
+# Hardware serial and Feetech STS3215 servo support
+pyserial>=3.5
+feetech-servo-sdk>=1.0.0

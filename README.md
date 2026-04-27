@@ -2,6 +2,11 @@
 
 ![Identity rover banner](docs/assets/identity-project-banner.png)
 
+[![Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml/badge.svg)](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml)
+![Python](https://img.shields.io/badge/Python-3.x-blue)
+![Arduino/C++](https://img.shields.io/badge/Arduino%2FC%2B%2B-Sensor%20Firmware-teal)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
+
 Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 servos, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
 
 The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
@@ -54,9 +59,11 @@ This repository contains the final public code, validation media, CAD references
 | --- | --- |
 | Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
 | Validated release history | Release links preserve the final post-competition, competition, and earlier autonomous rover milestones |
-| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint |
+| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint; GitHub Actions runs the simulation suite and pytest regressions on push and pull request |
+| Setup documentation | `RUNNING.md`, `ARCHITECTURE.md`, and `requirements.txt` document setup, runtime modes, and software structure |
 | Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
 | Documentation included | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
+| License | PolyForm Noncommercial 1.0.0; commercial use requires separate permission |
 | Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## My Role
@@ -72,6 +79,8 @@ This repository contains the rover software, CAD references, validation media, a
 ## System Architecture
 
 ![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map, including the Brain/Heart process split, sensor pipeline, terrain overlay, safety governors, and simulation coverage.
 
 ### Brain/Heart Process Split
 
@@ -125,7 +134,7 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 
 ## Software Map
 
-For a quick technical review, start with `final_full_gait_test.py` for the Python gait/navigation stack, `final_sensors.ino` for Arduino/C++ sensor firmware, and `sim_verify.py`, `sim_terrain.py`, and `sim_nav.py` for validation coverage. The remaining scripts support calibration, telemetry analysis, parameter tuning, and regression checks.
+For a quick technical review, start with `final_full_gait_test.py` for the Python gait/navigation stack, `final_sensors.ino` for Arduino/C++ sensor firmware, and `sim_verify.py`, `sim_terrain.py`, and `sim_nav.py` for validation coverage. See [`RUNNING.md`](RUNNING.md) for setup and command examples; the remaining scripts support calibration, telemetry analysis, parameter tuning, and regression checks.
 
 ### Runtime And Gait Control
 
@@ -329,6 +338,8 @@ The simulation framework contains 40 automated checks:
 - 12 navigation FSM categories in `sim_nav.py`
 
 At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or deformable terrain.
+
+GitHub Actions runs these simulation checks and the pytest regression suite on push and pull request.
 
 Run the simulation checks:
 
