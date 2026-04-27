@@ -57,7 +57,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
 | Ground contact | TPU rubber feet with staggered lug pattern | Improves traction on sand, gravel, stone, carpet, and packed earth |
 
-Measured platform geometry reported in the symposium paper:
+Measured Platform Geometry:
 
 - Body length: 511 mm
 - Total width: 280 mm
