@@ -22,7 +22,15 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 
 ## My Role
 
-My work spanned the full rover stack: Python gait and navigation software, terrain-overlay tuning, simulation validation, telemetry analysis, Arduino/C++ sensor-firmware integration, CAD modeling, 3D printing, component selection, and about half of the soldering work. The project was built by a team, so this repository presents my software, mechanical, and electrical contributions as part of the broader Team Euler rover effort.
+My contributions included:
+
+- Developed and tuned the Python gait/navigation stack, terrain overlays, telemetry analysis, simulation validation, and competition-readiness fixes.
+- Programmed the Arduino/C++ sensor firmware for ultrasonic and IMU data collection.
+- Integrated the sensor firmware with the Raspberry Pi control stack.
+- Designed the CAD models, managed the 3D printing workflow, and selected the ordered hardware components.
+- Contributed to electrical assembly, including soldering and wiring.
+
+This repository contains the rover software, CAD references, validation media, and documentation for the Team Euler build.
 
 ## System Architecture
 
