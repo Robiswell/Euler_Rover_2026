@@ -17,7 +17,7 @@ The final build combined field-tested hardware, simulation-backed control logic,
 
 | Reader | Start Here | What It Shows |
 | --- | --- | --- |
-| Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance) and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
+| Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance), [My Role](#my-role), and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
 | Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control](#gait-control), and [Simulation And Testing](#simulation-and-testing) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
 | Hardware reviewers | [Hardware Stack](#hardware-stack) and [Bill Of Materials](#bill-of-materials) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
 | Reproducing or running code | [Software Map](#software-map) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
