@@ -126,6 +126,10 @@ Terrain classification uses:
 
 ![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
+Servo load stayed below the stall threshold across the validation terrain set:
+
+![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
+
 Field demo traversal of a loose sand hill:
 
 [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
