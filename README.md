@@ -341,7 +341,7 @@ Hardware operation requires calibrated servos, connected sensor firmware, and sa
   <tr>
     <td width="58%"><img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="520"></td>
     <td>
-      <strong>2026 Undergraduate Space Research Symposium display</strong><br><br>
+      <strong>2026 NASA Colorado Space Grant Consortium Research Symposium display</strong><br><br>
       Presented the rover prototype, printed CAD components, and research poster together so reviewers could connect the software, mechanical design, and validation results.
     </td>
   </tr>
