@@ -219,7 +219,7 @@ Built and validated a six-legged autonomous rover spanning Python-based Raspberr
 
 Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
 
-## Paper And Poster
+## Colorado Space Grant Consortium Research Symposium Submissions
 
 - [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](docs/paper/development-of-six-legged-autonomous-robot-frcc.pdf)
 - [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](docs/paper/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf)
