@@ -261,7 +261,7 @@ Across the validation terrain set, measured servo loads stayed below the configu
 | Paper Presentation Video | YouTube link pending | [Download presentation MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4) |
 | Poster | [View poster](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc-poster.pdf) | [Download poster PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
 | Award Video | YouTube link pending | [Download award video MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
-| Field Demos & Course Success Videos | [Open gallery](docs/media.md) | - |
+| Field Demos & Course Success Videos | [Open gallery](docs/media.md) | <div align="center">N/A</div> |
 
 <table>
   <tr>
