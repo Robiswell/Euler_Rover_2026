@@ -14,6 +14,7 @@ The project explored whether a six-servo hexapod could adapt to rough outdoor te
 | Observed traversal success | 96.9% |
 | Terrain categories | 7 |
 | Simulation tests | 40/40 passing |
+| Award recognition | 2026 COSGC Robotics Challenge, Outstanding Demonstration of Creative Locomotion |
 | Heart loop rate | 30 Hz |
 | Sensor update rate | ~10 Hz |
 | Steady-state servo load margin | At least 42% in formal trials |
@@ -325,6 +326,18 @@ Built and validated a six-legged autonomous rover spanning Python-based Raspberr
 ## Repository Status
 
 Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
+
+## Colorado Space Grant Consortium Robotics Challenge Award
+
+<table>
+  <tr>
+    <td width="58%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
+    <td>
+      <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
+      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six-legged C-leg locomotion approach.
+    </td>
+  </tr>
+</table>
 
 ## Colorado Space Grant Consortium Research Symposium Submissions
 
