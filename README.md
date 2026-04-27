@@ -20,7 +20,6 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance) and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
 | Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control](#gait-control), and [Simulation And Testing](#simulation-and-testing) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
 | Hardware reviewers | [Hardware Stack](#hardware-stack) and [Bill Of Materials](#bill-of-materials) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
-| Media reviewers | [Media Gallery](docs/media.md) | Full field demo videos, course success runs, symposium materials, and award media |
 | Reproducing or running code | [Software Map](#software-map) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
 
 ## Table Of Contents
@@ -38,7 +37,6 @@ The final build combined field-tested hardware, simulation-backed control logic,
 - [Software Map](#software-map)
 - [Gait Control](#gait-control)
 - [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
-- [Media Gallery](#media-gallery)
 - [Recognition And Publications](#recognition-and-publications)
 - [Simulation And Testing](#simulation-and-testing)
 - [Releases](#releases)
@@ -230,16 +228,6 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 ![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
 
-## Media Gallery
-
-The README highlights the video evidence without embedding every preview table. The full gallery is in [`docs/media.md`](docs/media.md), including field demos, course success runs, symposium materials, and award video links.
-
-| Gallery | What The Link Opens |
-| --- | --- |
-| [Field Demo Videos](docs/media.md#field-demo-videos) | Clickable GIF previews linked to full traversal videos: sand hill, cliff detection, indoor navigation, and park obstacle navigation |
-| [Course Success Runs](docs/media.md#course-success-runs) | Course 1-5 and challenge-course success videos with preview GIFs |
-| [Research Symposium Materials](docs/media.md#research-symposium-materials) | Paper, presentation slides, poster, and COSGC award video |
-
 ## Recognition And Publications
 
 <table>
@@ -273,7 +261,7 @@ The README highlights the video evidence without embedding every preview table. 
 | Paper Presentation Video | [COSGC Symposium Paper Presentation Using Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4) |
 | Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
 | Award Video | [Identity COSGC Video](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
-| Full Media Gallery | [Field demos, course runs, symposium media, and award previews](docs/media.md) |
+| Full Media Gallery | [Field demos, course success videos, symposium media, and award previews](docs/media.md) |
 
 <table>
   <tr>
