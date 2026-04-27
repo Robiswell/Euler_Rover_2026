@@ -251,6 +251,16 @@ The README highlights the video evidence without embedding every preview table. 
     </td>
   </tr>
 </table>
+<table>
+  <tr>
+    <td align="center"><strong>2026 Best Robotics Poster</strong></td>
+    <td align="center"><strong>2026 People's Choice Video</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="360"></td>
+    <td><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="360"></td>
+  </tr>
+</table>
 
 | Research Output | Link |
 | --- | --- |
@@ -270,16 +280,6 @@ The README highlights the video evidence without embedding every preview table. 
   </tr>
 </table>
 
-<table>
-  <tr>
-    <td align="center"><strong>2026 Best Robotics Poster</strong></td>
-    <td align="center"><strong>2026 People's Choice Video</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="360"></td>
-    <td><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="360"></td>
-  </tr>
-</table>
 
 ## Simulation And Testing
 
