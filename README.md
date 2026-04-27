@@ -266,6 +266,18 @@ Across the validation terrain set, measured servo loads stayed below the configu
   </tr>
 </table>
 
+## Colorado Space Grant Consortium Robotics Challenge Award
+
+<table>
+  <tr>
+    <td width="58%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
+    <td>
+      <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
+      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six-legged C-leg locomotion approach.
+    </td>
+  </tr>
+</table>
+
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
 ## Simulation And Testing
@@ -334,18 +346,6 @@ This repository is the cleaned public project version of the rover codebase, med
 | Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
 | Portfolio documentation | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
 | Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
-
-## Colorado Space Grant Consortium Robotics Challenge Award
-
-<table>
-  <tr>
-    <td width="58%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
-    <td>
-      <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
-      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six-legged C-leg locomotion approach.
-    </td>
-  </tr>
-</table>
 
 ## Colorado Space Grant Consortium Research Symposium Submissions
 
