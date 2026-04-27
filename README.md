@@ -13,8 +13,19 @@ The project explored whether a six-servo hexapod could adapt to rough outdoor te
 
 The final build combined field-tested hardware, simulation-backed control logic, and documented validation results showing 31/32 successful traversals across seven terrain categories.
 
+## Quick Reviewer Path
+
+| Start Here | Why It Matters |
+| --- | --- |
+| [`final_full_gait_test.py`](final_full_gait_test.py) | Main Raspberry Pi/Python gait, navigation, terrain overlay, and safety-governor program |
+| [`final_sensors.ino`](final_sensors.ino) | Arduino/C++ sensor firmware for ultrasonic and IMU data collection |
+| [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) | Passing gait, terrain, navigation, and pytest regression checks |
+| [Field Demo Videos](#field-demo-videos) | Clickable GIF previews linking to full rover traversal videos |
+| [Research Symposium Submissions](#colorado-space-grant-consortium-research-symposium-submissions) | Paper, poster, presentation slides, award video, and symposium documentation |
+
 ## Table Of Contents
 
+- [Quick Reviewer Path](#quick-reviewer-path)
 - [Results At A Glance](#results-at-a-glance)
 - [Repository Status](#repository-status)
 - [My Role](#my-role)
