@@ -106,12 +106,16 @@ Terrain overlays adjust gait choice, impact window, duty cycle, and speed for fl
 
 The autonomous navigation layer uses an eight-state finite state machine for forward traversal, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior. Sensor input comes from ultrasonic range data, IMU orientation, servo telemetry, and watchdog state.
 
+![Navigation finite-state machine flowchart](docs/assets/navigation-state-flowchart.jpg)
+
 Terrain classification uses:
 
 - IMU pitch for incline detection
 - Angular-rate and ultrasonic stability for rough terrain
 - Sustained servo load for deep sand
 - Downward ultrasonic distance changes for cliff/drop-off detection
+
+![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
