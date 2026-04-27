@@ -207,22 +207,22 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 | Demo | Preview |
 | --- | --- |
-| Loose Sand Hill Traversal | [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4) |
-| Daytime Sand Hill Traversal | [![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4) |
-| Cliff Detection Behavior | [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4) |
-| Indoor Obstacle Navigation | [![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4) |
-| Park Concrete Table Seating Navigation | [![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v4.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4) |
+| Loose Sand Hill Traversal | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4"><img src="docs/assets/sand-hill-traversal-preview-v3.gif" alt="Sand hill traversal preview" width="480"></a> |
+| Daytime Sand Hill Traversal | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4"><img src="docs/assets/daytime-hill-traversal-preview-v2.gif" alt="Daytime sand hill traversal preview" width="480"></a> |
+| Cliff Detection Behavior | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4"><img src="docs/assets/cliff-detection-demo-preview-v2.gif" alt="Cliff detection demo preview" width="480"></a> |
+| Indoor Obstacle Navigation | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4"><img src="docs/assets/indoor-obstacle-navigation-preview-v2.gif" alt="Indoor obstacle navigation preview" width="480"></a> |
+| Park Concrete Table Seating Navigation | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4"><img src="docs/assets/navigation-park-table-seating-preview-v4.gif" alt="Park concrete table seating navigation preview" width="480"></a> |
 
 ### Course Success Runs
 
 | Run | Preview |
 | --- | --- |
-| Course 1 Success | [![Course 1 success preview](docs/assets/course-1-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4) |
-| Course 2 Success | [![Course 2 success preview](docs/assets/course-2-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4) |
-| Course 3 Success | [![Course 3 success preview](docs/assets/course-3-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4) |
-| Course 4 Success | [![Course 4 success preview](docs/assets/course-4-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4) |
-| Course 5 Success | [![Course 5 success preview](docs/assets/course-5-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4) |
-| Challenge Course Success | [![Challenge course success preview](docs/assets/challenge-course-success-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4) |
+| Course 1 Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="480"></a> |
+| Course 2 Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="480"></a> |
+| Course 3 Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="480"></a> |
+| Course 4 Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="480"></a> |
+| Course 5 Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="480"></a> |
+| Challenge Course Success | <a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="480"></a> |
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
