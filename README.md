@@ -117,7 +117,9 @@ Terrain classification uses:
 
 ![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
-A field demo of the navigation stack is available here: [park concrete table seating navigation run](docs/assets/navigation-park-table-seating.mp4).
+Field demo of the navigation stack moving through concrete table seating at a park:
+
+[![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
@@ -147,7 +149,7 @@ python3 sim_nav.py
 
 ## Demo Videos
 
-- [Park concrete table seating navigation run](docs/assets/navigation-park-table-seating.mp4)
+- [Park concrete table seating navigation run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
 - [Home Tripod Wave Test](https://youtube.com/shorts/x6369QqBHbY?feature=share)
 - [Full Gait Test 3/5/26](https://youtu.be/S6lwZjQxPko)
 
