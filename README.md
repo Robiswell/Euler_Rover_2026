@@ -186,9 +186,6 @@ python3 sim_nav.py
 
 ## Demo Videos
 
-- [![Identity COSGC 2026 award video preview](docs/assets/identity-cosgc-2026-award-video-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
-
-- [Identity COSGC 2026 award video](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
 - [Sand hill traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 - [Daytime sand hill traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4)
 - [Cliff detection demo](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4)
@@ -226,3 +223,6 @@ Hardware operation requires calibrated servos, connected sensor firmware, and sa
 
 - [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation](docs/paper/development-of-six-legged-autonomous-robot-frcc.pdf)
 - [Symposium poster](docs/paper/development-of-six-legged-autonomous-robot-frcc-poster.pdf)
+- [Identity COSGC 2026 award video](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
+
+[![Identity COSGC 2026 award video preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
