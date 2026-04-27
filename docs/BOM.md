@@ -37,7 +37,7 @@ This categorized BOM summarizes the exported source sheet in [`purchasing-bom.cs
 | [OVONIC 3S LiPo battery, 3000 mAh, 11.1 V, XT60, 2 pack](https://a.co/d/0gbthKod) | 1 pack | One active rover battery for the servo and compute power system, with one spare/replacement battery available |
 | [3A mini DC-DC buck step-down converters, 10 pack](https://a.co/d/47GRL41) | 1 pack | Regulated low-voltage rails for onboard electronics |
 | [16 AWG XT60 connectors, 3 pair](https://a.co/d/08h4Eg9N) | 1 pack | Main power harness connectors |
-| [12 AWG inline fuse holders, 4 pack](https://a.co/d/4MlUTQ7) | 1 pack | Serviceable power protection points in the battery harness |
+| [Inline fuse holders](https://a.co/d/01MM4D9o) | 1 pack | Serviceable power protection points in the battery harness |
 | [XT60 power splitter, 1 female to 3 male](https://a.co/d/fD9xkFq) | 1 | Power distribution from the main battery connection |
 | [LiPo safe bag, 2 pack](https://a.co/d/015qrFE) | 1 pack | Safer battery storage and charging workflow |
 | [Lexar 32 GB microSD cards, 2 pack](https://a.co/d/cnXFC7C) | 1 pack | Raspberry Pi OS, rover software, logs, and backup card |
