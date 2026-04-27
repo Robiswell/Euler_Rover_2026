@@ -335,6 +335,10 @@ Hardware operation requires calibrated servos, connected sensor firmware, and sa
 | Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster (2026 Best Robotics Poster)](docs/paper/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
 | Video | [Identity COSGC Video (2026 People's Choice Video)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)<br><br>[![Identity COSGC Video (2026 People's Choice Video) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4) |
 
+Poster presentation setup at the 2026 Undergraduate Space Research Symposium:
+
+<img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="720">
+
 ### Symposium Awards
 
 <table>
