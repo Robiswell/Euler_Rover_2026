@@ -20,7 +20,7 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 
 ## My Role
 
-My work focused on the Python gait and navigation stack, terrain-overlay tuning, simulation validation, telemetry analysis, competition-readiness fixes, and Arduino/C++ sensor-firmware integration. The project was built by a team, so this repository presents the software and validation work as part of the broader Team Euler rover effort.
+My work spanned the full rover stack: Python gait and navigation software, terrain-overlay tuning, simulation validation, telemetry analysis, Arduino/C++ sensor-firmware integration, CAD modeling, 3D printing, component selection, and about half of the soldering work. The project was built by a team, so this repository presents my software, mechanical, and electrical contributions as part of the broader Team Euler rover effort.
 
 ## System Architecture
 
@@ -196,7 +196,7 @@ python3 sim_nav.py
 
 ## Resume Summary
 
-Built and validated a six-legged autonomous rover with Python-based Raspberry Pi control, Arduino/C++ sensor firmware, terrain-adaptive gait overlays, Brain/Heart process architecture, and simulation-backed navigation tests. Formal field validation showed 31/32 successful traversals across seven terrain categories.
+Built and validated a six-legged autonomous rover spanning Python-based Raspberry Pi control, Arduino/C++ sensor firmware, CAD-modeled and 3D-printed mechanical parts, selected hardware components, terrain-adaptive gait overlays, Brain/Heart process architecture, and simulation-backed navigation tests. Formal field validation showed 31/32 successful traversals across seven terrain categories.
 
 ## Repository Status
 
