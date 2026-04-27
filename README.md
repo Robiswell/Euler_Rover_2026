@@ -95,6 +95,20 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 | `final_full_gait_test_tripod_default.py` | Tripod-default final gait-engine variant for comparison and fallback testing |
 | `home_tripod_wave_test.py` | Legs-home sequence followed by forward tripod and forward wave gait checks |
 
+### Main Program Modes
+
+`final_full_gait_test.py` supports several launch modes for hardware runs, dry runs, and subsystem checks:
+
+- `sudo python3 final_full_gait_test.py`: full maneuver demo across the implemented gaits and stance behaviors.
+- `sudo python3 final_full_gait_test.py --competition`: autonomous navigation with the eight-state FSM, Arduino sensor stream, terrain adaptation, and live terminal state output.
+- `sudo python3 final_full_gait_test.py --competition-dry-run`: autonomous navigation logic with sensors active and servo speed held at zero.
+- `sudo python3 final_full_gait_test.py --test-competition`: timed fallback sequence with no sensor dependency.
+- `sudo python3 final_full_gait_test.py --test-tripod`, `--test-quad`, or `--test-wave`: gait-specific forward, turning, pivot, and reverse checks.
+- `sudo python3 final_full_gait_test.py --test-recovery`: recovery wiggle and self-right behavior checks.
+- `sudo python3 final_full_gait_test.py --test-arduino`, `--test-sensors`, or `--test-nav`: Arduino serial, sensor-processing, and full navigation-pipeline diagnostics.
+- `sudo python3 final_full_gait_test.py --drift-test <gait>`: heading-drift measurement for gait tuning.
+- `--no-verbose-telemetry`: optional logging flag for reducing extended servo, sensor, and navigation output.
+
 ### Sensor Firmware And Input
 
 | File | Purpose |
