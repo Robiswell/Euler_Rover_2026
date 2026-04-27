@@ -32,6 +32,8 @@ The final build combined field-tested hardware, simulation-backed control logic,
 - [System Architecture](#system-architecture)
 - [Key Engineering Decisions](#key-engineering-decisions)
 - [Hardware Stack](#hardware-stack)
+  - [Build Components](#build-components)
+  - [Measured Platform Geometry](#measured-platform-geometry)
   - [CAD Models](#cad-models)
 - [Software Map](#software-map)
   - [Main Program Modes](#main-program-modes)
@@ -64,7 +66,7 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 
 ## Repository Status
 
-This repository contains the final public code, validation media, CAD references, release links, and documentation for the Team Euler rover build.
+This repository contains the final public code, validation previews, CAD references, release links, and documentation for the Team Euler rover build. Full-resolution videos and symposium PDFs are hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release to keep the repository lightweight.
 
 | Area | Status |
 | --- | --- |
@@ -122,6 +124,21 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Chassis | PETG 3D-printed octagonal body | Supports six servo modules with front/rear leg pairs splayed at 35 degrees and middle legs mounted perpendicular |
 | Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
 | Ground contact | TPU rubber feet with staggered lug pattern | Improves traction on sand, gravel, stone, carpet, and packed earth |
+
+### Build Components
+
+| Component | Quantity | Integration Notes |
+| --- | ---: | --- |
+| Raspberry Pi 3B+ | 1 | Main onboard computer for Python navigation, gait control, telemetry, and simulation-derived safety logic |
+| Arduino Nano | 1 | Dedicated sensor hub for deterministic ultrasonic timing and BNO085 polling |
+| Feetech STS3215 serial bus servos | 6 | One actuator per C-leg, driven through synchronized bus commands |
+| FE-URT-1 debug board | 1 | Feetech servo configuration, calibration, and serial bus debugging interface |
+| HC-SR04 ultrasonic sensors | 8 | Forward, side, rear, and downward cliff/drop-off distance sensing |
+| BNO085 IMU | 1 | Fused orientation for slope detection, terrain classification, and tip/fall logic |
+| 3S 3000 mAh LiPo battery | 1 | Main rover power source with software limits for voltage-sag protection |
+| PETG printed chassis, split lid, and C-leg assemblies | Custom set | CAD-modeled and 3D-printed rover structure, including octagonal body and single-actuator leg geometry |
+| TPU traction feet | 6 leg contact sets | Flexible lugged contact surface for sand, gravel, carpet, stone, and packed earth |
+| Wiring, soldered sensor harnesses, and mounting hardware | Rover-specific | Electrical assembly and mechanical fastening for sensors, compute boards, servo bus, and power distribution |
 
 ### Measured Platform Geometry
 
@@ -272,24 +289,24 @@ Across the validation terrain set, measured servo loads stayed below the configu
     <th>Preview</th>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4">Loose Sand Hill Traversal</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4"><img src="docs/assets/sand-hill-traversal-preview-v3.gif" alt="Sand hill traversal preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4">Loose Sand Hill Traversal</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4"><img src="docs/assets/sand-hill-traversal-preview-v3.gif" alt="Sand hill traversal preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4">Daytime Sand Hill Traversal</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4"><img src="docs/assets/daytime-hill-traversal-preview-v2.gif" alt="Daytime sand hill traversal preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4">Daytime Sand Hill Traversal</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4"><img src="docs/assets/daytime-hill-traversal-preview-v2.gif" alt="Daytime sand hill traversal preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4">Cliff Detection Behavior</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4"><img src="docs/assets/cliff-detection-demo-preview-v2.gif" alt="Cliff detection demo preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/cliff-detection-demo.mp4">Cliff Detection Behavior</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/cliff-detection-demo.mp4"><img src="docs/assets/cliff-detection-demo-preview-v2.gif" alt="Cliff detection demo preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4">Indoor Obstacle Navigation</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4"><img src="docs/assets/indoor-obstacle-navigation-preview-v2.gif" alt="Indoor obstacle navigation preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/indoor-obstacle-navigation-demo.mp4">Indoor Obstacle Navigation</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/indoor-obstacle-navigation-demo.mp4"><img src="docs/assets/indoor-obstacle-navigation-preview-v2.gif" alt="Indoor obstacle navigation preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4">Park Concrete Table Seating Navigation</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4"><img src="docs/assets/navigation-park-table-seating-preview-v4.gif" alt="Park concrete table seating navigation preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4">Park Concrete Table Seating Navigation</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4"><img src="docs/assets/navigation-park-table-seating-preview-v4.gif" alt="Park concrete table seating navigation preview" width="480"></a></td>
   </tr>
 </table>
 
@@ -301,28 +318,28 @@ Across the validation terrain set, measured servo loads stayed below the configu
     <th>Preview</th>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4">Course 1 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4">Course 1 Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4">Course 2 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4">Course 2 Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4">Course 3 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4">Course 3 Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4">Course 4 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4">Course 4 Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4">Course 5 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4">Course 5 Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="480"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4">Challenge Course Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4">Challenge Course Success</a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="480"></a></td>
   </tr>
 </table>
 
@@ -378,10 +395,10 @@ python3 sim_nav.py
 
 | Submission | Link |
 | --- | --- |
-| Paper | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](docs/paper/development-of-six-legged-autonomous-robot-frcc.pdf) |
-| Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](docs/paper/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
-| Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster (2026 Best Robotics Poster)](docs/paper/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
-| Video | [Identity COSGC Video (2026 People's Choice Video)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)<br><br>[![Identity COSGC Video (2026 People's Choice Video) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4) |
+| Paper | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf) |
+| Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
+| Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster (2026 Best Robotics Poster)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
+| Video | [Identity COSGC Video (2026 People's Choice Video)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4)<br><br>[![Identity COSGC Video (2026 People's Choice Video) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
 
 ### Symposium Poster Presentation
 
