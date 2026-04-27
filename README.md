@@ -86,38 +86,23 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 
 ## Software Map
 
-| File | Purpose |
-| --- | --- |
-| `final_full_gait_test.py` | Main Python autonomous gait engine and navigation FSM |
-| `offset_full_gait_test_v2.py` | Earlier v2 gait-engine implementation retained for comparison and development history |
-| `final_full_gait_test_tripod_default.py` | Tripod-default variant of the final gait engine used for gait comparison and fallback testing |
-| `home_tripod_wave_test.py` | Home test script for tripod and wave gait behavior |
-| `final_sensors.ino` | Arduino/C++ Nano sensor firmware for ultrasonic and IMU data collection |
-| `Detection_SensorHub_FINAL.ino` | Alternate final Arduino/C++ sensor-hub firmware variant |
-| `fusion.py`, `fusion2.py` | Sensor interpretation and classification support |
-| `input_thread.py`, `input_thread2.py` | Serial input handling |
-| `auto_calibrate.py` | Automated calibration helper for setup and tuning |
-| `calibrate_homes.py` | Servo home-position calibration utility |
-| `calibrate_legs.py` | Leg calibration utility for physical alignment |
-| `validate_config.py` | Configuration validation before running the rover |
-| `sim_verify.py` | Kinematic and gait-engine checks |
-| `sim_terrain.py` | Terrain and governor stress scenarios |
-| `sim_nav.py` | Navigation FSM tests with synthetic sensor frames |
-| `monte_carlo_terrain.py` | Monte Carlo terrain simulation and robustness exploration |
-| `rover_statics.py` | Static geometry/load analysis support |
-| `gait_viz.py` | Gait visualization helper |
-| `fsm_audit.py` | Navigation FSM audit/support script |
-| `load_monitor.py` | Servo load monitoring support |
-| `param_sweep.py` | Parameter sweep tooling for tuning control behavior |
-| `sweep_hz_governor.py` | Frequency/governor sweep analysis |
-| `sweep_stall_threshold.py` | Stall-threshold sweep analysis |
-| `parse_telemetry.py`, `analyze_run_log.py` | Telemetry and run-log analysis |
-| `test_governor_ff_budget.py` | Regression test for feedforward/governor budget behavior |
-| `test_nav_logic.py` | Navigation logic regression tests |
-| `test_nav_serial.py` | Navigation serial-input regression tests |
-| `test_sensor_classification.py` | Sensor classification regression tests |
-| `rhex_cliff_research.txt` | Research notes for RHex-style cliff/drop-off handling |
-| `.gitignore` | Repository ignore rules |
+| File | Purpose | File | Purpose |
+| --- | --- | --- | --- |
+| `final_full_gait_test.py` | Main Python autonomous gait engine and navigation FSM | `offset_full_gait_test_v2.py` | Earlier v2 gait-engine implementation retained for comparison and development history |
+| `final_full_gait_test_tripod_default.py` | Tripod-default final gait-engine variant for comparison and fallback testing | `home_tripod_wave_test.py` | Home test script for tripod and wave gait behavior |
+| `final_sensors.ino` | Arduino/C++ Nano sensor firmware for ultrasonic and IMU data collection | `Detection_SensorHub_FINAL.ino` | Alternate final Arduino/C++ sensor-hub firmware variant |
+| `fusion.py`, `fusion2.py` | Sensor interpretation and classification support | `input_thread.py`, `input_thread2.py` | Serial input handling |
+| `auto_calibrate.py` | Automated setup and tuning calibration helper | `calibrate_homes.py` | Servo home-position calibration utility |
+| `calibrate_legs.py` | Leg calibration utility for physical alignment | `validate_config.py` | Configuration validation before running the rover |
+| `sim_verify.py` | Kinematic and gait-engine checks | `sim_terrain.py` | Terrain and governor stress scenarios |
+| `sim_nav.py` | Navigation FSM tests with synthetic sensor frames | `monte_carlo_terrain.py` | Monte Carlo terrain simulation and robustness exploration |
+| `rover_statics.py` | Static geometry/load analysis support | `gait_viz.py` | Gait visualization helper |
+| `fsm_audit.py` | Navigation FSM audit/support script | `load_monitor.py` | Servo load monitoring support |
+| `param_sweep.py` | Parameter sweep tooling for control tuning | `sweep_hz_governor.py` | Frequency/governor sweep analysis |
+| `sweep_stall_threshold.py` | Stall-threshold sweep analysis | `parse_telemetry.py`, `analyze_run_log.py` | Telemetry and run-log analysis |
+| `test_governor_ff_budget.py` | Feedforward/governor budget regression test | `test_nav_logic.py` | Navigation logic regression tests |
+| `test_nav_serial.py` | Navigation serial-input regression tests | `test_sensor_classification.py` | Sensor classification regression tests |
+| `rhex_cliff_research.txt` | RHex-style cliff/drop-off research notes | `.gitignore` | Repository ignore rules |
 
 ## Gait Control
 
