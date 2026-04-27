@@ -128,7 +128,7 @@ Terrain classification uses:
 
 Field demo of the sand terrain overlay traversing a loose sand hill:
 
-[![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
+[![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 
 Field demo of the navigation stack moving through concrete table seating at a park:
 
