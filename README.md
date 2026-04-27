@@ -120,14 +120,14 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Orientation sensing | BNO085 IMU | Provides fused orientation for slope detection, rough-terrain classification, tip/fall safety logic, and navigation state decisions |
 | Power | 3S 3000 mAh LiPo battery, 11.1 V nominal | Powers the rover with software brownout protection and speed limiting under voltage sag |
 | Chassis | PETG 3D-printed octagonal body | Supports six servo modules with front/rear leg pairs splayed at 35 degrees and middle legs mounted perpendicular |
-| Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
+| Legs | C-shaped PETG arc legs with TPU tread interface layer, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry with a flexible layer between the printed legs and bumper-pad tread |
 | Ground contact | Adhesive rubber bumper pads with hot-glue V tread | Adds compliant grip and a NASA rover-inspired chevron contact pattern for rough terrain |
 
 <p align="center">
   <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
 </p>
 
-The C-legs use adhesive rubber bumper pads as the base contact surface, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while still leaving enough compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
+The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
 
 ### Build Components
 
