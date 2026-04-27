@@ -7,7 +7,7 @@
 [![Arduino/C++: Sensor Firmware](https://img.shields.io/badge/Arduino%2FC%2B%2B-Sensor%20Firmware-00878F)](final_sensors.ino)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
-Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 servos, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
+Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 smart servos with runtime telemetry, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
 
 The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
 
@@ -97,7 +97,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map,
 
 ![Brain/Heart process split diagram](docs/assets/brain-heart-process-split.jpg)
 
-The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, applies safety governors, and keeps motor control isolated from slower navigation work.
+The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, reads STS3215 position/load/speed telemetry, applies safety governors, and keeps motor control isolated from slower navigation work.
 
 ## Key Engineering Decisions
 
@@ -106,6 +106,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 - Split the software into Brain and Heart processes so navigation logic cannot block the 30 Hz gait loop.
 - Offloaded ultrasonic timing and IMU polling to an Arduino Nano because Linux on the Raspberry Pi is not real time.
 - Used Buehler-clock gait parameters rather than per-joint trajectory planning, keeping terrain adaptation interpretable.
+- Treated the STS3215 smart servos as both actuators and sensors, using position, load, speed, voltage, current, temperature, and error telemetry to tune gait behavior and safety limits.
 - Built simulation tests for gait timing, terrain overlays, governors, and navigation FSM regressions before hardware deployment.
 
 ## Hardware Stack
@@ -114,7 +115,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | --- | --- | --- |
 | Main compute | Raspberry Pi 3B+ | Runs the Python Brain/Heart control stack, navigation FSM, gait engine, telemetry handling, and simulation-derived safety logic |
 | Sensor hub | Arduino Nano | Runs Arduino/C++ firmware for deterministic ultrasonic timing and IMU polling, then streams a 20-column CSV frame to the Raspberry Pi at ~10 Hz |
-| Actuation | 6x Feetech STS3215 serial bus servos | One actuator per leg, commanded with synchronized bus writes for coordinated C-leg locomotion |
+| Actuation and servo telemetry | 6x Feetech STS3215 serial bus smart servos | One actuator per leg, commanded with synchronized bus writes and read back for position, load, speed, voltage, current, temperature, and error telemetry |
 | Servo bus interface | FE-URT-1 debug board | Provides the serial interface used for Feetech servo configuration, calibration, and bus-level debugging |
 | Obstacle and cliff sensing | 8x HC-SR04 ultrasonic sensors | Provides 360-degree obstacle coverage plus downward-facing cliff/drop-off detection |
 | Orientation sensing | BNO085 IMU | Provides fused orientation for slope detection, rough-terrain classification, tip/fall safety logic, and navigation state decisions |
@@ -148,7 +149,7 @@ This purchasing BOM was consolidated from `Robotics_Purchasing_2025-2026.xlsx`. 
 | --- | ---: | --- |
 | [Raspberry Pi Model 3B 1GB](https://www.digikey.com/en/products/detail/raspberry-pi/SC0022/6152799) | 1 | Main onboard computer for Python gait control, navigation, telemetry, and validation-derived safety logic |
 | [Nano V3.0, 3 pack](https://a.co/d/9xtDXWl) | 1 pack | Arduino-compatible sensor hub board, with spares for development and replacement |
-| [Feetech STS3215 30 kg serial bus servo, 6 pack](https://a.co/d/iHHMIzh) | 1 pack | Six high-torque serial servos, one per C-leg |
+| [Feetech STS3215 30 kg serial bus servo, 6 pack](https://a.co/d/iHHMIzh) | 1 pack | Six high-torque smart servos, one per C-leg, providing both actuation and runtime feedback for gait tuning |
 | [FE-URT-1 serial bus servo signal conversion board](https://a.co/d/dvNswPN) | 1 | Servo configuration, calibration, and bus-level debugging interface |
 | [BNO085 9-DOF IMU](https://www.digikey.com/en/products/detail/adafruit-industries-llc/4754/13426653) | 1 | Fused orientation for slope detection, terrain classification, and fall recovery logic |
 | [HC-SR04 close-range ultrasonic sensors, 5 pack](https://a.co/d/3diNHQw) | 2 packs | Eight installed sensors for 360-degree obstacle coverage and cliff/drop-off detection, plus spares |
