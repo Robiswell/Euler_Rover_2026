@@ -87,8 +87,6 @@ This repository contains the final public code, validation previews, CAD referen
 - Designed the CAD models, managed the 3D printing workflow, and selected the ordered hardware components.
 - Contributed to electrical assembly, including soldering and wiring.
 
-This repository contains the rover software, CAD references, validation media, and documentation for the Team Euler build.
-
 ## System Architecture
 
 ![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
@@ -162,7 +160,7 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 
 ## Software Map
 
-For a quick technical review, start with `final_full_gait_test.py` for the Python gait/navigation stack, `final_sensors.ino` for Arduino/C++ sensor firmware, and `sim_verify.py`, `sim_terrain.py`, and `sim_nav.py` for validation coverage. See [`RUNNING.md`](RUNNING.md) for setup and command examples; the remaining scripts support calibration, telemetry analysis, parameter tuning, and regression checks.
+The source files are grouped by runtime role below. See [`RUNNING.md`](RUNNING.md) for setup and command examples; calibration, telemetry, tuning, and regression helpers are listed separately so reviewers can distinguish active runtime code from support tooling.
 
 ### Runtime And Gait Control
 

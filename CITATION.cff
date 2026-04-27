@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this rover project or its validation materials, please cite this repository."
+title: "Identity: Team Euler Autonomous Hexapod Rover"
+type: software
+authors:
+  - family-names: Ganey
+    given-names: Robert
+  - family-names: Garcia
+    given-names: Alejandro
+repository-code: "https://github.com/Robiswell/Euler_Rover_2026"
+url: "https://github.com/Robiswell/Euler_Rover_2026"
+date-released: "2026-04-27"
+abstract: "Autonomous six-legged rover project using Raspberry Pi/Python gait and navigation control, Arduino/C++ sensor firmware, Feetech STS3215 servos, ultrasonic and IMU sensing, simulation-backed validation, CAD references, and field-demo media for rough-terrain traversal."
+keywords:
+  - hexapod robot
+  - autonomous navigation
+  - gait control
+  - terrain adaptation
+  - Raspberry Pi
+  - Arduino
+  - C++
+  - Python

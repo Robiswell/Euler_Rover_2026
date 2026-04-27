@@ -1,0 +1,19 @@
+# Keep generated media and binary assets from distorting GitHub language stats.
+docs/assets/* linguist-generated=true
+
+# Binary assets.
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.mp4 binary
+*.pdf binary
+*.zip binary
+
+# Source files should remain visible in language statistics.
+*.py linguist-detectable=true
+*.ino linguist-detectable=true
+*.cpp linguist-detectable=true
+*.c linguist-detectable=true
+*.h linguist-detectable=true
+*.hpp linguist-detectable=true
