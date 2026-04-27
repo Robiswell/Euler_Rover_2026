@@ -130,6 +130,10 @@ Field demo traversal of a loose sand hill:
 
 [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 
+Daytime field demo traversal of a sand hill:
+
+[![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4)
+
 Field demo of cliff detection behavior:
 
 [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4)
@@ -171,6 +175,7 @@ python3 sim_nav.py
 ## Demo Videos
 
 - [Sand hill traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
+- [Daytime sand hill traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4)
 - [Cliff detection demo](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4)
 - [Indoor obstacle navigation run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4)
 - [Park concrete table seating navigation run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
