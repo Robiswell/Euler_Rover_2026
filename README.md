@@ -90,6 +90,16 @@ The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fr
 | Wave | 0.75 | Higher-contact gait for rough terrain and inclines |
 | Quadruped | 0.7 | Balance of stability and speed |
 
+### Gait Pattern Visuals
+
+The diagrams below show the servo grouping and top-view leg order used by the implemented gait modes.
+
+![Tripod gait locomotion diagram](docs/assets/gait-tripod.jpg)
+
+![Quadruped gait locomotion diagram](docs/assets/gait-quadruped.jpg)
+
+![Wave gait locomotion diagram](docs/assets/gait-wave.jpg)
+
 Terrain overlays adjust gait choice, impact window, duty cycle, and speed for flat ground, rough terrain, deep sand, and incline traversal. A phase-error governor reduces speed when commanded and measured servo phase diverge beyond the threshold used in the validation work.
 
 ## Navigation And Terrain Adaptation
