@@ -145,12 +145,14 @@ The autonomous navigation layer uses an eight-state finite state machine for for
 
 ![Navigation finite-state machine flowchart](docs/assets/navigation-state-flowchart.jpg)
 
-Terrain classification uses:
+### Terrain Classification
 
-- IMU pitch for incline detection
-- Angular-rate and ultrasonic stability for rough terrain
-- Sustained servo load for deep sand
-- Downward ultrasonic distance changes for cliff/drop-off detection
+| Signal | Used For |
+| --- | --- |
+| IMU pitch | Incline and descent detection |
+| Angular-rate and ultrasonic stability | Rough-terrain classification |
+| Sustained servo load | Deep-sand detection |
+| Downward ultrasonic distance changes | Cliff/drop-off detection |
 
 ![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
