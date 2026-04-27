@@ -253,14 +253,14 @@ The README highlights the video evidence without embedding every preview table. 
   <tr>
     <td width="46%"><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="420"></td>
     <td>
-      <strong>2026 Best Robotics Poster</strong><br><br>
+      <strong>Best Robotics Poster</strong><br><br>
       Awarded at the 2026 Colorado Space Grant Consortium Undergraduate Space Research Symposium for the rover research poster and technical presentation.
     </td>
   </tr>
   <tr>
     <td width="46%"><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="420"></td>
     <td>
-      <strong>2026 People's Choice Video</strong><br><br>
+      <strong>People's Choice Video</strong><br><br>
       Awarded at the 2026 Colorado Space Grant Consortium Undergraduate Space Research Symposium for the Identity rover project video.
     </td>
   </tr>
