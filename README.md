@@ -1,73 +1,113 @@
 # Identity: Team Euler Autonomous Hexapod Rover
 
-Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. The platform uses Python control software on a Raspberry Pi 3B+, Arduino/C++ firmware on an Arduino Nano sensor hub, six Feetech STS3215 servos, eight HC-SR04 ultrasonic sensors, and a BNO085 IMU to test terrain-adaptive locomotion with a simple single-actuator-per-leg design.
+Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 servos, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
 
-The core research question was whether rough-terrain adaptation could be handled with a small set of gait parameters: Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint, without per-joint trajectory planning or teleoperation.
+The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
 
-## Highlights
+## Results At A Glance
 
-- Dual-process Brain/Heart software architecture on a Raspberry Pi 3B+
-- 30 Hz Heart loop for gait timing, servo commands, safety governors, and fault handling
-- Approximately 10 Hz Brain loop for sensor acquisition, terrain classification, and navigation
-- Arduino/C++ sensor firmware for ultrasonic timing and IMU polling
-- Terrain-adaptive gait overlays for flat ground, rough terrain, deep sand, and inclines
-- Tripod, wave, and quadruped gait patterns using a Buehler-clock CPG
-- Simulation-backed validation with kinematic, terrain, and navigation test suites
-- Formal field validation across seven terrain categories
-
-## Results
-
-Formal validation produced 31 successful autonomous traversals out of 32 trials, an observed 96.9% traversal success rate across tile, carpet, packed earth, loose sand, gravel, stone fields, and 20-degree inclines.
-
-The symposium paper treats this as a pilot validation phase rather than a fully powered statistical proof: the 95% confidence interval lower bound falls below 90%, and the exact per-trial software hashes were not preserved. Within that scope, the results support high observed traversal reliability and show that the fixed hardware setup could adapt across seven terrain categories by changing gait choice, impact window, duty cycle, and speed.
-
-## Hardware
-
-| Component | Role |
+| Metric | Result |
 | --- | --- |
-| Raspberry Pi 3B+ | Main controller running Python navigation and gait logic |
-| Arduino Nano | C++ sensor hub firmware for ultrasonic ranging and IMU polling |
-| Feetech STS3215 servos x6 | Single-actuator leg drive using serial bus control |
-| HC-SR04 ultrasonic sensors x8 | Obstacle and cliff-distance sensing |
-| BNO085 IMU x1 | Fused orientation for terrain and safety logic |
-| 3S LiPo, 3000 mAh | 11.1 V nominal power source |
-| PETG chassis and C-shaped legs | 3D-printed compliant hexapod body and legs |
-| TPU feet | Improved ground contact and traction |
+| Formal validation trials | 31/32 successful |
+| Observed traversal success | 96.9% |
+| Terrain categories | 7 |
+| Simulation tests | 40/40 passing |
+| Heart loop rate | 30 Hz |
+| Sensor update rate | ~10 Hz |
+| Steady-state servo load margin | At least 42% in formal trials |
 
-Measured platform dimensions reported in the symposium paper:
+The symposium paper treats the 32-trial validation set as a pilot study because the 95% confidence interval lower bound falls below 90%. Within that scope, the data support high observed traversal reliability across tile, carpet, packed earth, loose sand, gravel, stone fields, and 20-degree inclines.
 
-- 511 mm body length
-- 280 mm total width
-- 74 mm ground clearance
-- 2 to 3 kg total mass
+## My Role
 
-## Software Architecture
+My work focused on the Python gait and navigation stack, terrain-overlay tuning, simulation validation, telemetry analysis, competition-readiness fixes, and Arduino/C++ sensor-firmware integration. The project was built by a team, so this repository presents the software and validation work as part of the broader Team Euler rover effort.
 
-The software uses a Brain/Heart split so navigation logic cannot block motor timing. Python handles the rover control stack on the Raspberry Pi, while Arduino/C++ firmware handles timing-sensitive sensor acquisition on the Nano.
+## System Architecture
 
-- `final_full_gait_test.py`: main Python autonomous gait engine and state machine
-- `final_sensors.ino`: Arduino/C++ Nano sensor firmware
-- `Detection_SensorHub_FINAL.ino`: final Arduino/C++ sensor-hub firmware variant
-- `fusion.py`, `fusion2.py`: sensor interpretation and classification support
-- `input_thread.py`, `input_thread2.py`: serial input handling
-- `sim_verify.py`: kinematic and gait-engine checks
-- `sim_terrain.py`: terrain and governor stress scenarios
-- `sim_nav.py`: navigation FSM tests with synthetic sensor frames
-- `parse_telemetry.py`, `analyze_run_log.py`: telemetry and log analysis tools
+```mermaid
+flowchart LR
+    Sensors[8x HC-SR04 + BNO085 IMU] --> Nano[Arduino Nano<br/>C++ sensor firmware]
+    Nano -->|20-column CSV at ~10 Hz| Brain[Raspberry Pi Brain<br/>Python navigation FSM]
+    Brain -->|shared commands| Heart[Raspberry Pi Heart<br/>30 Hz gait loop]
+    Heart -->|GroupSyncWrite| Servos[6x Feetech STS3215 Servos]
+```
 
-## Gait And Navigation
+The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, applies safety governors, and keeps motor control isolated from slower navigation work.
+
+## Key Engineering Decisions
+
+- Kept each leg to one powered degree of freedom to reduce mechanical complexity and make the control system easier to audit.
+- Used RHex-style C-shaped legs for rolling ground contact, passive compliance, and simple stance/swing timing.
+- Split the software into Brain and Heart processes so navigation logic cannot block the 30 Hz gait loop.
+- Offloaded ultrasonic timing and IMU polling to an Arduino Nano because Linux on the Raspberry Pi is not real time.
+- Used Buehler-clock gait parameters rather than per-joint trajectory planning, keeping terrain adaptation interpretable.
+- Built simulation tests for gait timing, terrain overlays, governors, and navigation FSM regressions before hardware deployment.
+
+## Hardware Stack
+
+| Subsystem | Components | Purpose |
+| --- | --- | --- |
+| Main compute | Raspberry Pi 3B+ | Runs the Python Brain/Heart control stack, navigation FSM, gait engine, telemetry handling, and simulation-derived safety logic |
+| Sensor hub | Arduino Nano | Runs Arduino/C++ firmware for deterministic ultrasonic timing and IMU polling, then streams a 20-column CSV frame to the Raspberry Pi at ~10 Hz |
+| Actuation | 6x Feetech STS3215 serial bus servos | One actuator per leg, commanded with synchronized bus writes for coordinated C-leg locomotion |
+| Obstacle and cliff sensing | 8x HC-SR04 ultrasonic sensors | Provides 360-degree obstacle coverage plus downward-facing cliff/drop-off detection |
+| Orientation sensing | BNO085 IMU | Provides fused orientation for slope detection, rough-terrain classification, tip/fall safety logic, and navigation state decisions |
+| Power | 3S 3000 mAh LiPo battery, 11.1 V nominal | Powers the rover with software brownout protection and speed limiting under voltage sag |
+| Chassis | PETG 3D-printed octagonal body | Supports six servo modules with front/rear leg pairs splayed at 35 degrees and middle legs mounted perpendicular |
+| Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
+| Ground contact | TPU rubber feet with staggered lug pattern | Improves traction on sand, gravel, stone, carpet, and packed earth |
+
+Measured platform geometry reported in the symposium paper:
+
+- Body length: 511 mm
+- Total width: 280 mm
+- Static ground clearance: 74 mm
+- Effective leg radius: 125 mm from servo shaft to outer contact surface
+- Leg arc span: 195 degrees
+- Estimated mass: 2 to 3 kg
+
+This hardware layout intentionally trades fine-grained foot placement for mechanical simplicity, passive compliance, and an auditable control model. The Arduino Nano isolates microsecond-sensitive sensor timing from the Raspberry Pi, while the Pi handles higher-level gait and navigation logic.
+
+## Software Map
+
+| File | Purpose |
+| --- | --- |
+| `final_full_gait_test.py` | Main Python autonomous gait engine and navigation FSM |
+| `final_sensors.ino` | Arduino/C++ Nano sensor firmware |
+| `Detection_SensorHub_FINAL.ino` | Final Arduino/C++ sensor-hub firmware variant |
+| `fusion.py`, `fusion2.py` | Sensor interpretation and classification support |
+| `input_thread.py`, `input_thread2.py` | Serial input handling |
+| `sim_verify.py` | Kinematic and gait-engine checks |
+| `sim_terrain.py` | Terrain and governor stress scenarios |
+| `sim_nav.py` | Navigation FSM tests with synthetic sensor frames |
+| `parse_telemetry.py`, `analyze_run_log.py` | Telemetry and run-log analysis |
+
+## Gait Control
 
 The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fraction, phase offsets define inter-leg timing, and a global speed setpoint controls phase progression.
 
-Implemented gait patterns:
+| Gait | Duty Cycle | Primary Use |
+| --- | --- | --- |
+| Tripod | 0.5 | Faster locomotion on flat and moderate terrain |
+| Wave | 0.75 | Higher-contact gait for rough terrain and inclines |
+| Quadruped | 0.7 | Balance of stability and speed |
 
-- Tripod: fast locomotion with two groups of three legs
-- Wave: slower, high-contact gait for rough terrain and inclines
-- Quadruped: diagonal-pair gait balancing speed and stability
+Terrain overlays adjust gait choice, impact window, duty cycle, and speed for flat ground, rough terrain, deep sand, and incline traversal. A phase-error governor reduces speed when commanded and measured servo phase diverge beyond the threshold used in the validation work.
 
-The autonomous navigation layer uses an eight-state finite state machine for forward motion, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior. Terrain classification uses IMU orientation, servo telemetry, and ultrasonic stability to select overlays for flat ground, rough terrain, deep sand, and incline traversal.
+## Navigation And Terrain Adaptation
 
-## Simulation
+The autonomous navigation layer uses an eight-state finite state machine for forward traversal, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior. Sensor input comes from ultrasonic range data, IMU orientation, servo telemetry, and watchdog state.
+
+Terrain classification uses:
+
+- IMU pitch for incline detection
+- Angular-rate and ultrasonic stability for rough terrain
+- Sustained servo load for deep sand
+- Downward ultrasonic distance changes for cliff/drop-off detection
+
+The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
+
+## Simulation And Testing
 
 The simulation framework contains 40 automated checks:
 
@@ -75,7 +115,7 @@ The simulation framework contains 40 automated checks:
 - 14 terrain and governor scenarios in `sim_terrain.py`
 - 12 navigation FSM categories in `sim_nav.py`
 
-At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or terrain deformation.
+At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or deformable terrain.
 
 Run the simulation checks:
 
@@ -88,18 +128,26 @@ python3 sim_nav.py
 ## Releases
 
 - [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): cleaned public final build after the COSGC competition, with cliff detection turned back on.
-- [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): release snapshot used for the competition build.
-- [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier semi-working autonomous rover program release.
+- [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): competition snapshot used during the event.
+- [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier autonomous rover milestone.
 
 ## Demo Videos
 
 - [Home Tripod Wave Test](https://youtube.com/shorts/x6369QqBHbY?feature=share)
 - [Full Gait Test 3/5/26](https://youtu.be/S6lwZjQxPko)
 
+## Limitations
+
+- The 32-trial validation set is best treated as a pilot study, not a fully powered statistical proof.
+- Exact per-trial software hashes were not preserved during the late-stage validation period.
+- The simulation framework does not model mechanical compliance, backlash, or deformable terrain.
+- The clearest remaining failure mode was abrupt terrain transition within a single stride.
+- Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains.
+
 ## Resume Summary
 
 Built and validated a six-legged autonomous rover with Python-based Raspberry Pi control, Arduino/C++ sensor firmware, terrain-adaptive gait overlays, Brain/Heart process architecture, and simulation-backed navigation tests. Formal field validation showed 31/32 successful traversals across seven terrain categories.
 
-## Notes
+## Repository Status
 
-This repository is a cleaned public portfolio version of the Team Euler rover codebase. Hardware operation requires calibrated servos, a connected sensor hub, and appropriate safety checks before powering the robot.
+This repository is a cleaned public portfolio version of the Team Euler rover codebase. Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
