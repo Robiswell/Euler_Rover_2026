@@ -87,6 +87,7 @@ python3 sim_nav.py
 
 ## Releases
 
+- [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): cleaned public final build after the COSGC competition, with cliff detection turned back on.
 - [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): release snapshot used for the competition build.
 - [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier semi-working autonomous rover program release.
 
