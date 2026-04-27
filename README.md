@@ -119,7 +119,7 @@ Terrain classification uses:
 
 Field demo of the navigation stack moving through concrete table seating at a park:
 
-[![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
+[![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
