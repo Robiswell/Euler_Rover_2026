@@ -126,9 +126,9 @@ Terrain classification uses:
 
 ![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
-Field demo of the sand terrain overlay traversing a loose obstacle:
+Field demo of the sand terrain overlay traversing a loose sand hill:
 
-[![Sand obstacle traversal preview](docs/assets/sand-obstacle-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-obstacle-traversal.mp4)
+[![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 
 Field demo of the navigation stack moving through concrete table seating at a park:
 
@@ -162,7 +162,7 @@ python3 sim_nav.py
 
 ## Demo Videos
 
-- [Sand obstacle traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-obstacle-traversal.mp4)
+- [Sand hill traversal run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 - [Park concrete table seating navigation run](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
 - [Home Tripod Wave Test](https://youtube.com/shorts/x6369QqBHbY?feature=share)
 - [Full Gait Test 3/5/26](https://youtu.be/S6lwZjQxPko)
