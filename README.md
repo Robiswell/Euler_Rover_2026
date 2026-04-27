@@ -123,12 +123,6 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Legs | C-shaped PETG arc legs with TPU tread interface layer, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry with a flexible layer between the printed legs and bumper-pad tread |
 | Ground contact | Adhesive rubber bumper pads with hot-glue V tread | Adds compliant grip and a NASA rover-inspired chevron contact pattern for rough terrain |
 
-<p align="center">
-  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
-</p>
-
-The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
-
 ### Build Components
 
 | Component | Quantity | Integration Notes |
@@ -143,6 +137,12 @@ The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber b
 | PETG printed chassis, split lid, and C-leg assemblies | Custom set | CAD-modeled and 3D-printed rover structure, including octagonal body and single-actuator leg geometry |
 | Adhesive bumper pads and hot-glue tread | 6 leg contact sets | Field-built V tread pattern for added grip on sand, gravel, carpet, stone, and packed earth |
 | Wiring, soldered sensor harnesses, and mounting hardware | Rover-specific | Electrical assembly and mechanical fastening for sensors, compute boards, servo bus, and power distribution |
+
+<p align="center">
+  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
+</p>
+
+The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
 
 ### Measured Platform Geometry
 
