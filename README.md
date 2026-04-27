@@ -3,8 +3,8 @@
 ![Identity rover banner](docs/assets/identity-project-banner.png)
 
 [![Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml/badge.svg)](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml)
-![Python](https://img.shields.io/badge/Python-3.x-blue)
-![Arduino/C++](https://img.shields.io/badge/Arduino%2FC%2B%2B-Sensor%20Firmware-teal)
+[![Raspberry Pi/Python: Gait Control Program](https://img.shields.io/badge/Raspberry%20Pi%2FPython-Gait%20Control%20Program-2ea44f)](final_full_gait_test.py)
+[![Arduino/C++: Sensor Firmware](https://img.shields.io/badge/Arduino%2FC%2B%2B-Sensor%20Firmware-00878F)](final_sensors.ino)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 servos, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
@@ -44,7 +44,7 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Observed traversal success | 96.9% |
 | Terrain categories | 7 |
 | Simulation tests | 40/40 passing |
-| Awards | 3 COSGC recognitions: Creative Locomotion, Best Robotics Poster, and People's Choice Video |
+| Awards | 3 COSGC recognitions: Outstanding Demonstration of Creative Locomotion, Best Robotics Poster, and People's Choice Video |
 | Heart loop rate | 30 Hz |
 | Sensor update rate | ~10 Hz |
 | Steady-state servo load margin | At least 42% in formal trials |
