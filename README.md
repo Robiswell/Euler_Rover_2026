@@ -253,6 +253,15 @@ Across the validation terrain set, measured servo loads stayed below the configu
     </td>
   </tr>
 </table>
+<table>
+  <tr>
+    <td width="58%"><img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="520"></td>
+    <td>
+      <strong>2026 NASA Colorado Space Grant Consortium Research Symposium Display</strong><br><br>
+      Presented the rover prototype, printed CAD components, and research poster together so reviewers could connect the software, mechanical design, and validation results.
+    </td>
+  </tr>
+</table>
 
 | Research Output | View | Download |
 | --- | --- | --- |
@@ -263,15 +272,6 @@ Across the validation terrain set, measured servo loads stayed below the configu
 | Award Video | YouTube link pending | [Download award video MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
 | Field Demos & Course Success Videos | [Open gallery](docs/media.md) | <div align="center">N/A</div> |
 
-<table>
-  <tr>
-    <td width="58%"><img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="520"></td>
-    <td>
-      <strong>2026 NASA Colorado Space Grant Consortium Research Symposium Display</strong><br><br>
-      Presented the rover prototype, printed CAD components, and research poster together so reviewers could connect the software, mechanical design, and validation results.
-    </td>
-  </tr>
-</table>
 
 
 ## Simulation And Testing
