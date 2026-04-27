@@ -126,7 +126,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 
 ### Bill Of Materials
 
-This purchasing BOM was consolidated from `Robotics_Purchasing_2025-2026.xlsx`. Quantities reflect ordered packages from the source sheet, so multi-packs list the package count and the integration notes call out the installed usage where it matters.
+This purchasing BOM was consolidated from the exported source sheet in [`docs/purchasing-bom.csv`](docs/purchasing-bom.csv). Quantities reflect ordered packages from the source sheet, so multi-packs list the package count and the integration notes call out the installed usage where it matters.
 
 <table>
   <tr>
