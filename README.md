@@ -15,13 +15,13 @@ The final build combined field-tested hardware, simulation-backed control logic,
 
 ## Quick Reviewer Path
 
-| Start Here | Why It Matters |
-| --- | --- |
-| [`final_full_gait_test.py`](final_full_gait_test.py) | Main Raspberry Pi/Python gait, navigation, terrain overlay, and safety-governor program |
-| [`final_sensors.ino`](final_sensors.ino) | Arduino/C++ sensor firmware for ultrasonic and IMU data collection |
-| [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) | Passing gait, terrain, navigation, and pytest regression checks |
-| [Field Demo Videos](#field-demo-videos) | Clickable GIF previews linking to full rover traversal videos |
-| [Research Symposium Submissions](#colorado-space-grant-consortium-research-symposium-submissions) | Paper, poster, presentation slides, award video, and symposium documentation |
+| Reader | Start Here | What It Shows |
+| --- | --- | --- |
+| Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance) and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
+| Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control](#gait-control), and [Simulation And Testing](#simulation-and-testing) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
+| Hardware reviewers | [Hardware Stack](#hardware-stack) and [Bill Of Materials](#bill-of-materials) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
+| Media reviewers | [Media Gallery](docs/media.md) | Full field demo videos, course success runs, symposium materials, and award media |
+| Reproducing or running code | [Software Map](#software-map) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
 
 ## Table Of Contents
 
@@ -36,18 +36,13 @@ The final build combined field-tested hardware, simulation-backed control logic,
   - [Measured Platform Geometry](#measured-platform-geometry)
   - [CAD Models](#cad-models)
 - [Software Map](#software-map)
-  - [Main Program Modes](#main-program-modes)
 - [Gait Control](#gait-control)
 - [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
-  - [Field Demo Videos](#field-demo-videos)
-  - [Course Success Runs](#course-success-runs)
-- [Colorado Space Grant Consortium Robotics Challenge Award](#colorado-space-grant-consortium-robotics-challenge-award)
+- [Media Gallery](#media-gallery)
+- [Recognition And Publications](#recognition-and-publications)
 - [Simulation And Testing](#simulation-and-testing)
 - [Releases](#releases)
 - [Known Limits](#known-limits)
-- [Colorado Space Grant Consortium Research Symposium Submissions](#colorado-space-grant-consortium-research-symposium-submissions)
-  - [Symposium Poster Presentation](#symposium-poster-presentation)
-  - [Symposium Awards](#symposium-awards)
 
 ## Results At A Glance
 
@@ -66,7 +61,7 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 
 ## Repository Status
 
-This repository contains the final public code, validation previews, CAD references, release links, and documentation for the Team Euler rover build. Full-resolution videos and symposium PDFs are hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release to keep the repository lightweight.
+This repository contains the final public code, validation previews, CAD references, release links, and documentation for the Team Euler rover build. Longer reference pages are collected in the [docs index](docs/README.md), and full-resolution videos and symposium PDFs are hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release to keep the repository lightweight.
 
 | Area | Status |
 | --- | --- |
@@ -126,7 +121,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 
 ### Bill Of Materials
 
-This purchasing BOM was consolidated from the exported source sheet in [`docs/purchasing-bom.csv`](docs/purchasing-bom.csv). Quantities reflect ordered packages from the source sheet, so multi-packs list the package count and the integration notes call out the installed usage where it matters.
+The README keeps the BOM at summary level. The detailed categorized table lives in [`docs/BOM.md`](docs/BOM.md), with the exported source sheet preserved as [`docs/purchasing-bom.csv`](docs/purchasing-bom.csv). Quantities in both files are ordered package counts, with integration notes explaining installed usage.
 
 <table>
   <tr>
@@ -137,68 +132,16 @@ This purchasing BOM was consolidated from the exported source sheet in [`docs/pu
   </tr>
   <tr>
     <td align="center"><strong>31</strong><br>tracked source items</td>
-    <td align="center"><strong>6</strong><br>STS3215 C-leg servos</td>
+    <td align="center"><strong>6</strong><br>STS3215 C-leg smart servos</td>
     <td align="center"><strong>8</strong><br>ultrasonic sensors plus BNO085 IMU</td>
     <td align="center"><strong>PETG + TPU</strong><br>with bumper-pad V tread</td>
   </tr>
 </table>
 
-#### Control, Actuation, And Sensing
-
-| Purchased Item | Ordered Qty | Integration Role |
-| --- | ---: | --- |
-| [Raspberry Pi Model 3B 1GB](https://www.digikey.com/en/products/detail/raspberry-pi/SC0022/6152799) | 1 | Main onboard computer for Python gait control, navigation, telemetry, and validation-derived safety logic |
-| [Nano V3.0, 3 pack](https://a.co/d/9xtDXWl) | 1 pack | Arduino-compatible sensor hub board, with spares for development and replacement |
-| [Feetech STS3215 30 kg serial bus servo, 6 pack](https://a.co/d/iHHMIzh) | 1 pack | Six high-torque smart servos, one per C-leg, providing both actuation and runtime feedback for gait tuning |
-| [FE-URT-1 serial bus servo signal conversion board](https://a.co/d/dvNswPN) | 1 | Servo configuration, calibration, and bus-level debugging interface |
-| [BNO085 9-DOF IMU](https://www.digikey.com/en/products/detail/adafruit-industries-llc/4754/13426653) | 1 | Fused orientation for slope detection, terrain classification, and fall recovery logic |
-| [HC-SR04 close-range ultrasonic sensors, 5 pack](https://a.co/d/3diNHQw) | 2 packs | Eight installed sensors for 360-degree obstacle coverage and cliff/drop-off detection, plus spares |
-
-#### Power And Compute Support
-
-| Purchased Item | Ordered Qty | Integration Role |
-| --- | ---: | --- |
-| [OVONIC 3S LiPo battery, 3000 mAh, 11.1 V, XT60, 2 pack](https://a.co/d/0gbthKod) | 1 pack | One active rover battery for the servo and compute power system, with one spare/replacement battery available |
-| [3A mini DC-DC buck step-down converters, 10 pack](https://a.co/d/47GRL41) | 1 pack | Regulated low-voltage rails for onboard electronics |
-| [16 AWG XT60 connectors, 3 pair](https://a.co/d/08h4Eg9N) | 1 pack | Main power harness connectors |
-| [12 AWG inline fuse holders, 4 pack](https://a.co/d/4MlUTQ7) | 1 pack | Serviceable power protection points in the battery harness |
-| [XT60 power splitter, 1 female to 3 male](https://a.co/d/fD9xkFq) | 1 | Power distribution from the main battery connection |
-| [LiPo safe bag, 2 pack](https://a.co/d/015qrFE) | 1 pack | Safer battery storage and charging workflow |
-| [Lexar 32 GB microSD cards, 2 pack](https://a.co/d/cnXFC7C) | 1 pack | Raspberry Pi OS, rover software, logs, and backup card |
-
-#### Printed Structure And Traction
-
-| Purchased Item | Ordered Qty | Integration Role |
-| --- | ---: | --- |
-| [White Elegoo PETG filament, 2 kg](https://a.co/d/hY3RwI1) | 1 | Printed chassis, split lid, and C-leg arc structure |
-| [Black Siraya Tech Flex 85A TPU filament, 1 kg](https://a.co/d/5w6u7CR) | 1 | Flexible tread interface layer between PETG legs and bumper-pad tread |
-| [Scotch clear adhesive bumper pads](https://a.co/d/0gSrLq1X) | 1 | Rubber contact pads used as the base of the V-shaped tread |
-| [GE Advanced Silicone Caulk, 2.8 oz](https://a.co/d/0bI7Rz4a) | 1 | Flexible sealing and retention support during physical assembly |
-| [Mo-Flow hydrophobic mesh air filter](https://a.co/d/06QhTKAN) | 1 | Protective breathable mesh for exposed openings |
-
-<p align="center">
-  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
-</p>
-
-The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
-
-#### Wiring, Mounting, And Assembly
-
-| Purchased Item | Ordered Qty | Integration Role |
-| --- | ---: | --- |
-| [22 AWG stranded wire spool, 6 colors](https://a.co/d/5BzQJls) | 1 | Sensor, signal, low-current power wiring, and soldered sensor harnesses |
-| [Breadboard jumper cables](https://a.co/d/0hUW9Au0) | 1 | Prototyping and short internal signal connections |
-| [Cable management mesh](https://a.co/d/0e090q8c) | 1 | Harness organization and abrasion protection |
-| [Scotch vinyl electrical tape](https://a.co/d/eYtmley) | 1 | Insulation, strain relief, and harness finishing |
-| [3M double-sided foam tape](https://a.co/d/iFtOYlh) | 1 | Lightweight mounting for electronics, sensors, and temporary fixtures |
-| [Museum putty](https://a.co/d/8DZjPia) | 1 | Temporary positioning and vibration-tolerant test mounting |
-| [J-B Weld Plastic Bonder structural adhesive](https://a.co/d/7YW5mEn) | 1 | Structural bonding for plastic assemblies and repairs |
-| [HFT super glue gel, 10 pack](https://www.harborfreight.com/super-glue-gel-10-pack-68349.html) | 1 pack | Fast local bonding during assembly and field repairs |
-| [Loctite 243 blue threadlocker](https://a.co/d/04PtQ2lp) | 1 | Vibration-resistant threaded fastener retention |
-| [M2/M3/M4 metric bolt assortment, 1710 pieces](https://a.co/d/033dwhMF) | 1 kit | Primary fastener assortment for chassis, modules, and brackets |
-| [M1-M2.3 self-tapping electronic screws, 1440 pieces](https://a.co/d/078vDWSM) | 1 kit | Small electronics and sensor mounting |
-| [M2/M3/M4/M5 threaded inserts, 520 pieces](https://a.co/d/08kKaHyx) | 1 kit | Reusable threaded attachment points in printed parts |
-| [M5 x 12 mm tee wing knob thumb screws, 20 pack](https://a.co/d/0gaDvqod) | 1 pack | Hand-removable service fasteners for accessible assemblies |
+| Detailed BOM View | Contents |
+| --- | --- |
+| [Categorized Bill of Materials](docs/BOM.md) | Control electronics, smart servos, sensors, power, printed structure, tread materials, wiring, adhesives, fasteners, and assembly supplies |
+| [Purchasing Source CSV](docs/purchasing-bom.csv) | Exported source rows from `Robotics_Purchasing_2025-2026.xlsx` |
 
 ### Measured Platform Geometry
 
@@ -222,81 +165,14 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 
 ## Software Map
 
-The source files are grouped by runtime role below. See [`RUNNING.md`](RUNNING.md) for setup and command examples; calibration, telemetry, tuning, and regression helpers are listed separately so reviewers can distinguish active runtime code from support tooling.
+The README lists only the main entry points. The full file-by-file map, diagnostics, launch modes, calibration tools, simulation helpers, telemetry analysis, and regression tests live in [`docs/software-map.md`](docs/software-map.md).
 
-### Runtime And Gait Control
-
-| File | Purpose |
-| --- | --- |
-| `final_full_gait_test.py` | Main Python autonomous gait engine and navigation FSM |
-| `offset_full_gait_test_v2.py` | Earlier v2 gait-engine implementation retained for comparison and development history |
-| `final_full_gait_test_tripod_default.py` | Tripod-default final gait-engine variant for comparison and fallback testing |
-| `home_tripod_wave_test.py` | Legs-home sequence followed by forward tripod and forward wave gait checks |
-
-### Main Program Modes
-
-`final_full_gait_test.py` supports several launch modes for hardware runs, dry runs, and subsystem checks:
-
-- `sudo python3 final_full_gait_test.py`: full maneuver demo across the implemented gaits and stance behaviors.
-- `sudo python3 final_full_gait_test.py --competition`: autonomous navigation with the eight-state FSM, Arduino sensor stream, terrain adaptation, and live terminal state output.
-- `sudo python3 final_full_gait_test.py --competition-dry-run`: autonomous navigation logic with sensors active and servo speed held at zero.
-- `sudo python3 final_full_gait_test.py --test-competition`: timed fallback sequence with no sensor dependency.
-- `sudo python3 final_full_gait_test.py --test-tripod`, `--test-quad`, or `--test-wave`: gait-specific forward, turning, pivot, and reverse checks.
-- `sudo python3 final_full_gait_test.py --test-recovery`: recovery wiggle and self-right behavior checks.
-- `sudo python3 final_full_gait_test.py --test-arduino`, `--test-sensors`, or `--test-nav`: Arduino serial, sensor-processing, and full navigation-pipeline diagnostics.
-- `sudo python3 final_full_gait_test.py --drift-test <gait>`: heading-drift measurement for gait tuning.
-- `--no-verbose-telemetry`: optional logging flag for reducing extended servo, sensor, and navigation output.
-
-### Sensor Firmware And Input
-
-| File | Purpose |
-| --- | --- |
-| `final_sensors.ino` | Arduino/C++ Nano sensor firmware for ultrasonic and IMU data collection |
-| `Detection_SensorHub_FINAL.ino` | Alternate final Arduino/C++ sensor-hub firmware variant |
-| `fusion.py`, `fusion2.py` | Sensor interpretation and classification support |
-| `input_thread.py`, `input_thread2.py` | Serial input handling |
-
-### Calibration And Configuration
-
-| File | Purpose |
-| --- | --- |
-| `auto_calibrate.py` | Automated setup and tuning calibration helper |
-| `calibrate_homes.py` | Servo home-position calibration utility |
-| `calibrate_legs.py` | Leg calibration utility for physical alignment |
-| `validate_config.py` | Configuration validation before running the rover |
-
-### Simulation And Verification
-
-| File | Purpose |
-| --- | --- |
-| `sim_verify.py` | Kinematic and gait-engine checks |
-| `sim_terrain.py` | Terrain and governor stress scenarios |
-| `sim_nav.py` | Navigation FSM tests with synthetic sensor frames |
-| `monte_carlo_terrain.py` | Monte Carlo terrain simulation and robustness exploration |
-
-### Analysis And Tuning
-
-| File | Purpose |
-| --- | --- |
-| `rover_statics.py` | Static geometry/load analysis support |
-| `gait_viz.py` | Gait visualization helper |
-| `fsm_audit.py` | Navigation FSM audit/support script |
-| `load_monitor.py` | Servo load monitoring support |
-| `param_sweep.py` | Parameter sweep tooling for control tuning |
-| `sweep_hz_governor.py` | Frequency/governor sweep analysis |
-| `sweep_stall_threshold.py` | Stall-threshold sweep analysis |
-| `parse_telemetry.py`, `analyze_run_log.py` | Telemetry and run-log analysis |
-
-### Regression Tests And Notes
-
-| File | Purpose |
-| --- | --- |
-| `test_governor_ff_budget.py` | Feedforward/governor budget regression test |
-| `test_nav_logic.py` | Navigation logic regression tests |
-| `test_nav_serial.py` | Navigation serial-input regression tests |
-| `test_sensor_classification.py` | Sensor classification regression tests |
-| `rhex_cliff_research.txt` | RHex-style cliff/drop-off research notes |
-| `.gitignore` | Repository ignore rules |
+| Area | Primary Files | Why Reviewers Should Care |
+| --- | --- | --- |
+| Runtime gait and autonomy | [`final_full_gait_test.py`](final_full_gait_test.py), [`final_sensors.ino`](final_sensors.ino) | Main Raspberry Pi control loop plus Arduino sensor firmware used by the final rover |
+| Running and diagnostics | [`RUNNING.md`](RUNNING.md), [`docs/software-map.md`](docs/software-map.md) | Hardware launch commands, dry-run modes, subsystem tests, and gait-specific checks |
+| Simulation and regression | [`sim_verify.py`](sim_verify.py), [`sim_terrain.py`](sim_terrain.py), [`sim_nav.py`](sim_nav.py), pytest files | Kinematic, terrain, governor, navigation, and regression coverage |
+| Telemetry and tuning | [`parse_telemetry.py`](parse_telemetry.py), [`analyze_run_log.py`](analyze_run_log.py), [`param_sweep.py`](param_sweep.py) | Post-run evidence used to tune gait constants, load limits, and safety governors |
 
 ## Gait Control
 
@@ -354,81 +230,45 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 ![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
 
-### Field Demo Videos
+## Media Gallery
 
-<table width="100%">
-  <tr>
-    <th width="260">Demo</th>
-    <th>Preview</th>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4">Loose Sand Hill Traversal</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4"><img src="docs/assets/sand-hill-traversal-preview-v3.gif" alt="Sand hill traversal preview" width="480"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4">Daytime Sand Hill Traversal</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4"><img src="docs/assets/daytime-hill-traversal-preview-v2.gif" alt="Daytime sand hill traversal preview" width="480"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/cliff-detection-demo.mp4">Cliff Detection Behavior</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/cliff-detection-demo.mp4"><img src="docs/assets/cliff-detection-demo-preview-v2.gif" alt="Cliff detection demo preview" width="480"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/indoor-obstacle-navigation-demo.mp4">Indoor Obstacle Navigation</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/indoor-obstacle-navigation-demo.mp4"><img src="docs/assets/indoor-obstacle-navigation-preview-v2.gif" alt="Indoor obstacle navigation preview" width="480"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4">Park Concrete Table Seating Navigation</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4"><img src="docs/assets/navigation-park-table-seating-preview-v4.gif" alt="Park concrete table seating navigation preview" width="480"></a></td>
-  </tr>
-</table>
+The README highlights the video evidence without embedding every preview table. The full gallery is in [`docs/media.md`](docs/media.md), including field demos, course success runs, symposium materials, and award video links.
 
-### Course Success Runs
+| Gallery | What The Link Opens |
+| --- | --- |
+| [Field Demo Videos](docs/media.md#field-demo-videos) | Clickable GIF previews linked to full traversal videos: sand hill, cliff detection, indoor navigation, and park obstacle navigation |
+| [Course Success Runs](docs/media.md#course-success-runs) | Course 1-5 and challenge-course success videos with preview GIFs |
+| [Research Symposium Materials](docs/media.md#research-symposium-materials) | Paper, presentation slides, poster, and COSGC award video |
 
-<table width="100%">
-  <tr>
-    <th width="260">Run</th>
-    <th>Preview</th>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4">Course 1 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="320"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4">Course 2 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="320"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4">Course 3 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="320"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4">Course 4 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="320"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4">Course 5 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="320"></a></td>
-  </tr>
-  <tr>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4">Challenge Course Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="320"></a></td>
-  </tr>
-</table>
-
-## Colorado Space Grant Consortium Robotics Challenge Award
+## Recognition And Publications
 
 <table>
   <tr>
     <td width="58%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
     <td>
       <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
-      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six C-leg locomotion approach.
+      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six C-leg locomotion system.
     </td>
   </tr>
 </table>
 
-The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
+| Research Output | Link |
+| --- | --- |
+| Paper | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf) |
+| Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
+| Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
+| Award Video | [Identity COSGC Video](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
+| Full Media Gallery | [Field demos, course runs, symposium media, and award previews](docs/media.md) |
+
+<table>
+  <tr>
+    <td width="58%"><img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="520"></td>
+    <td>
+      <strong>2026 NASA Colorado Space Grant Consortium Research Symposium Display</strong><br><br>
+      Presented the rover prototype, printed CAD components, and research poster together so reviewers could connect the software, mechanical design, and validation results.
+    </td>
+  </tr>
+</table>
 
 ## Simulation And Testing
 
@@ -458,42 +298,10 @@ python3 sim_nav.py
 
 ## Known Limits
 
-- The 32-trial validation set supports pilot-scale reliability claims, not a fully powered statistical proof.
-- Late-stage validation did not preserve exact per-trial software hashes.
-- The simulation framework does not model mechanical compliance, backlash, or deformable terrain.
-- The clearest remaining failure mode was abrupt terrain transition within a single stride.
-- Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains.
-
-## Colorado Space Grant Consortium Research Symposium Submissions
-
-| Submission | Link |
+| Category | Limit |
 | --- | --- |
-| Paper | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf) |
-| Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
-| Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster (2026 Best Robotics Poster)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
-| Video | [Identity COSGC Video (2026 People's Choice Video)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4)<br><br>[![Identity COSGC Video (2026 People's Choice Video) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
-
-### Symposium Poster Presentation
-
-<table>
-  <tr>
-    <td width="58%"><img src="docs/assets/cosgc-poster-presentation-setup.jpg" alt="COSGC symposium poster presentation setup with rover prototype and printed parts" width="520"></td>
-    <td>
-      <strong>2026 NASA Colorado Space Grant Consortium Research Symposium Display</strong><br><br>
-      Presented the rover prototype, printed CAD components, and research poster together so reviewers could connect the software, mechanical design, and validation results.
-    </td>
-  </tr>
-</table>
-
-### Symposium Awards
-
-<table>
-  <tr>
-    <td align="center"><strong>2026 Best Robotics Poster</strong></td>
-    <td align="center"><strong>2026 People's Choice Video</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="360"></td>
-    <td><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="360"></td>
-  </tr>
-</table>
+| Validation scope | The 32-trial validation set supports pilot-scale reliability claims, not a fully powered statistical proof. |
+| Reproducibility | Late-stage validation did not preserve exact per-trial software hashes. |
+| Simulation fidelity | The simulation framework validates timing, state transitions, terrain overlays, and control invariants, but does not model all physical compliance, backlash, or deformable-terrain effects. |
+| Hardware behavior | The clearest remaining failure mode was abrupt terrain transition within a single stride. |
+| Application claims | Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains. |
