@@ -22,8 +22,6 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 
 ## My Role
 
-My contributions included:
-
 - Developed and tuned the Python gait/navigation stack, terrain overlays, telemetry analysis, simulation validation, and competition-readiness fixes.
 - Programmed the Arduino/C++ sensor firmware for ultrasonic and IMU data collection.
 - Integrated the sensor firmware with the Raspberry Pi control stack.
