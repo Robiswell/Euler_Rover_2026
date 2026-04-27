@@ -223,6 +223,6 @@ Hardware operation requires calibrated servos, connected sensor firmware, and sa
 
 - [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation](docs/paper/development-of-six-legged-autonomous-robot-frcc.pdf)
 - [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation (2026 Best Robotics Poster Award)](docs/paper/development-of-six-legged-autonomous-robot-frcc-poster.pdf)
-- [Identity COSGC 2026 People's Choice Award Video](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
+- [Identity COSGC Video (2026 People's Choice Video Award)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
 
-[![Identity COSGC 2026 People's Choice Award Video preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
+[![Identity COSGC Video (2026 People's Choice Video Award) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)
