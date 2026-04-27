@@ -1,6 +1,6 @@
 # Validation Reference
 
-This page collects the validation details summarized in the main README: field results, terrain classification signals, servo load margin, simulation coverage, and known limits.
+This page collects the validation details summarized in the main README: field results, navigation behavior, terrain classification signals, servo load margin, simulation coverage, and known limits.
 
 ## Field Results
 
@@ -23,6 +23,14 @@ The symposium paper treats the 32-trial validation set as a pilot study because 
 | Sustained servo load | Deep-sand detection |
 | Downward ultrasonic distance changes | Cliff/drop-off detection |
 
+![Terrain validation classes and overlay parameters](assets/terrain-validation-overlays.jpg)
+
+## Navigation FSM
+
+The autonomous navigation layer uses an eight-state finite state machine for forward traversal, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior.
+
+![Navigation finite-state machine flowchart](assets/navigation-state-flowchart.jpg)
+
 ## Servo Load Margin
 
 Across the validation terrain set, measured servo loads stayed below the configured stall threshold.
@@ -40,6 +48,14 @@ The simulation framework contains 40 automated checks:
 At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or deformable terrain.
 
 [GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs these simulation checks and the pytest regression suite on code, firmware, dependency, workflow, pull request, and manual-dispatch events.
+
+Run the simulation checks locally:
+
+```bash
+python3 sim_verify.py
+python3 sim_terrain.py
+python3 sim_nav.py
+```
 
 ## Known Limits
 

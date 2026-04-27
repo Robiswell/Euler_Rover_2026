@@ -18,27 +18,9 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Reader | Start Here | What It Shows |
 | --- | --- | --- |
 | Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance), [My Role](#my-role), and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
-| Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Architecture Overview](docs/architecture.md), and [Validation Reference](docs/validation.md) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
+| Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control Reference](docs/gait-control.md), and [Validation Reference](docs/validation.md) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
 | Hardware reviewers | [Hardware Reference](docs/hardware.md) and [Categorized Bill of Materials](docs/BOM.md) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
 | Reproducing or running code | [Software Map](docs/software-map.md) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
-
-## Table Of Contents
-
-- [Quick Reviewer Path](#quick-reviewer-path)
-- [Results At A Glance](#results-at-a-glance)
-- [Technical Highlights](#technical-highlights)
-- [Repository Status](#repository-status)
-- [My Role](#my-role)
-- [System Architecture](#system-architecture)
-- [Key Engineering Decisions](#key-engineering-decisions)
-- [Hardware Stack](#hardware-stack)
-  - [Bill Of Materials](#bill-of-materials)
-- [Software Map](#software-map)
-- [Gait Control](#gait-control)
-- [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
-- [Recognition And Publications](#recognition-and-publications)
-- [Simulation And Testing](#simulation-and-testing)
-- [Releases](#releases)
 
 ## Results At A Glance
 
@@ -53,32 +35,31 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Sensor update rate | ~10 Hz |
 | Steady-state servo load margin | At least 42% in formal trials |
 
-The symposium paper treats the 32-trial validation set as a pilot study because the 95% confidence interval lower bound falls below 90%. Within that scope, the data support high observed traversal reliability across tile, carpet, packed earth, loose sand, gravel, stone fields, and 20-degree inclines.
+The validation set is treated as a pilot study; the detailed statistical framing and known limits are documented in [`docs/validation.md`](docs/validation.md).
 
-## Technical Highlights
+## Engineering Highlights
 
 | Highlight | Why It Matters |
 | --- | --- |
 | Multiprocess Brain/Heart architecture | Keeps navigation logic from blocking the 30 Hz gait loop |
-| STS3215 smart-servo telemetry | Uses actuator feedback as sensor data for phase error, load, speed, voltage, current, temperature, and fault monitoring |
-| Simulation-backed gait validation | Tests gait timing, terrain overlays, governors, and navigation FSM behavior before hardware runs |
+| STS3215 smart-servo telemetry | Treats actuator feedback as sensor data for phase error, load, speed, voltage, current, temperature, and fault monitoring |
 | Arduino Nano sensor hub | Moves ultrasonic timing and IMU polling off the Raspberry Pi so sensor collection stays deterministic |
+| Buehler-clock gait control | Keeps rough-terrain adaptation interpretable through duty cycle, impact window, phase offsets, and speed setpoint changes |
+| Simulation-backed validation | Tests gait timing, terrain overlays, governors, and navigation FSM behavior before hardware runs |
 | Field-tested C-leg locomotion | Validated a low-cost PETG/TPU C-leg platform across sand, gravel, stone, carpet, packed earth, tile, and inclines |
 
 ## Repository Status
 
-This repository contains the final public code, validation previews, CAD references, release links, and documentation for the Team Euler rover build. Longer reference pages are collected in the [docs index](docs/README.md), and full-resolution videos and symposium PDFs are hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release to keep the repository lightweight.
+This repository contains the final public code, validation previews, CAD references, media links, and supporting documentation for the Team Euler rover build. Longer reference pages are collected in the [docs index](docs/README.md), and full-resolution media is hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release.
 
 | Area | Status |
 | --- | --- |
-| Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
-| Validated release history | Release links preserve the final post-competition, competition, and earlier autonomous rover milestones |
-| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint; [GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs the simulation suite and pytest regressions on code/firmware/dependency changes, pull request, and manual dispatch |
-| Setup documentation | `RUNNING.md`, `ARCHITECTURE.md`, and `requirements.txt` document setup, runtime modes, and software structure |
-| Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
-| Documentation included | README summarizes the project; docs pages cover hardware, BOM, architecture, software map, validation, slide gallery, and media |
+| Final rover build | [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build), with cliff detection restored after the competition troubleshooting snapshot |
+| Primary runtime | [`final_full_gait_test.py`](final_full_gait_test.py) on Raspberry Pi plus [`final_sensors.ino`](final_sensors.ino) on Arduino Nano |
+| Validation | 31/32 formal traversals successful, with 40/40 simulation checks passing at the symposium-paper checkpoint |
+| Setup and references | [`RUNNING.md`](RUNNING.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), [`docs/README.md`](docs/README.md), and [`requirements.txt`](requirements.txt) |
+| Release history | Earlier public milestones are preserved in [`docs/releases.md`](docs/releases.md) |
 | License | PolyForm Noncommercial 1.0.0; commercial use requires separate permission |
-| Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## My Role
 
@@ -94,27 +75,13 @@ This was a team robotics project. My individual work focused on software, contro
 
 ![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map, or [`docs/architecture.md`](docs/architecture.md) for a compact diagram-focused architecture overview.
+The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, reads STS3215 telemetry, applies safety governors, and keeps motor control isolated from slower navigation work.
 
-### Brain/Heart Process Split
-
-![Brain/Heart process split diagram](docs/assets/brain-heart-process-split.jpg)
-
-The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, reads STS3215 position/load/speed telemetry, applies safety governors, and keeps motor control isolated from slower navigation work.
-
-## Key Engineering Decisions
-
-- Kept each leg to one powered degree of freedom to reduce mechanical complexity and make the control system easier to audit.
-- Used RHex-style C-shaped legs for rolling ground contact, passive compliance, and simple stance/swing timing.
-- Split the software into Brain and Heart processes so navigation logic cannot block the 30 Hz gait loop.
-- Offloaded ultrasonic timing and IMU polling to an Arduino Nano because Linux on the Raspberry Pi is not real time.
-- Used Buehler-clock gait parameters rather than per-joint trajectory planning, keeping terrain adaptation interpretable.
-- Treated the STS3215 smart servos as both actuators and sensors, using position, load, speed, voltage, current, temperature, and error telemetry to tune gait behavior and safety limits.
-- Built simulation tests for gait timing, terrain overlays, governors, and navigation FSM regressions before hardware deployment.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map, or [`docs/architecture.md`](docs/architecture.md) for a diagram-focused overview.
 
 ## Hardware Stack
 
-The README keeps the hardware section at system-summary level. The full hardware reference, measured geometry, CAD links, tread construction notes, and BOM routing live in [`docs/hardware.md`](docs/hardware.md).
+Identity uses a low-cost, field-serviceable hardware stack built around one smart servo per C-leg, a Raspberry Pi control computer, and an Arduino sensor hub. The full hardware reference, measured geometry, CAD links, tread construction notes, and BOM routing live in [`docs/hardware.md`](docs/hardware.md).
 
 | Subsystem | Components | Purpose |
 | --- | --- | --- |
@@ -125,6 +92,10 @@ The README keeps the hardware section at system-summary level. The full hardware
 
 ### Bill Of Materials
 
+| Purchase Lines | Locomotion Core | Sensor Coverage | Fabrication Stack |
+| --- | --- | --- | --- |
+| 31 tracked source items | 6 STS3215 smart servos | 8 ultrasonic sensors plus BNO085 IMU | PETG/TPU structure with bumper-pad V tread |
+
 | BOM Resource | Contents |
 | --- | --- |
 | [Categorized Bill of Materials](docs/BOM.md) | Control electronics, smart servos, sensors, power, printed structure, tread materials, wiring, adhesives, fasteners, and assembly supplies |
@@ -132,70 +103,31 @@ The README keeps the hardware section at system-summary level. The full hardware
 
 ## Software Map
 
-The README lists only the main entry points. The full file-by-file map, diagnostics, launch modes, calibration tools, simulation helpers, telemetry analysis, and regression tests live in [`docs/software-map.md`](docs/software-map.md).
+The main runtime is split between the Raspberry Pi gait/navigation program and Arduino sensor firmware. The full file-by-file map, diagnostics, launch modes, calibration tools, simulation helpers, telemetry analysis, and regression tests live in [`docs/software-map.md`](docs/software-map.md).
 
 | Area | Primary Files | Why Reviewers Should Care |
 | --- | --- | --- |
 | Runtime gait and autonomy | [`final_full_gait_test.py`](final_full_gait_test.py), [`final_sensors.ino`](final_sensors.ino) | Main Raspberry Pi control loop plus Arduino sensor firmware used by the final rover |
 | Running and diagnostics | [`RUNNING.md`](RUNNING.md), [`docs/software-map.md`](docs/software-map.md) | Hardware launch commands, dry-run modes, subsystem tests, and gait-specific checks |
-| Simulation and regression | [`sim_verify.py`](sim_verify.py), [`sim_terrain.py`](sim_terrain.py), [`sim_nav.py`](sim_nav.py), pytest files | Kinematic, terrain, governor, navigation, and regression coverage |
-| Telemetry and tuning | [`parse_telemetry.py`](parse_telemetry.py), [`analyze_run_log.py`](analyze_run_log.py), [`param_sweep.py`](param_sweep.py) | Post-run evidence used to tune gait constants, load limits, and safety governors |
 
 ## Gait Control
 
-The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fraction, phase offsets define inter-leg timing, and a global speed setpoint controls phase progression.
+The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fraction, phase offsets define inter-leg timing, and a global speed setpoint controls phase progression. Tripod, wave, and quadruped modes were tuned for different terrain demands.
 
-| Gait | Duty Cycle | Primary Use |
-| --- | --- | --- |
-| Tripod | 0.5 | Faster locomotion on flat and moderate terrain |
-| Wave | 0.75 | Higher-contact gait for rough terrain and inclines |
-| Quadruped | 0.7 | Balance of stability and speed |
-
-### Smart-Servo Feedback For Gait Changes
-
-The Feetech STS3215 smart servos were used as feedback sensors, not just as motors. The Heart process reads present position, load, and speed during the live gait loop, then rotates lower-rate telemetry reads for voltage, current, temperature, and hardware error flags.
-
-| Servo Feedback | How It Changed The Gait System |
+| Control Feature | Implementation |
 | --- | --- |
-| Present position | Converted into actual leg phase and compared against the Buehler-clock target phase |
-| Phase error | Triggered the phase-error governor to slow the gait before lag caused foot drag or lost ground clearance |
-| Present load | Drove stall detection, self-right load monitoring, and terrain signals such as sustained heavy load in sand |
-| Present speed | Showed when commanded motion was not translating into actual leg speed under load |
-| Voltage, current, temperature, and error flags | Fed brownout, current-budget, thermal, and overload-protection limits |
-| Post-run telemetry | Informed feedforward caps, walking speed limits, impact windows, duty cycles, and final gait transitions |
+| Interpretable gait parameters | Duty cycle, impact window, phase offsets, and global speed setpoint |
+| STS3215 feedback loop | Position, phase error, load, speed, voltage, current, temperature, and error flags |
+| Safety governors | Phase-error slowdown, stall detection, brownout/current limits, thermal monitoring, and overload prevention |
+| Detailed reference | [`docs/gait-control.md`](docs/gait-control.md) |
 
-### Gait Pattern Visuals
-
-The diagrams below show the servo grouping and top-view leg order used by the implemented gait modes.
-
-| Tripod | Quadruped | Wave |
-| --- | --- | --- |
-| ![Tripod gait locomotion diagram](docs/assets/gait-tripod.jpg) | ![Quadruped gait locomotion diagram](docs/assets/gait-quadruped.jpg) | ![Wave gait locomotion diagram](docs/assets/gait-wave.jpg) |
-
-Terrain overlays adjust gait choice, impact window, duty cycle, and speed for flat ground, rough terrain, deep sand, and incline traversal. A phase-error governor reduces speed when commanded and measured servo phase diverge beyond the threshold used in the validation work.
+STS3215 telemetry was central to the gait changes: the rover compared commanded and measured leg phase, slowed before phase lag became foot drag, used sustained load as a terrain signal, and applied voltage/current/temperature limits during field testing.
 
 ## Navigation And Terrain Adaptation
 
 The autonomous navigation layer uses an eight-state finite state machine for forward traversal, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior. Sensor input comes from ultrasonic range data, IMU orientation, servo telemetry, and watchdog state.
 
-![Navigation finite-state machine flowchart](docs/assets/navigation-state-flowchart.jpg)
-
-### Terrain Classification
-
-| Signal | Used For |
-| --- | --- |
-| IMU pitch | Incline and descent detection |
-| Angular-rate and ultrasonic stability | Rough-terrain classification |
-| Sustained servo load | Deep-sand detection |
-| Downward ultrasonic distance changes | Cliff/drop-off detection |
-
-![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
-
-### Servo Load Margin
-
-Across the validation terrain set, measured servo loads stayed below the configured stall threshold.
-
-![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
+Terrain classification combines IMU pitch/roll, angular-rate stability, ultrasonic range changes, and servo-load trends. The navigation FSM diagram, terrain overlay chart, and servo load margin figure are collected in [`docs/validation.md`](docs/validation.md).
 
 ## Recognition And Publications
 
@@ -245,16 +177,10 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 ## Simulation And Testing
 
-The project includes 40 automated simulation checks covering gait timing, terrain overlays, governors, and navigation FSM behavior. The README keeps the headline result here; detailed field validation, servo load margin, simulation scope, and known limits live in [`docs/validation.md`](docs/validation.md).
+The project includes 40 automated simulation checks covering gait timing, terrain overlays, governors, and navigation FSM behavior. GitHub Actions runs the simulation and pytest regression suite on code, firmware, dependency, workflow, pull request, and manual-dispatch events.
 
 | Validation Resource | Link |
 | --- | --- |
 | GitHub Actions simulation workflow | [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) |
 | Field results and known limits | [Validation Reference](docs/validation.md) |
-| Local simulation commands | `python3 sim_verify.py`, `python3 sim_terrain.py`, `python3 sim_nav.py` |
-
-## Releases
-
-- [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): final public build after the COSGC competition, with cliff detection turned back on.
-- [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): competition snapshot used during the event.
-- [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier autonomous rover milestone.
+| Local simulation commands | [`docs/validation.md`](docs/validation.md#simulation-coverage) |
