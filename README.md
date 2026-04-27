@@ -158,7 +158,7 @@ This purchasing BOM was consolidated from `Robotics_Purchasing_2025-2026.xlsx`. 
 
 | Purchased Item | Ordered Qty | Integration Role |
 | --- | ---: | --- |
-| [OVONIC 3S LiPo battery, 3000 mAh, 11.1 V, XT60, 2 pack](https://a.co/d/0gbthKod) | 1 pack | Main rover batteries feeding the servo and compute power system, with one spare/replacement pack available |
+| [OVONIC 3S LiPo battery, 3000 mAh, 11.1 V, XT60, 2 pack](https://a.co/d/0gbthKod) | 1 pack | One active rover battery for the servo and compute power system, with one spare/replacement battery available |
 | [3A mini DC-DC buck step-down converters, 10 pack](https://a.co/d/47GRL41) | 1 pack | Regulated low-voltage rails for onboard electronics |
 | [16 AWG XT60 connectors, 3 pair](https://a.co/d/08h4Eg9N) | 1 pack | Main power harness connectors |
 | [12 AWG inline fuse holders, 4 pack](https://a.co/d/4MlUTQ7) | 1 pack | Serviceable power protection points in the battery harness |
