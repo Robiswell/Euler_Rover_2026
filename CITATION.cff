@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use this rover project or its validation materials, please cite this repository."
+message: "If you use this rover software, validation materials, or public repository, please cite this repository."
 title: "Identity: Team Euler Autonomous Hexapod Rover"
 type: software
 authors:
