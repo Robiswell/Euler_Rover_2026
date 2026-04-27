@@ -121,7 +121,13 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Power | 3S 3000 mAh LiPo battery, 11.1 V nominal | Powers the rover with software brownout protection and speed limiting under voltage sag |
 | Chassis | PETG 3D-printed octagonal body | Supports six servo modules with front/rear leg pairs splayed at 35 degrees and middle legs mounted perpendicular |
 | Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
-| Ground contact | TPU rubber feet with staggered lug pattern | Improves traction on sand, gravel, stone, carpet, and packed earth |
+| Ground contact | Adhesive rubber bumper pads with hot-glue V tread | Adds compliant grip and a NASA rover-inspired chevron contact pattern for rough terrain |
+
+<p align="center">
+  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
+</p>
+
+The C-legs use adhesive rubber bumper pads as the base contact surface, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while still leaving enough compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
 
 ### Build Components
 
@@ -135,7 +141,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | BNO085 IMU | 1 | Fused orientation for slope detection, terrain classification, and tip/fall logic |
 | 3S 3000 mAh LiPo battery | 1 | Main rover power source with software limits for voltage-sag protection |
 | PETG printed chassis, split lid, and C-leg assemblies | Custom set | CAD-modeled and 3D-printed rover structure, including octagonal body and single-actuator leg geometry |
-| TPU traction feet | 6 leg contact sets | Flexible lugged contact surface for sand, gravel, carpet, stone, and packed earth |
+| Adhesive bumper pads and hot-glue tread | 6 leg contact sets | Field-built V tread pattern for added grip on sand, gravel, carpet, stone, and packed earth |
 | Wiring, soldered sensor harnesses, and mounting hardware | Rover-specific | Electrical assembly and mechanical fastening for sensors, compute boards, servo bus, and power distribution |
 
 ### Measured Platform Geometry
