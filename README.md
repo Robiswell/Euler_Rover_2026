@@ -111,11 +111,9 @@ The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fr
 
 The diagrams below show the servo grouping and top-view leg order used by the implemented gait modes.
 
-![Tripod gait locomotion diagram](docs/assets/gait-tripod.jpg)
-
-![Quadruped gait locomotion diagram](docs/assets/gait-quadruped.jpg)
-
-![Wave gait locomotion diagram](docs/assets/gait-wave.jpg)
+| Tripod | Quadruped | Wave |
+| --- | --- | --- |
+| ![Tripod gait locomotion diagram](docs/assets/gait-tripod.jpg) | ![Quadruped gait locomotion diagram](docs/assets/gait-quadruped.jpg) | ![Wave gait locomotion diagram](docs/assets/gait-wave.jpg) |
 
 Terrain overlays adjust gait choice, impact window, duty cycle, and speed for flat ground, rough terrain, deep sand, and incline traversal. A phase-error governor reduces speed when commanded and measured servo phase diverge beyond the threshold used in the validation work.
 
@@ -138,25 +136,26 @@ Servo load stayed below the stall threshold across the validation terrain set:
 
 ![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
 
-**Field demo:** Loose sand hill traversal
+### Field Demo Videos
 
-[![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
+| Demo | Preview |
+| --- | --- |
+| Loose sand hill traversal | [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4) |
+| Daytime sand hill traversal | [![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4) |
+| Cliff detection behavior | [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4) |
+| Indoor obstacle navigation | [![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4) |
+| Park concrete table seating navigation | [![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4) |
 
-**Field demo:** Daytime sand hill traversal
+### Course Success Runs
 
-[![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4)
-
-**Field demo:** Cliff detection behavior
-
-[![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4)
-
-**Field demo:** Indoor obstacle navigation
-
-[![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4)
-
-**Field demo:** Park concrete table seating navigation
-
-[![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
+| Run | Preview |
+| --- | --- |
+| Course 1 success | [![Course 1 success preview](docs/assets/course-1-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4) |
+| Course 2 success | [![Course 2 success preview](docs/assets/course-2-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4) |
+| Course 3 success | [![Course 3 success preview](docs/assets/course-3-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4) |
+| Course 4 success | [![Course 4 success preview](docs/assets/course-4-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4) |
+| Course 5 success | [![Course 5 success preview](docs/assets/course-5-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4) |
+| Challenge course success | [![Challenge course success preview](docs/assets/challenge-course-success-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4) |
 
 The [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build) restores cliff detection after the competition snapshot had it disabled during troubleshooting.
 
