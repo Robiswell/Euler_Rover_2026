@@ -354,7 +354,7 @@ Across the validation terrain set, measured servo loads stayed below the configu
     <td width="58%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
     <td>
       <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
-      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six-legged C-leg locomotion approach.
+      Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six C-leg locomotion approach.
     </td>
   </tr>
 </table>
