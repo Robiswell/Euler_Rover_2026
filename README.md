@@ -310,9 +310,16 @@ The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fr
 
 ### Smart-Servo Feedback For Gait Changes
 
-The Feetech STS3215 smart servos were used as feedback sensors, not just as motors. The Heart process reads present position, load, and speed from the servo bus during the live gait loop, then rotates lower-rate telemetry reads for voltage, current, temperature, and hardware error flags. That made the gait system hardware-aware: commanded leg phase could be compared against measured servo position, load spikes could be tied to specific legs, and speed/current/voltage limits could be adjusted from real operating data instead of guesses.
+The Feetech STS3215 smart servos were used as feedback sensors, not just as motors. The Heart process reads present position, load, and speed during the live gait loop, then rotates lower-rate telemetry reads for voltage, current, temperature, and hardware error flags.
 
-That feedback directly shaped gait changes. Measured position was converted into actual leg phase, then compared with the Buehler-clock target phase; when the servos lagged the commanded phase, the phase-error governor reduced gait speed before phase lag could turn into foot drag or lost ground clearance. Servo load telemetry was used for stall detection, self-right/load monitoring, and terrain classification signals such as sustained heavy load in sand or rough terrain. Present-speed feedback helped identify when commanded motion was not translating into actual leg speed, while voltage, current, and temperature readings fed brownout, current-budget, and thermal safety limits. Post-run telemetry then informed the chosen feedforward caps, walking speed limits, impact windows, duty cycles, and gait transitions used in the final tripod, quadruped, and wave modes.
+| Servo Feedback | How It Changed The Gait System |
+| --- | --- |
+| Present position | Converted into actual leg phase and compared against the Buehler-clock target phase |
+| Phase error | Triggered the phase-error governor to slow the gait before lag caused foot drag or lost ground clearance |
+| Present load | Drove stall detection, self-right load monitoring, and terrain signals such as sustained heavy load in sand |
+| Present speed | Showed when commanded motion was not translating into actual leg speed under load |
+| Voltage, current, temperature, and error flags | Fed brownout, current-budget, thermal, and overload-protection limits |
+| Post-run telemetry | Informed feedforward caps, walking speed limits, impact windows, duty cycles, and final gait transitions |
 
 ### Gait Pattern Visuals
 
@@ -385,27 +392,27 @@ Across the validation terrain set, measured servo loads stayed below the configu
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4">Course 1 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4"><img src="docs/assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="320"></a></td>
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4">Course 2 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4"><img src="docs/assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="320"></a></td>
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4">Course 3 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-3-success.mp4"><img src="docs/assets/course-3-success-preview-v3.gif" alt="Course 3 success preview" width="320"></a></td>
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4">Course 4 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4"><img src="docs/assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="320"></a></td>
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4">Course 5 Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4"><img src="docs/assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="320"></a></td>
   </tr>
   <tr>
     <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4">Challenge Course Success</a></td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="480"></a></td>
+    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4"><img src="docs/assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="320"></a></td>
   </tr>
 </table>
 
