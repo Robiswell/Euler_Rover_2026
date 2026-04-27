@@ -325,7 +325,15 @@ Built and validated a six-legged autonomous rover spanning Python-based Raspberr
 
 ## Repository Status
 
-Hardware operation requires calibrated servos, connected sensor firmware, and safety checks before powering the robot.
+This repository is the cleaned public project version of the rover codebase, media, CAD references, validation artifacts, and final competition-era release links.
+
+| Area | Status |
+| --- | --- |
+| Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
+| Simulation validation | 40/40 checks passing at the symposium-paper checkpoint |
+| Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
+| Portfolio documentation | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
+| Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## Colorado Space Grant Consortium Robotics Challenge Award
 
