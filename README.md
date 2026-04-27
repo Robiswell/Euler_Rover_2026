@@ -193,6 +193,15 @@ python3 sim_nav.py
 - [Home Tripod Wave Test](https://youtube.com/shorts/x6369QqBHbY?feature=share)
 - [Full Gait Test 3/5/26](https://youtu.be/S6lwZjQxPko)
 
+## Challenge Success Videos
+
+- [Course 1 success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-1-success.mp4)
+- [Course 2 success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-2-success.mp4)
+- [Course 3 success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-3-success.mp4)
+- [Course 4 success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-4-success.mp4)
+- [Course 5 success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/course-5-success.mp4)
+- [Challenge course success](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/challenge-course-success.mp4)
+
 ## Limitations
 
 - The 32-trial validation set is best treated as a pilot study, not a fully powered statistical proof.
