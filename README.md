@@ -307,6 +307,12 @@ The gait engine follows a RHex-style Buehler clock. Duty cycle defines stance fr
 | Wave | 0.75 | Higher-contact gait for rough terrain and inclines |
 | Quadruped | 0.7 | Balance of stability and speed |
 
+### Smart-Servo Feedback For Gait Changes
+
+The Feetech STS3215 smart servos were used as feedback sensors, not just as motors. The Heart process reads present position, load, and speed from the servo bus during the live gait loop, then rotates lower-rate telemetry reads for voltage, current, temperature, and hardware error flags. That made the gait system hardware-aware: commanded leg phase could be compared against measured servo position, load spikes could be tied to specific legs, and speed/current/voltage limits could be adjusted from real operating data instead of guesses.
+
+That feedback directly shaped gait changes. Measured position was converted into actual leg phase, then compared with the Buehler-clock target phase; when the servos lagged the commanded phase, the phase-error governor reduced gait speed before phase lag could turn into foot drag or lost ground clearance. Servo load telemetry was used for stall detection, self-right/load monitoring, and terrain classification signals such as sustained heavy load in sand or rough terrain. Present-speed feedback helped identify when commanded motion was not translating into actual leg speed, while voltage, current, and temperature readings fed brownout, current-budget, and thermal safety limits. Post-run telemetry then informed the chosen feedforward caps, walking speed limits, impact windows, duty cycles, and gait transitions used in the final tripod, quadruped, and wave modes.
+
 ### Gait Pattern Visuals
 
 The diagrams below show the servo grouping and top-view leg order used by the implemented gait modes.
