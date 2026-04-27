@@ -6,37 +6,27 @@ Identity is a six-legged autonomous rover built by Team Euler for the COSGC robo
 
 The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
 
+The final build combined field-tested hardware, simulation-backed control logic, and documented validation results showing 31/32 successful traversals across seven terrain categories.
+
 ## Table Of Contents
 
 - [Results At A Glance](#results-at-a-glance)
+- [Repository Status](#repository-status)
 - [My Role](#my-role)
 - [System Architecture](#system-architecture)
-  - [Brain/Heart Process Split](#brainheart-process-split)
 - [Key Engineering Decisions](#key-engineering-decisions)
 - [Hardware Stack](#hardware-stack)
-  - [Measured Platform Geometry](#measured-platform-geometry)
   - [CAD Models](#cad-models)
 - [Software Map](#software-map)
-  - [Runtime And Gait Control](#runtime-and-gait-control)
   - [Main Program Modes](#main-program-modes)
-  - [Sensor Firmware And Input](#sensor-firmware-and-input)
-  - [Calibration And Configuration](#calibration-and-configuration)
-  - [Simulation And Verification](#simulation-and-verification)
-  - [Analysis And Tuning](#analysis-and-tuning)
-  - [Regression Tests And Notes](#regression-tests-and-notes)
 - [Gait Control](#gait-control)
-  - [Gait Pattern Visuals](#gait-pattern-visuals)
 - [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
-  - [Terrain Classification](#terrain-classification)
-  - [Servo Load Margin](#servo-load-margin)
   - [Field Demo Videos](#field-demo-videos)
   - [Course Success Runs](#course-success-runs)
 - [Colorado Space Grant Consortium Robotics Challenge Award](#colorado-space-grant-consortium-robotics-challenge-award)
 - [Simulation And Testing](#simulation-and-testing)
 - [Releases](#releases)
-- [Limitations](#limitations)
-- [Summary](#summary)
-- [Repository Status](#repository-status)
+- [Known Limits](#known-limits)
 - [Colorado Space Grant Consortium Research Symposium Submissions](#colorado-space-grant-consortium-research-symposium-submissions)
   - [Symposium Poster Presentation](#symposium-poster-presentation)
   - [Symposium Awards](#symposium-awards)
@@ -49,12 +39,25 @@ The project explored whether a six-servo hexapod could adapt to rough outdoor te
 | Observed traversal success | 96.9% |
 | Terrain categories | 7 |
 | Simulation tests | 40/40 passing |
-| Award recognition | 2026 COSGC Robotics Challenge, Outstanding Demonstration of Creative Locomotion |
+| Awards | 3 COSGC recognitions: Creative Locomotion, Best Robotics Poster, and People's Choice Video |
 | Heart loop rate | 30 Hz |
 | Sensor update rate | ~10 Hz |
 | Steady-state servo load margin | At least 42% in formal trials |
 
 The symposium paper treats the 32-trial validation set as a pilot study because the 95% confidence interval lower bound falls below 90%. Within that scope, the data support high observed traversal reliability across tile, carpet, packed earth, loose sand, gravel, stone fields, and 20-degree inclines.
+
+## Repository Status
+
+This repository contains the final public code, validation media, CAD references, release links, and documentation for the Team Euler rover build.
+
+| Area | Status |
+| --- | --- |
+| Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
+| Validated release history | Release links preserve the final post-competition, competition, and earlier autonomous rover milestones |
+| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint |
+| Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
+| Documentation included | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
+| Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## My Role
 
@@ -121,6 +124,8 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 This hardware layout intentionally trades fine-grained foot placement for mechanical simplicity, passive compliance, and an auditable control model. The Arduino Nano isolates microsecond-sensitive sensor timing from the Raspberry Pi, while the Pi handles higher-level gait and navigation logic.
 
 ## Software Map
+
+For a quick technical review, start with `final_full_gait_test.py` for the Python gait/navigation stack, `final_sensors.ino` for Arduino/C++ sensor firmware, and `sim_verify.py`, `sim_terrain.py`, and `sim_nav.py` for validation coverage. The remaining scripts support calibration, telemetry analysis, parameter tuning, and regression checks.
 
 ### Runtime And Gait Control
 
@@ -335,33 +340,17 @@ python3 sim_nav.py
 
 ## Releases
 
-- [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): cleaned public final build after the COSGC competition, with cliff detection turned back on.
+- [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): final public build after the COSGC competition, with cliff detection turned back on.
 - [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): competition snapshot used during the event.
 - [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier autonomous rover milestone.
 
-## Limitations
+## Known Limits
 
-- The 32-trial validation set is best treated as a pilot study, not a fully powered statistical proof.
-- Exact per-trial software hashes were not preserved during the late-stage validation period.
+- The 32-trial validation set supports pilot-scale reliability claims, not a fully powered statistical proof.
+- Late-stage validation did not preserve exact per-trial software hashes.
 - The simulation framework does not model mechanical compliance, backlash, or deformable terrain.
 - The clearest remaining failure mode was abrupt terrain transition within a single stride.
 - Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains.
-
-## Summary
-
-Built and validated a six-legged autonomous rover spanning Python-based Raspberry Pi control, Arduino/C++ sensor firmware, CAD-modeled and 3D-printed mechanical parts, selected hardware components, terrain-adaptive gait overlays, Brain/Heart process architecture, and simulation-backed navigation tests. Formal field validation showed 31/32 successful traversals across seven terrain categories.
-
-## Repository Status
-
-This repository is the cleaned public project version of the rover codebase, media, CAD references, validation artifacts, and final competition-era release links.
-
-| Area | Status |
-| --- | --- |
-| Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
-| Simulation validation | 40/40 checks passing at the symposium-paper checkpoint |
-| Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
-| Portfolio documentation | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
-| Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## Colorado Space Grant Consortium Research Symposium Submissions
 
