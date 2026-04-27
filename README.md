@@ -18,29 +18,27 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Reader | Start Here | What It Shows |
 | --- | --- | --- |
 | Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance), [My Role](#my-role), and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
-| Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control](#gait-control), and [Simulation And Testing](#simulation-and-testing) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
-| Hardware reviewers | [Hardware Stack](#hardware-stack) and [Bill Of Materials](#bill-of-materials) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
-| Reproducing or running code | [Software Map](#software-map) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
+| Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Architecture Overview](docs/architecture.md), and [Validation Reference](docs/validation.md) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
+| Hardware reviewers | [Hardware Reference](docs/hardware.md) and [Categorized Bill of Materials](docs/BOM.md) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
+| Reproducing or running code | [Software Map](docs/software-map.md) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
 
 ## Table Of Contents
 
 - [Quick Reviewer Path](#quick-reviewer-path)
 - [Results At A Glance](#results-at-a-glance)
+- [Technical Highlights](#technical-highlights)
 - [Repository Status](#repository-status)
 - [My Role](#my-role)
 - [System Architecture](#system-architecture)
 - [Key Engineering Decisions](#key-engineering-decisions)
 - [Hardware Stack](#hardware-stack)
   - [Bill Of Materials](#bill-of-materials)
-  - [Measured Platform Geometry](#measured-platform-geometry)
-  - [CAD Models](#cad-models)
 - [Software Map](#software-map)
 - [Gait Control](#gait-control)
 - [Navigation And Terrain Adaptation](#navigation-and-terrain-adaptation)
 - [Recognition And Publications](#recognition-and-publications)
 - [Simulation And Testing](#simulation-and-testing)
 - [Releases](#releases)
-- [Known Limits](#known-limits)
 
 ## Results At A Glance
 
@@ -57,6 +55,16 @@ The final build combined field-tested hardware, simulation-backed control logic,
 
 The symposium paper treats the 32-trial validation set as a pilot study because the 95% confidence interval lower bound falls below 90%. Within that scope, the data support high observed traversal reliability across tile, carpet, packed earth, loose sand, gravel, stone fields, and 20-degree inclines.
 
+## Technical Highlights
+
+| Highlight | Why It Matters |
+| --- | --- |
+| Multiprocess Brain/Heart architecture | Keeps navigation logic from blocking the 30 Hz gait loop |
+| STS3215 smart-servo telemetry | Uses actuator feedback as sensor data for phase error, load, speed, voltage, current, temperature, and fault monitoring |
+| Simulation-backed gait validation | Tests gait timing, terrain overlays, governors, and navigation FSM behavior before hardware runs |
+| Arduino Nano sensor hub | Moves ultrasonic timing and IMU polling off the Raspberry Pi so sensor collection stays deterministic |
+| Field-tested C-leg locomotion | Validated a low-cost PETG/TPU C-leg platform across sand, gravel, stone, carpet, packed earth, tile, and inclines |
+
 ## Repository Status
 
 This repository contains the final public code, validation previews, CAD references, release links, and documentation for the Team Euler rover build. Longer reference pages are collected in the [docs index](docs/README.md), and full-resolution videos and symposium PDFs are hosted in the [Portfolio Media Assets](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets) release to keep the repository lightweight.
@@ -68,23 +76,25 @@ This repository contains the final public code, validation previews, CAD referen
 | Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint; [GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs the simulation suite and pytest regressions on code/firmware/dependency changes, pull request, and manual dispatch |
 | Setup documentation | `RUNNING.md`, `ARCHITECTURE.md`, and `requirements.txt` document setup, runtime modes, and software structure |
 | Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
-| Documentation included | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
+| Documentation included | README summarizes the project; docs pages cover hardware, BOM, architecture, software map, validation, slide gallery, and media |
 | License | PolyForm Noncommercial 1.0.0; commercial use requires separate permission |
 | Known limits | Simulation does not fully model compliance, backlash, or deformable terrain; abrupt terrain transitions remained the clearest unresolved risk |
 
 ## My Role
 
+This was a team robotics project. My individual work focused on software, controls, validation, and documenting the parts of the build I led or integrated.
+
 - Developed and tuned the Python gait/navigation stack, terrain overlays, telemetry analysis, simulation validation, and competition-readiness fixes.
-- Programmed the Arduino/C++ sensor firmware for ultrasonic and IMU data collection.
-- Integrated the sensor firmware with the Raspberry Pi control stack.
-- Designed the CAD models, managed the 3D printing workflow, and selected the ordered hardware components.
+- Programmed and integrated the Arduino/C++ sensor firmware for ultrasonic and IMU data collection.
+- Used smart-servo telemetry and field logs to tune gait behavior, load limits, and safety governors.
+- Designed CAD models, managed the 3D printing workflow, and selected and ordered hardware components recorded in the public BOM.
 - Contributed to electrical assembly, including soldering and wiring.
 
 ## System Architecture
 
 ![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map, including the Brain/Heart process split, sensor pipeline, terrain overlay, safety governors, and simulation coverage.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map, or [`docs/architecture.md`](docs/architecture.md) for a compact diagram-focused architecture overview.
 
 ### Brain/Heart Process Split
 
@@ -104,62 +114,21 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 
 ## Hardware Stack
 
+The README keeps the hardware section at system-summary level. The full hardware reference, measured geometry, CAD links, tread construction notes, and BOM routing live in [`docs/hardware.md`](docs/hardware.md).
+
 | Subsystem | Components | Purpose |
 | --- | --- | --- |
-| Main compute | Raspberry Pi 3B+ | Runs the Python Brain/Heart control stack, navigation FSM, gait engine, telemetry handling, and simulation-derived safety logic |
-| Sensor hub | Arduino Nano | Runs Arduino/C++ firmware for deterministic ultrasonic timing and IMU polling, then streams a 20-column CSV frame to the Raspberry Pi at ~10 Hz |
-| Actuation and servo telemetry | 6x Feetech STS3215 serial bus smart servos | One actuator per leg, commanded with synchronized bus writes and read back for position, load, speed, voltage, current, temperature, and error telemetry |
-| Servo bus interface | FE-URT-1 debug board | Provides the serial interface used for Feetech servo configuration, calibration, and bus-level debugging |
-| Obstacle and cliff sensing | 8x HC-SR04 ultrasonic sensors | Provides 360-degree obstacle coverage plus downward-facing cliff/drop-off detection |
-| Orientation sensing | BNO085 IMU | Provides fused orientation for slope detection, rough-terrain classification, tip/fall safety logic, and navigation state decisions |
-| Power | 3S 3000 mAh LiPo battery, 11.1 V nominal | Powers the rover with software brownout protection and speed limiting under voltage sag |
-| Chassis | PETG 3D-printed octagonal body | Supports six servo modules with front/rear leg pairs splayed at 35 degrees and middle legs mounted perpendicular |
-| Legs | C-shaped PETG arc legs with TPU tread interface layer, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry with a flexible layer between the printed legs and bumper-pad tread |
-| Ground contact | Adhesive rubber bumper pads with hot-glue V tread | Adds compliant grip and a NASA rover-inspired chevron contact pattern for rough terrain |
+| Compute and sensing | Raspberry Pi 3B+, Arduino Nano, BNO085 IMU, 8x HC-SR04 ultrasonic sensors | Brain/Heart control, deterministic sensor timing, orientation feedback, obstacle detection, and cliff/drop-off sensing |
+| Locomotion | 6x Feetech STS3215 smart servos with C-shaped PETG/TPU legs | Single-actuator C-leg motion with servo telemetry used for phase, load, speed, voltage, current, temperature, and error feedback |
+| Structure and traction | PETG octagonal chassis, TPU tread interface, adhesive bumper pads, hot-glue V tread | Mechanically simple rough-terrain platform with a NASA rover-inspired chevron contact pattern |
+| Power and integration | 3S 3000 mAh LiPo, FE-URT-1 servo interface, wiring harnesses, fasteners, adhesives | Portable power, servo bus configuration, and field-serviceable assembly |
 
 ### Bill Of Materials
 
-The README keeps the BOM at summary level. The detailed categorized table lives in [`docs/BOM.md`](docs/BOM.md), with the exported source sheet preserved as [`docs/purchasing-bom.csv`](docs/purchasing-bom.csv). Quantities in both files are ordered package counts, with integration notes explaining installed usage.
-
-<table>
-  <tr>
-    <th>Purchase Lines</th>
-    <th>Locomotion Core</th>
-    <th>Sensor Coverage</th>
-    <th>Fabrication Stack</th>
-  </tr>
-  <tr>
-    <td align="center"><strong>31</strong><br>tracked source items</td>
-    <td align="center"><strong>6</strong><br>STS3215 C-leg smart servos</td>
-    <td align="center"><strong>8</strong><br>ultrasonic sensors plus BNO085 IMU</td>
-    <td align="center"><strong>PETG + TPU</strong><br>with bumper-pad V tread</td>
-  </tr>
-</table>
-
-| Detailed BOM View | Contents |
+| BOM Resource | Contents |
 | --- | --- |
 | [Categorized Bill of Materials](docs/BOM.md) | Control electronics, smart servos, sensors, power, printed structure, tread materials, wiring, adhesives, fasteners, and assembly supplies |
 | [Purchasing Source CSV](docs/purchasing-bom.csv) | Exported source rows from `Robotics_Purchasing_2025-2026.xlsx` |
-
-### Measured Platform Geometry
-
-- Body length: 511 mm
-- Total width: 280 mm
-- Static ground clearance: 74 mm
-- Effective leg radius: 125 mm from servo shaft to outer contact surface
-- Leg arc span: 195 degrees
-- Estimated mass: 2 to 3 kg
-
-### CAD Models
-
-| Part | Onshape Link |
-| --- | --- |
-| Split lid | [Open model](https://cad.onshape.com/documents/4f3de965fea211f4280a3c9d/w/cdf7ccd18bab44fcea532f37/e/039c12e9b8634e9de48b237f) |
-| Chassis | [Open model](https://cad.onshape.com/documents/b0cc0fb5d7d22bf167ea7f76/w/008ad764f5d31a5d18c51176/e/51bfb1e7ed0292f5d8418b8c) |
-| C-leg | [Open model](https://cad.onshape.com/documents/da3a47429f3542b58cbfb9b8/w/d8b269a68f869584fe54d88e/e/9680572918098f7f67734634) |
-| Leg adapters | [Open model](https://cad.onshape.com/documents/60e3d6ac247373a6c9d27099/w/3073c20af8fd58d7202c08cb/e/fac01f63525d9f291b8ab335) |
-
-This hardware layout intentionally trades fine-grained foot placement for mechanical simplicity, passive compliance, and an auditable control model. The Arduino Nano isolates microsecond-sensitive sensor timing from the Raspberry Pi, while the Pi handles higher-level gait and navigation logic.
 
 ## Software Map
 
@@ -276,36 +245,16 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 ## Simulation And Testing
 
-The simulation framework contains 40 automated checks:
+The project includes 40 automated simulation checks covering gait timing, terrain overlays, governors, and navigation FSM behavior. The README keeps the headline result here; detailed field validation, servo load margin, simulation scope, and known limits live in [`docs/validation.md`](docs/validation.md).
 
-- 14 kinematic and gait checks in `sim_verify.py`
-- 14 terrain and governor scenarios in `sim_terrain.py`
-- 12 navigation FSM categories in `sim_nav.py`
-
-At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or deformable terrain.
-
-[GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs these simulation checks and the pytest regression suite on code, firmware, dependency, workflow, pull request, and manual-dispatch events.
-
-Run the simulation checks:
-
-```bash
-python3 sim_verify.py
-python3 sim_terrain.py
-python3 sim_nav.py
-```
+| Validation Resource | Link |
+| --- | --- |
+| GitHub Actions simulation workflow | [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) |
+| Field results and known limits | [Validation Reference](docs/validation.md) |
+| Local simulation commands | `python3 sim_verify.py`, `python3 sim_terrain.py`, `python3 sim_nav.py` |
 
 ## Releases
 
 - [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build): final public build after the COSGC competition, with cliff detection turned back on.
 - [Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/Competition): competition snapshot used during the event.
 - [V0.5 Full Program](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/pre-release): earlier autonomous rover milestone.
-
-## Known Limits
-
-| Category | Limit |
-| --- | --- |
-| Validation scope | The 32-trial validation set supports pilot-scale reliability claims, not a fully powered statistical proof. |
-| Reproducibility | Late-stage validation did not preserve exact per-trial software hashes. |
-| Simulation fidelity | The simulation framework validates timing, state transitions, terrain overlays, and control invariants, but does not model all physical compliance, backlash, or deformable-terrain effects. |
-| Hardware behavior | The clearest remaining failure mode was abrupt terrain transition within a single stride. |
-| Application claims | Search-and-rescue and planetary robotics are future application targets, not demonstrated deployment domains. |
