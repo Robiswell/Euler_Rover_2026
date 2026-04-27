@@ -334,3 +334,16 @@ Hardware operation requires calibrated servos, connected sensor firmware, and sa
 | Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](docs/paper/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
 | Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster (2026 Best Robotics Poster)](docs/paper/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
 | Video | [Identity COSGC Video (2026 People's Choice Video)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4)<br><br>[![Identity COSGC Video (2026 People's Choice Video) preview](docs/assets/identity-cosgc-2026-award-video-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/identity-cosgc-2026-award-video.mp4) |
+
+### Symposium Awards
+
+<table>
+  <tr>
+    <td align="center"><strong>2026 Best Robotics Poster</strong></td>
+    <td align="center"><strong>2026 People's Choice Video</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="360"></td>
+    <td><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="360"></td>
+  </tr>
+</table>
