@@ -56,6 +56,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Main compute | Raspberry Pi 3B+ | Runs the Python Brain/Heart control stack, navigation FSM, gait engine, telemetry handling, and simulation-derived safety logic |
 | Sensor hub | Arduino Nano | Runs Arduino/C++ firmware for deterministic ultrasonic timing and IMU polling, then streams a 20-column CSV frame to the Raspberry Pi at ~10 Hz |
 | Actuation | 6x Feetech STS3215 serial bus servos | One actuator per leg, commanded with synchronized bus writes for coordinated C-leg locomotion |
+| Servo bus interface | FE-URT-1 debug board | Provides the serial interface used for Feetech servo configuration, calibration, and bus-level debugging |
 | Obstacle and cliff sensing | 8x HC-SR04 ultrasonic sensors | Provides 360-degree obstacle coverage plus downward-facing cliff/drop-off detection |
 | Orientation sensing | BNO085 IMU | Provides fused orientation for slope detection, rough-terrain classification, tip/fall safety logic, and navigation state decisions |
 | Power | 3S 3000 mAh LiPo battery, 11.1 V nominal | Powers the rover with software brownout protection and speed limiting under voltage sag |
@@ -140,11 +141,11 @@ Servo load stayed below the stall threshold across the validation terrain set:
 
 | Demo | Preview |
 | --- | --- |
-| Loose sand hill traversal | [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4) |
-| Daytime sand hill traversal | [![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4) |
-| Cliff detection behavior | [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4) |
-| Indoor obstacle navigation | [![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4) |
-| Park concrete table seating navigation | [![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4) |
+| Loose sand hill traversal | [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4) |
+| Daytime sand hill traversal | [![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4) |
+| Cliff detection behavior | [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4) |
+| Indoor obstacle navigation | [![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4) |
+| Park concrete table seating navigation | [![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v4.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4) |
 
 ### Course Success Runs
 
