@@ -265,12 +265,12 @@ Across the validation terrain set, measured servo loads stayed below the configu
 
 | Research Output | View | Download |
 | --- | --- | --- |
-| Paper | [View paper](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc.pdf) | [Download paper PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf) |
-| Presentation Slides | [View slides](docs/paper-presentation-slides.md) | [Download slides PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
-| Paper Presentation Video | [Watch on YouTube](https://youtu.be/zEp2kFS_MPs) | [Download presentation MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4) |
-| Poster | [View poster](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc-poster.pdf) | [Download poster PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
-| People's Choice Video | [Watch on YouTube](https://youtu.be/kA2DoByfL78) | [Download video MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
-| Field Demos & Course Success Videos | [Open gallery](docs/media.md) | <div align="center">N/A</div> |
+| Paper | <div align="center">[View paper](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc.pdf)</div> | <div align="center">[Download paper PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf)</div> |
+| Presentation Slides | <div align="center">[View slides](docs/paper-presentation-slides.md)</div> | <div align="center">[Download slides PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf)</div> |
+| Paper Presentation Video | <div align="center">[Watch on YouTube](https://youtu.be/zEp2kFS_MPs)</div> | <div align="center">[Download presentation MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4)</div> |
+| Poster | <div align="center">[View poster](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc-poster.pdf)</div> | <div align="center">[Download poster PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf)</div> |
+| People's Choice Video | <div align="center">[Watch on YouTube](https://youtu.be/kA2DoByfL78)</div> | <div align="center">[Download video MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4)</div> |
+| Field Demos & Course Success Videos | <div align="center">[Open gallery](docs/media.md)</div> | <div align="center">N/A</div> |
 
 
 
