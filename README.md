@@ -93,7 +93,7 @@ This hardware layout intentionally trades fine-grained foot placement for mechan
 | `final_full_gait_test.py` | Main Python autonomous gait engine and navigation FSM |
 | `offset_full_gait_test_v2.py` | Earlier v2 gait-engine implementation retained for comparison and development history |
 | `final_full_gait_test_tripod_default.py` | Tripod-default final gait-engine variant for comparison and fallback testing |
-| `home_tripod_wave_test.py` | Home test script for tripod and wave gait behavior |
+| `home_tripod_wave_test.py` | Legs-home sequence followed by forward tripod and forward wave gait checks |
 
 ### Sensor Firmware And Input
 
