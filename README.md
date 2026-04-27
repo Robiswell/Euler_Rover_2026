@@ -32,7 +32,6 @@ The final build combined field-tested hardware, simulation-backed control logic,
 - [System Architecture](#system-architecture)
 - [Key Engineering Decisions](#key-engineering-decisions)
 - [Hardware Stack](#hardware-stack)
-  - [Build Components](#build-components)
   - [Bill Of Materials](#bill-of-materials)
   - [Measured Platform Geometry](#measured-platform-geometry)
   - [CAD Models](#cad-models)
@@ -124,27 +123,6 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Legs | C-shaped PETG arc legs with TPU tread interface layer, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry with a flexible layer between the printed legs and bumper-pad tread |
 | Ground contact | Adhesive rubber bumper pads with hot-glue V tread | Adds compliant grip and a NASA rover-inspired chevron contact pattern for rough terrain |
 
-### Build Components
-
-| Component | Quantity | Integration Notes |
-| --- | ---: | --- |
-| Raspberry Pi 3B+ | 1 | Main onboard computer for Python navigation, gait control, telemetry, and simulation-derived safety logic |
-| Arduino Nano | 1 | Dedicated sensor hub for deterministic ultrasonic timing and BNO085 polling |
-| Feetech STS3215 serial bus servos | 6 | One actuator per C-leg, driven through synchronized bus commands |
-| FE-URT-1 debug board | 1 | Feetech servo configuration, calibration, and serial bus debugging interface |
-| HC-SR04 ultrasonic sensors | 8 | Forward, side, rear, and downward cliff/drop-off distance sensing |
-| BNO085 IMU | 1 | Fused orientation for slope detection, terrain classification, and tip/fall logic |
-| 3S 3000 mAh LiPo battery | 1 | Main rover power source with software limits for voltage-sag protection |
-| PETG printed chassis, split lid, and C-leg assemblies | Custom set | CAD-modeled and 3D-printed rover structure, including octagonal body and single-actuator leg geometry |
-| Adhesive bumper pads and hot-glue tread | 6 leg contact sets | Field-built V tread pattern for added grip on sand, gravel, carpet, stone, and packed earth |
-| Wiring, soldered sensor harnesses, and mounting hardware | Rover-specific | Electrical assembly and mechanical fastening for sensors, compute boards, servo bus, and power distribution |
-
-<p align="center">
-  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
-</p>
-
-The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
-
 ### Bill Of Materials
 
 This purchasing BOM was consolidated from `Robotics_Purchasing_2025-2026.xlsx`. Quantities reflect ordered packages from the source sheet, so multi-packs list the package count and the integration notes call out the installed usage where it matters.
@@ -197,11 +175,17 @@ This purchasing BOM was consolidated from `Robotics_Purchasing_2025-2026.xlsx`. 
 | [GE Advanced Silicone Caulk, 2.8 oz](https://a.co/d/0bI7Rz4a) | 1 | Flexible sealing and retention support during physical assembly |
 | [Mo-Flow hydrophobic mesh air filter](https://a.co/d/06QhTKAN) | 1 | Protective breathable mesh for exposed openings |
 
+<p align="center">
+  <img src="docs/assets/identity-v-tread-legs.jpg" alt="Identity rover C-legs with adhesive bumper pads and hot-glue V tread" width="720">
+</p>
+
+The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber bumper pads, with hot glue built up between and over the pads to form a repeated V-shaped tread. The pattern was inspired by the chevron-style grousers used on NASA rover wheels: each V gives the leg an angled edge to bite into loose sand, gravel, carpet, and packed soil while the TPU layer preserves compliance for the rolling C-leg motion. This was a practical field-build solution that improved grip without redesigning the printed legs or adding a separate molded tire.
+
 #### Wiring, Mounting, And Assembly
 
 | Purchased Item | Ordered Qty | Integration Role |
 | --- | ---: | --- |
-| [22 AWG stranded wire spool, 6 colors](https://a.co/d/5BzQJls) | 1 | Sensor, signal, and low-current power wiring |
+| [22 AWG stranded wire spool, 6 colors](https://a.co/d/5BzQJls) | 1 | Sensor, signal, low-current power wiring, and soldered sensor harnesses |
 | [Breadboard jumper cables](https://a.co/d/0hUW9Au0) | 1 | Prototyping and short internal signal connections |
 | [Cable management mesh](https://a.co/d/0e090q8c) | 1 | Harness organization and abrasion protection |
 | [Scotch vinyl electrical tape](https://a.co/d/eYtmley) | 1 | Insulation, strain relief, and harness finishing |
