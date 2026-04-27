@@ -63,7 +63,7 @@ The Brain process handles sensor interpretation, terrain classification, obstacl
 | Legs | C-shaped PETG arc legs, 125 mm effective radius, 195-degree arc span | RHex-style rolling contact geometry for single-actuator stance and swing phases |
 | Ground contact | TPU rubber feet with staggered lug pattern | Improves traction on sand, gravel, stone, carpet, and packed earth |
 
-Measured Platform Geometry:
+### Measured Platform Geometry
 
 - Body length: 511 mm
 - Total width: 280 mm
@@ -138,23 +138,23 @@ Servo load stayed below the stall threshold across the validation terrain set:
 
 ![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
 
-Field demo traversal of a loose sand hill:
+**Field demo:** Loose sand hill traversal
 
 [![Sand hill traversal preview](docs/assets/sand-hill-traversal-preview-v2.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/sand-hill-traversal.mp4)
 
-Daytime field demo traversal of a sand hill:
+**Field demo:** Daytime sand hill traversal
 
 [![Daytime sand hill traversal preview](docs/assets/daytime-hill-traversal-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/daytime-hill-traversal.mp4)
 
-Field demo of cliff detection behavior:
+**Field demo:** Cliff detection behavior
 
 [![Cliff detection demo preview](docs/assets/cliff-detection-demo-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/cliff-detection-demo.mp4)
 
-Field demo of indoor obstacle navigation:
+**Field demo:** Indoor obstacle navigation
 
 [![Indoor obstacle navigation preview](docs/assets/indoor-obstacle-navigation-preview-v1.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/indoor-obstacle-navigation-demo.mp4)
 
-Field demo of the navigation stack moving through concrete table seating at a park:
+**Field demo:** Park concrete table seating navigation
 
 [![Park concrete table seating navigation preview](docs/assets/navigation-park-table-seating-preview-v3.gif)](https://github.com/Robiswell/Euler_Rover_2026/blob/main/docs/assets/navigation-park-table-seating.mp4)
 
