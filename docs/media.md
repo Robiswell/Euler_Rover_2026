@@ -22,13 +22,3 @@ This page collects the full-resolution videos and symposium materials linked fro
 | [Course 4 Success](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4) | [<img src="assets/course-4-success-preview-v3.gif" alt="Course 4 success preview" width="320">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-4-success.mp4) |
 | [Course 5 Success](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4) | [<img src="assets/course-5-success-preview-v3.gif" alt="Course 5 success preview" width="320">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-5-success.mp4) |
 | [Challenge Course Success](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4) | [<img src="assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="320">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4) |
-
-## Research Symposium Materials
-
-| Submission | Link |
-| --- | --- |
-| Paper | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf) |
-| Presentation Slides | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Paper Presentation Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf) |
-| Paper Presentation Video | [COSGC Symposium Paper Presentation Using Slides](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4) |
-| Poster | [Development of a Six-Legged Autonomous Robot for Rough Terrain Navigation Poster](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf) |
-| Video | [Identity COSGC Video](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4) |
