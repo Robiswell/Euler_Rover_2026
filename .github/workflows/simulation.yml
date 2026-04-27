@@ -1,8 +1,19 @@
 name: Simulation Checks
+run-name: Simulation Checks
 
 on:
   push:
+    paths:
+      - "**.py"
+      - "**.ino"
+      - "requirements.txt"
+      - ".github/workflows/simulation.yml"
   pull_request:
+    paths:
+      - "**.py"
+      - "**.ino"
+      - "requirements.txt"
+      - ".github/workflows/simulation.yml"
   workflow_dispatch:
 
 jobs:
