@@ -24,7 +24,7 @@ My work focused on the Python gait and navigation stack, terrain-overlay tuning,
 
 ## System Architecture
 
-![Brain/Heart system architecture diagram](docs/assets/brain-heart-architecture.jpg)
+![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
 
 The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, applies safety governors, and keeps motor control isolated from slower navigation work.
 
