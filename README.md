@@ -59,7 +59,7 @@ This repository contains the final public code, validation media, CAD references
 | --- | --- |
 | Main rover program | Final post-competition build is published, with cliff detection restored after the competition troubleshooting snapshot |
 | Validated release history | Release links preserve the final post-competition, competition, and earlier autonomous rover milestones |
-| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint; GitHub Actions runs the simulation suite and pytest regressions on push and pull request |
+| Simulation coverage | 40/40 checks passing at the symposium-paper checkpoint; [GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs the simulation suite and pytest regressions on push, pull request, and manual dispatch |
 | Setup documentation | `RUNNING.md`, `ARCHITECTURE.md`, and `requirements.txt` document setup, runtime modes, and software structure |
 | Hardware operation | Requires calibrated servos, connected Arduino sensor firmware, and pre-run safety checks before powering the rover |
 | Documentation included | README includes system architecture, software map, CAD links, field demos, course success videos, paper/poster links, and award documentation |
@@ -339,7 +339,7 @@ The simulation framework contains 40 automated checks:
 
 At the time of the symposium paper, the full suite passed 40/40 checks. The simulation validates timing, state transitions, terrain overlays, and control invariants, but it does not model all physical effects such as compliance, backlash, or deformable terrain.
 
-GitHub Actions runs these simulation checks and the pytest regression suite on push and pull request.
+[GitHub Actions](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) runs these simulation checks and the pytest regression suite on push, pull request, and manual dispatch.
 
 Run the simulation checks:
 
