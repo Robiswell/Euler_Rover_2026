@@ -133,7 +133,9 @@ Terrain classification uses:
 
 ![Terrain validation classes and overlay parameters](docs/assets/terrain-validation-overlays.jpg)
 
-Servo load stayed below the stall threshold across the validation terrain set:
+### Servo Load Margin
+
+Across the validation terrain set, measured servo loads stayed below the configured stall threshold.
 
 ![Servo load margin by terrain type with stall threshold](docs/assets/stall-threshold-load-margin.jpg)
 
