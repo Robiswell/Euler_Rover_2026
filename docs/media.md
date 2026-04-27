@@ -1,10 +1,10 @@
 # Media Gallery
 
-This page collects the full-resolution videos and symposium materials linked from the repository README. GIF previews are stored in `docs/assets`; full videos and PDFs are hosted in the `media-assets` GitHub release.
+This page collects full-resolution video downloads linked from the repository README. Links in the left column download the MP4 files from the `media-assets` GitHub release; GIF previews on the right provide a quick visual check before downloading.
 
 ## Field Demo Videos
 
-| Demo | Preview |
+| MP4 Download | Preview |
 | --- | --- |
 | [Loose Sand Hill Traversal](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4) | [<img src="assets/sand-hill-traversal-preview-v3.gif" alt="Sand hill traversal preview" width="480">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4) |
 | [Daytime Sand Hill Traversal](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4) | [<img src="assets/daytime-hill-traversal-preview-v2.gif" alt="Daytime sand hill traversal preview" width="480">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/daytime-hill-traversal.mp4) |
@@ -14,7 +14,7 @@ This page collects the full-resolution videos and symposium materials linked fro
 
 ## Course Success Runs
 
-| Run | Preview |
+| MP4 Download | Preview |
 | --- | --- |
 | [Course 1 Success](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4) | [<img src="assets/course-1-success-preview-v3.gif" alt="Course 1 success preview" width="320">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4) |
 | [Course 2 Success](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4) | [<img src="assets/course-2-success-preview-v3.gif" alt="Course 2 success preview" width="320">](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-2-success.mp4) |
