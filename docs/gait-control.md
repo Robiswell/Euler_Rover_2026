@@ -1,6 +1,8 @@
 # Gait Control Reference
 
-This page collects the gait-control details summarized in the main README: Buehler-clock timing, implemented gait modes, smart-servo feedback, gait visuals, and terrain overlays.
+[Back to main README](../README.md)
+
+Gait-control reference for Buehler-clock timing, implemented gait modes, smart-servo feedback, gait visuals, and terrain overlays.
 
 ## Buehler-Clock Gait Model
 

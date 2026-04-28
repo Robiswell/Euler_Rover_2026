@@ -1,6 +1,8 @@
 # Architecture Overview
 
-This page routes reviewers to the main architecture references for the Identity rover software stack.
+[Back to main README](../README.md)
+
+Architecture reference for the Identity rover software stack, with diagram links and routing to the full software architecture document.
 
 ## Primary Architecture Document
 

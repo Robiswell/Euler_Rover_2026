@@ -7,20 +7,33 @@
 [![Arduino/C++: Sensor Firmware](https://img.shields.io/badge/Arduino%2FC%2B%2B-Sensor%20Firmware-00878F)](final_sensors.ino)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
-Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 smart servos with runtime telemetry, ultrasonic sensing, and IMU feedback to test low-cost rough-terrain locomotion.
+Identity is a six-legged autonomous rover built by Team Euler for the COSGC robotics challenge. It combines Python control software on a Raspberry Pi 3B+, Arduino/C++ sensor firmware on an Arduino Nano, six Feetech STS3215 smart servos with runtime telemetry, ultrasonic sensing, and IMU feedback to test cost-conscious rough-terrain locomotion.
 
 The project explored whether a six-servo hexapod could adapt to rough outdoor terrain using a small set of interpretable gait parameters instead of complex multi-joint planning or learned locomotion. The key control variables were Buehler-clock duty cycle, impact window, phase offsets, and a global speed setpoint.
 
 The final build combined field-tested hardware, simulation-backed control logic, and documented validation results showing 31/32 successful traversals across seven terrain categories.
 
+## Project Snapshot
+
+| Category | Summary |
+| --- | --- |
+| Project | Autonomous six-legged rover using RHex-style C-leg locomotion |
+| Stack | Python, C++, Raspberry Pi 3B+, Arduino Nano, Feetech STS3215 serial smart servos, BNO085 IMU, HC-SR04 ultrasonic sensors |
+| My focus | Software, controls, validation, CAD/printing workflow, hardware selection, and build documentation |
+| Outcome | 31/32 formal traversals, 40/40 simulation checks, and 3 COSGC recognitions |
+
+The main README is intentionally concise; detailed build, validation, gait, media, release, and purchasing references are kept in [`docs/`](docs/README.md) for reviewers who want deeper evidence.
+
 ## Quick Reviewer Path
 
 | Reader | Start Here | What It Shows |
 | --- | --- | --- |
-| Recruiters and portfolio reviewers | [Results At A Glance](#results-at-a-glance), [My Role](#my-role), and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
+| Recruiters and portfolio reviewers | [Project Snapshot](#project-snapshot), [My Role](#my-role), and [Recognition And Publications](#recognition-and-publications) | Project outcome, validation result, awards, and public deliverables |
 | Robotics and controls reviewers | [`final_full_gait_test.py`](final_full_gait_test.py), [Gait Control Reference](docs/gait-control.md), and [Validation Reference](docs/validation.md) | Brain/Heart control split, smart-servo feedback, terrain adaptation, and validation strategy |
 | Hardware reviewers | [Hardware Reference](docs/hardware.md) and [Categorized Bill of Materials](docs/BOM.md) | Actuation, sensing, power, printed structure, tread design, and purchasing traceability |
 | Reproducing or running code | [Software Map](docs/software-map.md) and [`RUNNING.md`](RUNNING.md) | Main runtime entry points, diagnostics, simulations, and launch commands |
+
+For control-software review, start with [`final_full_gait_test.py`](final_full_gait_test.py), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`docs/gait-control.md`](docs/gait-control.md).
 
 ## Results At A Glance
 
@@ -30,12 +43,12 @@ The final build combined field-tested hardware, simulation-backed control logic,
 | Observed traversal success | 96.9% |
 | Terrain categories | 7 |
 | Simulation tests | 40/40 passing |
-| Awards | 3 COSGC recognitions: Outstanding Demonstration of Creative Locomotion, Best Robotics Poster, and People's Choice Video |
+| Awards | 3 COSGC recognitions |
 | Heart loop rate | 30 Hz |
 | Sensor update rate | ~10 Hz |
 | Steady-state servo load margin | At least 42% in formal trials |
 
-The validation set is treated as a pilot study; the detailed statistical framing and known limits are documented in [`docs/validation.md`](docs/validation.md).
+Validation is presented as pilot-scale testing; statistical framing and known limits are documented in [`docs/validation.md`](docs/validation.md).
 
 ## Engineering Highlights
 
@@ -46,7 +59,7 @@ The validation set is treated as a pilot study; the detailed statistical framing
 | Arduino Nano sensor hub | Moves ultrasonic timing and IMU polling off the Raspberry Pi so sensor collection stays deterministic |
 | Buehler-clock gait control | Keeps rough-terrain adaptation interpretable through duty cycle, impact window, phase offsets, and speed setpoint changes |
 | Simulation-backed validation | Tests gait timing, terrain overlays, governors, and navigation FSM behavior before hardware runs |
-| Field-tested C-leg locomotion | Validated a low-cost PETG/TPU C-leg platform across sand, gravel, stone, carpet, packed earth, tile, and inclines |
+| Field-tested C-leg locomotion | Validated a cost-conscious PETG/TPU C-leg platform across sand, gravel, stone, carpet, packed earth, tile, and inclines |
 
 ## Repository Status
 
@@ -54,12 +67,11 @@ This repository contains the final public code, validation previews, CAD referen
 
 | Area | Status |
 | --- | --- |
-| Final rover build | [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build), with cliff detection restored after the competition troubleshooting snapshot |
+| Final rover build | [Final Post-Competition Build](https://github.com/Robiswell/Euler_Rover_2026/releases/tag/final-post-competition-build), with cliff detection enabled in the public configuration |
 | Primary runtime | [`final_full_gait_test.py`](final_full_gait_test.py) on Raspberry Pi plus [`final_sensors.ino`](final_sensors.ino) on Arduino Nano |
 | Validation | 31/32 formal traversals successful, with 40/40 simulation checks passing at the symposium-paper checkpoint |
 | Setup and references | [`RUNNING.md`](RUNNING.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), [`docs/README.md`](docs/README.md), and [`requirements.txt`](requirements.txt) |
 | Release history | Earlier public milestones are preserved in [`docs/releases.md`](docs/releases.md) |
-| License | PolyForm Noncommercial 1.0.0; commercial use requires separate permission |
 
 ## My Role
 
@@ -73,7 +85,9 @@ This was a team robotics project. My individual work focused on software, contro
 
 ## System Architecture
 
-![Identity rover system architecture diagram](docs/assets/symposium-system-architecture.jpg)
+<p align="center">
+  <img src="docs/assets/symposium-system-architecture.jpg" alt="Identity rover system architecture diagram" width="960">
+</p>
 
 The Brain process handles sensor interpretation, terrain classification, obstacle/cliff logic, and navigation state transitions. The Heart process runs the timing-critical gait loop, computes servo commands, reads STS3215 telemetry, applies safety governors, and keeps motor control isolated from slower navigation work.
 
@@ -81,7 +95,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full software architecture map,
 
 ## Hardware Stack
 
-Identity uses a low-cost, field-serviceable hardware stack built around one smart servo per C-leg, a Raspberry Pi control computer, and an Arduino sensor hub. The full hardware reference, measured geometry, CAD links, tread construction notes, and BOM routing live in [`docs/hardware.md`](docs/hardware.md).
+Identity uses a cost-conscious, field-serviceable hardware stack built around one smart servo per C-leg, a Raspberry Pi control computer, and an Arduino sensor hub. The full hardware reference, measured geometry, CAD links, tread construction notes, and BOM routing live in [`docs/hardware.md`](docs/hardware.md).
 
 | Subsystem | Components | Purpose |
 | --- | --- | --- |
@@ -92,20 +106,18 @@ Identity uses a low-cost, field-serviceable hardware stack built around one smar
 
 ### Bill Of Materials
 
-| Purchase Lines | Locomotion Core | Sensor Coverage | Fabrication Stack |
-| --- | --- | --- | --- |
-| 31 tracked source items | 6 STS3215 smart servos | 8 ultrasonic sensors plus BNO085 IMU | PETG/TPU structure with bumper-pad V tread |
-
-| BOM Resource | Contents |
-| --- | --- |
-| [Categorized Bill of Materials](docs/BOM.md) | Control electronics, smart servos, sensors, power, printed structure, tread materials, wiring, adhesives, fasteners, and assembly supplies |
-| [Purchasing Source CSV](docs/purchasing-bom.csv) | Exported source rows from `Robotics_Purchasing_2025-2026.xlsx` |
+| BOM Snapshot | Key Details | Link |
+| --- | --- | --- |
+| 31 tracked purchase lines | Control electronics, sensors, power, printed structure, wiring, adhesives, fasteners, and assembly supplies | [Categorized BOM](docs/BOM.md) |
+| Locomotion core | 6 STS3215 smart servos driving PETG/TPU C-legs | [BOM locomotion entries](docs/BOM.md#control-actuation-and-sensing) |
+| Sensor coverage | 8 ultrasonic sensors plus BNO085 IMU | [BOM sensing entries](docs/BOM.md#control-actuation-and-sensing) |
+| Source export | CSV generated from `Robotics_Purchasing_2025-2026.xlsx` | [Purchasing source CSV](docs/purchasing-bom.csv) |
 
 ## Software Map
 
 The main runtime is split between the Raspberry Pi gait/navigation program and Arduino sensor firmware. The full file-by-file map, diagnostics, launch modes, calibration tools, simulation helpers, telemetry analysis, and regression tests live in [`docs/software-map.md`](docs/software-map.md).
 
-| Area | Primary Files | Why Reviewers Should Care |
+| Area | Primary Files | Reviewer Signal |
 | --- | --- | --- |
 | Runtime gait and autonomy | [`final_full_gait_test.py`](final_full_gait_test.py), [`final_sensors.ino`](final_sensors.ino) | Main Raspberry Pi control loop plus Arduino sensor firmware used by the final rover |
 | Running and diagnostics | [`RUNNING.md`](RUNNING.md), [`docs/software-map.md`](docs/software-map.md) | Hardware launch commands, dry-run modes, subsystem tests, and gait-specific checks |
@@ -128,6 +140,16 @@ STS3215 telemetry was central to the gait changes: the rover compared commanded 
 The autonomous navigation layer uses an eight-state finite state machine for forward traversal, slow approach, arc turns, backing up, pivot turns, recovery wiggle, and safe stop behavior. Sensor input comes from ultrasonic range data, IMU orientation, servo telemetry, and watchdog state.
 
 Terrain classification combines IMU pitch/roll, angular-rate stability, ultrasonic range changes, and servo-load trends. The navigation FSM diagram, terrain overlay chart, and servo load margin figure are collected in [`docs/validation.md`](docs/validation.md).
+
+## Simulation And Testing
+
+At the symposium-paper checkpoint, the project passed 40/40 automated simulation checks covering gait timing, terrain overlays, safety governors, and navigation FSM behavior. GitHub Actions runs the simulation and pytest regression suite on code, firmware, dependency, workflow, pull request, and manual-dispatch events.
+
+| Validation Resource | Link |
+| --- | --- |
+| GitHub Actions simulation workflow | [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) |
+| Field results and known limits | [Validation Reference](docs/validation.md) |
+| Local simulation commands | [`docs/validation.md`](docs/validation.md#simulation-coverage) |
 
 ## Recognition And Publications
 
@@ -172,15 +194,3 @@ Terrain classification combines IMU pitch/roll, angular-rate stability, ultrason
 | Poster | <div align="center">[View poster](https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc-poster.pdf)</div> | <div align="center">[Download poster PDF](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf)</div> |
 | People's Choice Video | <div align="center">[Watch on YouTube](https://youtu.be/kA2DoByfL78)</div> | <div align="center">[Download video MP4](https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4)</div> |
 | Field Demos & Course Success Videos | <div align="center">[Open gallery](docs/media.md)</div> | <div align="center">N/A</div> |
-
-
-
-## Simulation And Testing
-
-The project includes 40 automated simulation checks covering gait timing, terrain overlays, governors, and navigation FSM behavior. GitHub Actions runs the simulation and pytest regression suite on code, firmware, dependency, workflow, pull request, and manual-dispatch events.
-
-| Validation Resource | Link |
-| --- | --- |
-| GitHub Actions simulation workflow | [Simulation Checks](https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml) |
-| Field results and known limits | [Validation Reference](docs/validation.md) |
-| Local simulation commands | [`docs/validation.md`](docs/validation.md#simulation-coverage) |

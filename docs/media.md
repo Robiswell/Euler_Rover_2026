@@ -1,6 +1,8 @@
 # Media Gallery
 
-This page collects full-resolution video downloads linked from the repository README. Links in the left column download the MP4 files from the `media-assets` GitHub release; GIF previews on the right provide a quick visual check before downloading.
+[Back to main README](../README.md)
+
+Full-resolution field-demo and course-success video downloads linked from the repository README. Links in the left column download MP4 files from the `media-assets` GitHub release; GIF previews on the right provide a quick visual check before downloading.
 
 ## Field Demo Videos
 

@@ -1,6 +1,8 @@
 # Software Map
 
-See [`../RUNNING.md`](../RUNNING.md) for setup and command examples. This page separates active runtime files from calibration, simulation, analysis, and regression support.
+[Back to main README](../README.md)
+
+Software reference separating active runtime files from calibration, simulation, analysis, and regression support. See [`../RUNNING.md`](../RUNNING.md) for setup and command examples.
 
 ## Runtime And Gait Control
 

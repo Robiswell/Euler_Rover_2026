@@ -1,6 +1,8 @@
 # Hardware Reference
 
-This page collects the hardware details summarized in the main README: subsystem roles, measured platform geometry, CAD links, tread construction, and purchasing traceability.
+[Back to main README](../README.md)
+
+Hardware reference for subsystem roles, measured platform geometry, CAD links, printed-body assembly, tread construction, and purchasing traceability.
 
 ## Hardware Stack
 

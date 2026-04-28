@@ -1,6 +1,8 @@
 # COSGC Symposium Paper Presentation Slides
 
-This view-friendly slide gallery is generated from the full presentation PDF so it can be browsed directly on GitHub. Use the README research table to download the full-resolution PDF release asset.
+[Back to main README](../README.md)
+
+View-friendly slide gallery generated from the full presentation PDF so it can be browsed directly on GitHub. Use the README research table to download the full-resolution PDF release asset.
 
 ## Slide 1
 

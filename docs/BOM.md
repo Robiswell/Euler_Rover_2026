@@ -1,6 +1,8 @@
 # Bill of Materials
 
-This categorized BOM summarizes the exported source sheet in [`purchasing-bom.csv`](purchasing-bom.csv). Quantities are ordered package counts, so multi-packs list the package count while notes describe how the parts were used on the rover.
+[Back to main README](../README.md)
+
+Categorized purchasing reference for the Identity rover build. Quantities are ordered package counts, so multi-packs list the package count while notes describe how the parts were used on the rover.
 
 ## At A Glance
 

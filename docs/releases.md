@@ -1,6 +1,8 @@
 # Release History
 
-This page preserves the public release trail for the Identity rover while keeping the main README focused on the final portfolio presentation.
+[Back to main README](../README.md)
+
+Public release trail for the Identity rover, preserved separately so the main README can stay focused on the final portfolio presentation.
 
 | Release | Purpose |
 | --- | --- |

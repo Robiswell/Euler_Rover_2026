@@ -1,6 +1,8 @@
 # Validation Reference
 
-This page collects the validation details summarized in the main README: field results, navigation behavior, terrain classification signals, servo load margin, simulation coverage, and known limits.
+[Back to main README](../README.md)
+
+Validation reference for field results, navigation behavior, terrain classification signals, servo load margin, simulation coverage, and known limits.
 
 ## Field Results
 
