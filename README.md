@@ -389,3 +389,75 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
     <td align="center">N/A</td>
   </tr>
 </table>
+
+## Appendix: Project Reference Index
+
+This optional index is organized by what someone might need to find later, rather than by file name. It points to the deeper references behind the portfolio summary above.
+
+<table width="100%">
+  <tr>
+    <th width="28%">Looking For<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="275" height="1"></th>
+    <th width="32%">Best Starting Point<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="315" height="1"></th>
+    <th width="40%">What It Contains<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="390" height="1"></th>
+  </tr>
+  <tr>
+    <td>Fast reviewer orientation</td>
+    <td><a href="#quick-reviewer-path">Quick Reviewer Path</a>, <a href="#my-role">My Role</a></td>
+    <td>Shortest route to the code, architecture, validation evidence, hardware summary, and individual contribution scope.</td>
+  </tr>
+  <tr>
+    <td>Programming contribution evidence</td>
+    <td><a href="final_full_gait_test.py"><code>final_full_gait_test.py</code></a>, <a href="final_sensors.ino"><code>final_sensors.ino</code></a>, <a href="docs/software-map.md"><code>docs/software-map.md</code></a>, <a href="ARCHITECTURE.md"><code>ARCHITECTURE.md</code></a></td>
+    <td>Main Python gait/navigation stack, Arduino sensor firmware, runtime modes, Brain/Heart process split, safety governors, and simulation hooks.</td>
+  </tr>
+  <tr>
+    <td>Gait tuning and STS3215 telemetry</td>
+    <td><a href="docs/gait-control.md#smart-servo-feedback-for-gait-changes">Smart-Servo Feedback</a>, <a href="docs/validation.md#servo-load-margin">Servo Load Margin</a></td>
+    <td>How actuator telemetry was used as sensor input for phase error, load trends, speed feedback, voltage/current limits, temperature monitoring, and gait changes.</td>
+  </tr>
+  <tr>
+    <td>Validation claims and limits</td>
+    <td><a href="docs/validation.md"><code>docs/validation.md</code></a>, <a href="https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml">Simulation Checks</a></td>
+    <td>Formal traversal outcomes, terrain categories, pilot-scale framing, known limits, and the automated simulation/pytest checkpoint.</td>
+  </tr>
+  <tr>
+    <td>Mechanical design and fabrication</td>
+    <td><a href="docs/hardware.md#cad-models">CAD Models</a>, <a href="docs/hardware.md#printed-body-assembly">Printed Body Assembly</a>, <a href="docs/hardware.md#tread-construction">Tread Construction</a></td>
+    <td>CAD references, printed chassis/lid assembly, C-leg geometry, TPU layer, adhesive bumper tread construction, hot-glue V-tread pattern, and fabrication notes.</td>
+  </tr>
+  <tr>
+    <td>BOM and purchasing traceability</td>
+    <td><a href="docs/BOM.md"><code>docs/BOM.md</code></a>, <a href="docs/purchasing-bom.csv"><code>docs/purchasing-bom.csv</code></a></td>
+    <td>Categorized purchasing table, source links, quantities, pack counts, subsystem notes, and integration notes for the final public build.</td>
+  </tr>
+  <tr>
+    <td>Running, diagnostics, and reviewer commands</td>
+    <td><a href="RUNNING.md"><code>RUNNING.md</code></a>, <a href="docs/software-map.md#main-program-modes">Main Program Modes</a></td>
+    <td>Simulation commands, dry-run modes, hardware launch commands, Arduino firmware notes, safety checklist, and review-friendly execution paths.</td>
+  </tr>
+  <tr>
+    <td>Sensor stack and data flow</td>
+    <td><a href="docs/software-map.md#sensor-firmware-and-input">Sensor Firmware And Input</a>, <a href="ARCHITECTURE.md#sensor-pipeline">Sensor Pipeline</a></td>
+    <td>Arduino Nano hub, ultrasonic sensors, BNO085 IMU input, Raspberry Pi handoff, watchdog behavior, and sensor integration points.</td>
+  </tr>
+  <tr>
+    <td>Field demos and course videos</td>
+    <td><a href="docs/media.md"><code>docs/media.md</code></a></td>
+    <td>Full-resolution traversal videos, course-success runs, and GIF previews for sand, obstacle, indoor, and park-style navigation demos.</td>
+  </tr>
+  <tr>
+    <td>Research outputs and symposium materials</td>
+    <td><a href="#recognition-and-publications">Recognition And Publications</a>, <a href="docs/paper-presentation-slides.md"><code>docs/paper-presentation-slides.md</code></a></td>
+    <td>Paper, presentation slides, poster, paper-presentation video, People's Choice video, award certificates, and symposium display context.</td>
+  </tr>
+  <tr>
+    <td>Release history and public milestones</td>
+    <td><a href="docs/releases.md"><code>docs/releases.md</code></a>, <a href="https://github.com/Robiswell/Euler_Rover_2026/releases/tag/media-assets">Portfolio Media Assets</a></td>
+    <td>Final public release trail, earlier milestone summaries, and the GitHub release that hosts full-resolution PDFs and MP4s.</td>
+  </tr>
+  <tr>
+    <td>Complete documentation map</td>
+    <td><a href="docs/README.md"><code>docs/README.md</code></a></td>
+    <td>One-page index of the supporting docs for hardware, BOM, software, validation, media, release history, and reviewer references.</td>
+  </tr>
+</table>
