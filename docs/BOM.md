@@ -73,5 +73,5 @@ The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber b
 | [Loctite 243 blue threadlocker](https://a.co/d/04PtQ2lp) | 1 | Vibration-resistant threaded fastener retention |
 | [M2/M3/M4 metric bolt assortment, 1710 pieces](https://a.co/d/033dwhMF) | 1 kit | Primary fastener assortment for chassis, modules, and brackets |
 | [M1-M2.3 self-tapping electronic screws, 1440 pieces](https://a.co/d/078vDWSM) | 1 kit | Small electronics and sensor mounting |
-| [Heat-set threaded inserts](https://a.co/d/093C184J) | 1 kit | Reusable threaded attachment points in printed parts |
+| [M2/M3/M4/M5 threaded inserts, 520 pieces](https://a.co/d/08kKaHyx) | 1 kit | Reusable threaded attachment points in printed parts |
 | [Lid-to-chassis screws](https://a.co/d/08GloRdI) | 1 pack | Fasteners used to attach the split lid to the printed chassis |
