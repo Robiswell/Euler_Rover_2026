@@ -35,6 +35,10 @@ This page collects the hardware details summarized in the main README: subsystem
 | C-leg | [Open model](https://cad.onshape.com/documents/da3a47429f3542b58cbfb9b8/w/d8b269a68f869584fe54d88e/e/9680572918098f7f67734634) |
 | Leg adapters | [Open model](https://cad.onshape.com/documents/60e3d6ac247373a6c9d27099/w/3073c20af8fd58d7202c08cb/e/fac01f63525d9f291b8ab335) |
 
+## Printed Body Assembly
+
+The printed chassis and lid were each built from two PETG pieces. Before bonding, all glued surfaces were sanded to improve adhesion. J-B Weld Plastic Bonder was used to bond the two chassis halves and the two split-lid halves; the chassis joint also used cylindrical inserts through the alignment holes so the two printed halves had a more solid mechanical connection across the seam.
+
 ## Tread Construction
 
 <p align="center">

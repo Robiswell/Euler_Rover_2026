@@ -68,7 +68,7 @@ The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber b
 | [Scotch vinyl electrical tape](https://a.co/d/eYtmley) | 1 | Insulation, strain relief, and harness finishing |
 | [3M double-sided foam tape](https://a.co/d/iFtOYlh) | 1 | Lightweight mounting for electronics, sensors, and temporary fixtures |
 | [Museum putty](https://a.co/d/8DZjPia) | 1 | Temporary positioning and vibration-tolerant test mounting |
-| [J-B Weld Plastic Bonder structural adhesive](https://a.co/d/7YW5mEn) | 1 | Structural bonding for plastic assemblies and repairs |
+| [J-B Weld Plastic Bonder structural adhesive](https://a.co/d/7YW5mEn) | 1 | Bonded the two chassis halves and two split-lid halves after sanding the mating surfaces |
 | [HFT super glue gel, 10 pack](https://www.harborfreight.com/super-glue-gel-10-pack-68349.html) | 1 pack | Fast local bonding during assembly and field repairs |
 | [Loctite 243 blue threadlocker](https://a.co/d/04PtQ2lp) | 1 | Vibration-resistant threaded fastener retention |
 | [M2/M3/M4 metric bolt assortment, 1710 pieces](https://a.co/d/033dwhMF) | 1 kit | Primary fastener assortment for chassis, modules, and brackets |
