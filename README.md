@@ -76,10 +76,10 @@ For control-software review, start with [`final_full_gait_test.py`](final_full_g
 
 <table width="100%">
   <tr>
-    <th width="25%">Metric</th>
-    <th width="25%">Result</th>
-    <th width="25%">Metric</th>
-    <th width="25%">Result</th>
+    <th width="25%">Metric<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="245" height="1"></th>
+    <th width="25%">Result<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="245" height="1"></th>
+    <th width="25%">Metric<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="245" height="1"></th>
+    <th width="25%">Result<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="245" height="1"></th>
   </tr>
   <tr>
     <td>Formal validation trials</td>
@@ -289,9 +289,9 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
 
 <table width="100%">
   <tr>
-    <th width="30%">Validation Resource</th>
-    <th width="45%">What It Verifies</th>
-    <th width="25%">Link</th>
+    <th width="30%">Validation Resource<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="295" height="1"></th>
+    <th width="45%">What It Verifies<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="440" height="1"></th>
+    <th width="25%">Link<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="245" height="1"></th>
   </tr>
   <tr>
     <td>GitHub Actions simulation workflow</td>
@@ -347,10 +347,10 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
 
 <table width="100%">
   <tr>
-    <th width="24%">Research Output</th>
-    <th width="28%">Context</th>
-    <th width="24%">View</th>
-    <th width="24%">Download</th>
+    <th width="24%">Research Output<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="235" height="1"></th>
+    <th width="28%">Context<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="275" height="1"></th>
+    <th width="24%">View<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="235" height="1"></th>
+    <th width="24%">Download<br><img src="docs/assets/readme-table-spacer.svg" alt="" width="235" height="1"></th>
   </tr>
   <tr>
     <td>Paper</td>
