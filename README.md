@@ -77,9 +77,10 @@ This repository contains the final public code, validation previews, CAD referen
 
 This was a team robotics project. My individual work focused on software, controls, validation, and documenting the parts of the build I led or integrated.
 
-- Developed and tuned the Python gait/navigation stack, terrain overlays, telemetry analysis, simulation validation, and competition-readiness fixes.
-- Programmed and integrated the Arduino/C++ sensor firmware for ultrasonic and IMU data collection.
-- Used smart-servo telemetry and field logs to tune gait behavior, load limits, and safety governors.
+- Co-developed and tuned the Python gait/navigation stack, including terrain overlays, telemetry-driven gait tuning, simulation validation, and competition-readiness fixes.
+- Integrated Arduino/C++ sensor firmware with the Raspberry Pi control stack and contributed firmware-facing fixes for ultrasonic/IMU data handling.
+- Built the simulation and telemetry-analysis tooling used to validate gait timing, navigation behavior, terrain overlays, safety governors, and post-run logs.
+- Used STS3215 smart-servo telemetry and field logs to tune gait behavior, load limits, phase-error handling, and safety governors.
 - Designed CAD models, managed the 3D printing workflow, and selected and ordered hardware components recorded in the public BOM.
 - Contributed to electrical assembly, including soldering and wiring.
 
