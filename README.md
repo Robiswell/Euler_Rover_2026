@@ -157,13 +157,13 @@ This repository contains the final public code, validation previews, CAD referen
 
 ## My Role
 
-This was a team robotics project. My individual work focused on software, controls, validation, and documenting the parts of the build I led or integrated.
+This was a team robotics project. My individual work focused on software, controls, validation, and the mechanical design and 3D-printed fabrication work I personally owned, plus documentation for the parts of the build I led or integrated.
 
 - Co-developed and tuned the Python gait/navigation stack, including terrain overlays, telemetry-driven gait tuning, simulation validation, and competition-readiness fixes.
 - Integrated Arduino/C++ sensor firmware with the Raspberry Pi control stack and contributed firmware-facing fixes for ultrasonic/IMU data handling.
 - Built the simulation and telemetry-analysis tooling used to validate gait timing, navigation behavior, terrain overlays, safety governors, and post-run logs.
 - Used STS3215 smart-servo telemetry and field logs to tune gait behavior, load limits, phase-error handling, and safety governors.
-- Designed CAD models, managed the 3D printing workflow, and selected and ordered hardware components recorded in the public BOM.
+- Owned the CAD modeling and 3D printing workflow for the rover's custom mechanical parts, and selected and ordered hardware components recorded in the public BOM.
 - Contributed to electrical assembly, including soldering and wiring.
 
 ## System Architecture
