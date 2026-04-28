@@ -74,4 +74,4 @@ The C-legs use a TPU layer between the rigid PETG arcs and the adhesive rubber b
 | [M2/M3/M4 metric bolt assortment, 1710 pieces](https://a.co/d/033dwhMF) | 1 kit | Primary fastener assortment for chassis, modules, and brackets |
 | [M1-M2.3 self-tapping electronic screws, 1440 pieces](https://a.co/d/078vDWSM) | 1 kit | Small electronics and sensor mounting |
 | [M2/M3/M4/M5 threaded inserts, 520 pieces](https://a.co/d/08kKaHyx) | 1 kit | Reusable threaded attachment points in printed parts |
-| [Lid-to-chassis screws](https://a.co/d/08GloRdI) | 1 pack | Fasteners used to attach the split lid to the printed chassis |
+| [Lid-to-chassis screws](https://a.co/d/0gzwEmfd) | 1 pack | Fasteners used to attach the split lid to the printed chassis |
