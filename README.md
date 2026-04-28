@@ -155,21 +155,21 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
 
 <table>
   <tr>
-    <td width="46%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="420"></td>
+    <td width="46%"><img src="docs/assets/cosgc-robotics-challenge-creative-locomotion-certificate.jpg" alt="COSGC 2026 Robotics Challenge certificate for Outstanding Demonstration of Creative Locomotion" width="520"></td>
     <td>
       <strong>Outstanding Demonstration of Creative Locomotion</strong><br><br>
       Awarded at the 2026 Colorado Space Grant Consortium Robotics Challenge for the rover's six C-leg locomotion system.
     </td>
   </tr>
   <tr>
-    <td width="46%"><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="420"></td>
+    <td width="46%"><img src="docs/assets/cosgc-best-robotics-poster-certificate.jpg" alt="COSGC 2026 Best Robotics Poster certificate" width="520"></td>
     <td>
       <strong>Best Robotics Poster</strong><br><br>
       Awarded at the 2026 Colorado Space Grant Consortium Undergraduate Space Research Symposium for the rover research poster and technical presentation.
     </td>
   </tr>
   <tr>
-    <td width="46%"><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="420"></td>
+    <td width="46%"><img src="docs/assets/cosgc-peoples-choice-video-certificate.jpg" alt="COSGC 2026 People's Choice Video certificate" width="520"></td>
     <td>
       <strong>People's Choice Video</strong><br><br>
       Awarded at the 2026 Colorado Space Grant Consortium Undergraduate Space Research Symposium for the Identity rover project video.
