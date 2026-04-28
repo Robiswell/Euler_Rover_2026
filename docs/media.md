@@ -8,8 +8,8 @@ Full-resolution field-demo and course-success video downloads linked from the re
 
 <table width="100%">
   <tr>
-    <th width="34%" align="center" valign="middle">MP4 Download</th>
-    <th width="66%" align="center" valign="middle">Preview</th>
+    <th width="34%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="110" height="1">MP4 Download<img src="assets/readme-table-spacer.svg" alt="" width="110" height="1"></th>
+    <th width="66%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="295" height="1">Preview<img src="assets/readme-table-spacer.svg" alt="" width="295" height="1"></th>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4">Loose Sand Hill Traversal</a></td>
@@ -37,8 +37,8 @@ Full-resolution field-demo and course-success video downloads linked from the re
 
 <table width="100%">
   <tr>
-    <th width="34%" align="center" valign="middle">MP4 Download</th>
-    <th width="66%" align="center" valign="middle">Preview</th>
+    <th width="34%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="110" height="1">MP4 Download<img src="assets/readme-table-spacer.svg" alt="" width="110" height="1"></th>
+    <th width="66%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="295" height="1">Preview<img src="assets/readme-table-spacer.svg" alt="" width="295" height="1"></th>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4">Course 1 Success</a></td>
