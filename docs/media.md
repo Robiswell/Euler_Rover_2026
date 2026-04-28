@@ -8,8 +8,8 @@ Full-resolution field-demo and course-success video downloads linked from the re
 
 <table width="100%">
   <tr>
-    <th width="34%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="110" height="1">MP4 Download<img src="assets/readme-table-spacer.svg" alt="" width="110" height="1"></th>
-    <th width="66%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="295" height="1">Preview<img src="assets/readme-table-spacer.svg" alt="" width="295" height="1"></th>
+    <th width="34%" align="center" valign="middle">MP4 Download</th>
+    <th width="66%" align="center" valign="middle">Preview</th>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/sand-hill-traversal.mp4">Loose Sand Hill Traversal</a></td>
@@ -31,14 +31,18 @@ Full-resolution field-demo and course-success video downloads linked from the re
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4">Park Concrete Table Seating Navigation</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/navigation-park-table-seating.mp4"><img src="assets/navigation-park-table-seating-preview-v4.gif" alt="Park concrete table seating navigation preview" width="480"></a></td>
   </tr>
+  <tr>
+    <td width="34%"><img src="assets/readme-table-spacer.svg" alt="" width="335" height="1"></td>
+    <td width="66%"><img src="assets/readme-table-spacer.svg" alt="" width="650" height="1"></td>
+  </tr>
 </table>
 
 ## Course Success Runs
 
 <table width="100%">
   <tr>
-    <th width="34%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="110" height="1">MP4 Download<img src="assets/readme-table-spacer.svg" alt="" width="110" height="1"></th>
-    <th width="66%" align="center" valign="middle"><img src="assets/readme-table-spacer.svg" alt="" width="295" height="1">Preview<img src="assets/readme-table-spacer.svg" alt="" width="295" height="1"></th>
+    <th width="34%" align="center" valign="middle">MP4 Download</th>
+    <th width="66%" align="center" valign="middle">Preview</th>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/course-1-success.mp4">Course 1 Success</a></td>
@@ -63,5 +67,9 @@ Full-resolution field-demo and course-success video downloads linked from the re
   <tr>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4">Challenge Course Success</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/challenge-course-success.mp4"><img src="assets/challenge-course-success-preview-v3.gif" alt="Challenge course success preview" width="480"></a></td>
+  </tr>
+  <tr>
+    <td width="34%"><img src="assets/readme-table-spacer.svg" alt="" width="335" height="1"></td>
+    <td width="66%"><img src="assets/readme-table-spacer.svg" alt="" width="650" height="1"></td>
   </tr>
 </table>
