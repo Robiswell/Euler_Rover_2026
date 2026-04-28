@@ -76,17 +76,35 @@ For control-software review, start with [`final_full_gait_test.py`](final_full_g
 
 <table width="100%">
   <tr>
-    <th width="35%">Metric</th>
-    <th width="65%">Result</th>
+    <th width="25%">Metric</th>
+    <th width="25%">Result</th>
+    <th width="25%">Metric</th>
+    <th width="25%">Result</th>
   </tr>
-  <tr><td>Formal validation trials</td><td>31/32 successful</td></tr>
-  <tr><td>Observed traversal success</td><td>96.9%</td></tr>
-  <tr><td>Terrain categories</td><td>7</td></tr>
-  <tr><td>Simulation tests</td><td>40/40 passing</td></tr>
-  <tr><td>Awards</td><td>3 COSGC recognitions</td></tr>
-  <tr><td>Heart loop rate</td><td>30 Hz</td></tr>
-  <tr><td>Sensor update rate</td><td>~10 Hz</td></tr>
-  <tr><td>Steady-state servo load margin</td><td>At least 42% in formal trials</td></tr>
+  <tr>
+    <td>Formal validation trials</td>
+    <td>31/32 successful</td>
+    <td>Observed traversal success</td>
+    <td>96.9%</td>
+  </tr>
+  <tr>
+    <td>Terrain categories</td>
+    <td>7</td>
+    <td>Simulation tests</td>
+    <td>40/40 passing</td>
+  </tr>
+  <tr>
+    <td>Awards</td>
+    <td>3 COSGC recognitions</td>
+    <td>Heart loop rate</td>
+    <td>30 Hz</td>
+  </tr>
+  <tr>
+    <td>Sensor update rate</td>
+    <td>~10 Hz</td>
+    <td>Steady-state servo load margin</td>
+    <td>At least 42% in formal trials</td>
+  </tr>
 </table>
 
 Validation is presented as pilot-scale testing; statistical framing and known limits are documented in [`docs/validation.md`](docs/validation.md).
@@ -271,20 +289,24 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
 
 <table width="100%">
   <tr>
-    <th width="40%">Validation Resource</th>
-    <th width="60%">Link</th>
+    <th width="30%">Validation Resource</th>
+    <th width="45%">What It Verifies</th>
+    <th width="25%">Link</th>
   </tr>
   <tr>
     <td>GitHub Actions simulation workflow</td>
-    <td><a href="https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml">Simulation Checks</a></td>
+    <td>Automated simulation and pytest regression checks across code, firmware, dependency, workflow, pull request, and manual-dispatch events</td>
+    <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/actions/workflows/simulation.yml">Simulation Checks</a></td>
   </tr>
   <tr>
     <td>Field results and known limits</td>
-    <td><a href="docs/validation.md">Validation Reference</a></td>
+    <td>Formal traversal outcomes, terrain categories, servo load margin, pilot-test scope, and remaining validation limits</td>
+    <td align="center"><a href="docs/validation.md">Validation Reference</a></td>
   </tr>
   <tr>
     <td>Local simulation commands</td>
-    <td><a href="docs/validation.md#simulation-coverage"><code>docs/validation.md</code></a></td>
+    <td>Command references for <code>sim_verify.py</code>, <code>sim_terrain.py</code>, and <code>sim_nav.py</code>, including what the simulations do and do not model</td>
+    <td align="center"><a href="docs/validation.md#simulation-coverage"><code>docs/validation.md</code></a></td>
   </tr>
 </table>
 
@@ -325,37 +347,44 @@ At the symposium-paper checkpoint, the project passed 40/40 automated simulation
 
 <table width="100%">
   <tr>
-    <th width="32%">Research Output</th>
-    <th width="34%">View</th>
-    <th width="34%">Download</th>
+    <th width="24%">Research Output</th>
+    <th width="28%">Context</th>
+    <th width="24%">View</th>
+    <th width="24%">Download</th>
   </tr>
   <tr>
     <td>Paper</td>
+    <td>Full technical writeup for the rover design, gait control approach, validation results, and project limitations</td>
     <td align="center"><a href="https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc.pdf">View Paper</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc.pdf">Download Paper PDF</a></td>
   </tr>
   <tr>
     <td>Presentation Slides</td>
+    <td>Symposium presentation deck summarizing the engineering problem, rover architecture, gait strategy, and validation outcomes</td>
     <td align="center"><a href="docs/paper-presentation-slides.md">View Slides</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-presentation-slides.pdf">Download Slides PDF</a></td>
   </tr>
   <tr>
     <td>Paper Presentation Video</td>
+    <td>Recorded version of the symposium paper presentation with audio hosted externally for browser playback</td>
     <td align="center"><a href="https://youtu.be/zEp2kFS_MPs">Watch on YouTube</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/COSGC.Symposium.Paper.Presentation.Euler.2026.mp4">Download Presentation MP4</a></td>
   </tr>
   <tr>
     <td>Poster</td>
+    <td>Research-poster version of the project for quick review of motivation, design, validation, and outcomes</td>
     <td align="center"><a href="https://docs.google.com/gview?embedded=1&url=https%3A%2F%2Fgithub.com%2FRobiswell%2FEuler_Rover_2026%2Freleases%2Fdownload%2Fmedia-assets%2Fdevelopment-of-six-legged-autonomous-robot-frcc-poster.pdf">View Poster</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/development-of-six-legged-autonomous-robot-frcc-poster.pdf">Download Poster PDF</a></td>
   </tr>
   <tr>
     <td>People's Choice Video</td>
+    <td>Public-facing award video showing the rover and project story in a shorter presentation format</td>
     <td align="center"><a href="https://youtu.be/kA2DoByfL78">Watch on YouTube</a></td>
     <td align="center"><a href="https://github.com/Robiswell/Euler_Rover_2026/releases/download/media-assets/identity-cosgc-2026-award-video.mp4">Download Video MP4</a></td>
   </tr>
   <tr>
     <td>Field Demos & Course Success Videos</td>
+    <td>Gallery of full-resolution field demos and course-success videos with GIF previews</td>
     <td align="center"><a href="docs/media.md">Open Gallery</a></td>
     <td align="center">N/A</td>
   </tr>
